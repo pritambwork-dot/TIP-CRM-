@@ -406,25 +406,34 @@ function saveToStorage<T>(key: string, value: T) {
 export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [users, setUsers] = useState<UserProfile[]>(() => {
     const loaded = loadFromStorage<any[]>('crm_users', INITIAL_USERS);
-    const list = Array.isArray(loaded) && loaded.length > 0 ? loaded.map(normalizeUser) : [...INITIAL_USERS];
-    
-    // Ensure demo seed users exist in list if not already present
+    // Purge legacy mock accounts (u-1..u-8) if present in user's browser localStorage
+    const filtered = Array.isArray(loaded)
+      ? loaded
+          .filter(u => u && !/^u-[0-9]+$/.test(u.id) && !u.email?.includes('ruth@') && !u.email?.includes('marcus.chen@'))
+          .map(normalizeUser)
+      : [];
+
+    const list = filtered.length > 0 ? filtered : [...INITIAL_USERS];
+
+    // Ensure Pritam and Divyanshaa always exist with rkumar07 credentials
     INITIAL_USERS.forEach(seedUser => {
-      if (!list.some(u => u.id === seedUser.id)) {
+      const idx = list.findIndex(u => u.id === seedUser.id);
+      if (idx === -1) {
         list.push(seedUser);
+      } else {
+        list[idx] = { ...list[idx], ...seedUser };
       }
     });
 
-    // Ensure primary administrator u-1 exists in list
-    if (!list.some(u => u.id === 'u-1')) {
-      list.unshift(INITIAL_USERS[0]);
-    }
+    saveToStorage('crm_users', list);
     return list;
   });
 
   const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
     const loaded = loadFromStorage<any>('current_user', null);
-    if (!loaded) return INITIAL_USERS[0];
+    if (!loaded || loaded.id === 'u-1' || !['pritam', 'divyanshaa'].includes(loaded.id)) {
+      return INITIAL_USERS[0];
+    }
     return normalizeUser(loaded);
   });
   

@@ -88,17 +88,21 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   }, []);
 
 
-  const handleEmailSignIn = useCallback((email: string, password: string) => {
+  const handleEmailSignIn = useCallback((identifier: string, password: string) => {
     setAuthLoading(true);
     setAuthError(null);
 
     // Simulate async auth check
     setTimeout(() => {
-      const normalizedEmail = email.toLowerCase().trim();
-      const matchedUser = users.find(u => u.email.toLowerCase().trim() === normalizedEmail);
+      const cleanInput = (identifier || '').toLowerCase().trim();
+      const matchedUser = users.find(u => 
+        u.id.toLowerCase() === cleanInput ||
+        u.email.toLowerCase().trim() === cleanInput ||
+        u.name.toLowerCase().trim() === cleanInput
+      );
 
       if (!matchedUser) {
-        setAuthError('No account found with that email. Please check your email or contact your administrator.');
+        setAuthError(`No account found for "${identifier}". Use demo accounts: pritam or divyanshaa.`);
         setAuthLoading(false);
         return;
       }
@@ -122,20 +126,12 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
         return;
       }
 
-      // Check temporary password for admin-provisioned users
-      if (matchedUser.mustChangePassword && matchedUser.tempPassword) {
-        if (password !== matchedUser.tempPassword) {
-          setAuthError('Incorrect temporary password. Please enter the temporary password provided by your admin.');
-          setAuthLoading(false);
-          return;
-        }
-      } else {
-        // Standard password validation (minimum length check)
-        if (password.length < 4) {
-          setAuthError('Password must be at least 4 characters.');
-          setAuthLoading(false);
-          return;
-        }
+      // Password check: must match rkumar07 or user's stored password
+      const validPasswords = ['rkumar07', matchedUser.tempPassword, matchedUser.passwordHash].filter(Boolean);
+      if (!validPasswords.includes(password)) {
+        setAuthError('Incorrect password. The password for demo accounts is rkumar07.');
+        setAuthLoading(false);
+        return;
       }
 
       // Successful login
@@ -144,7 +140,7 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
       localStorage.setItem(AUTH_USER_KEY, matchedUser.id);
       setIsAuthenticated(true);
       setAuthLoading(false);
-    }, 600);
+    }, 400);
   }, [users, switchUser]);
 
   const handleGoogleSignIn = useCallback((email?: string, name?: string) => {
@@ -152,12 +148,22 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     setAuthError(null);
 
     setTimeout(() => {
-      const targetEmail = (email || '').toLowerCase().trim();
-      let matchedUser = users.find(u => u.email.toLowerCase().trim() === targetEmail);
+      const target = (email || '').toLowerCase().trim();
+      let matchedUser = users.find(u => 
+        u.email.toLowerCase().trim() === target ||
+        u.id.toLowerCase() === target ||
+        u.name.toLowerCase().trim() === target
+      );
 
-      // Default to root administrator if no email provided or ruth's email
-      if (!matchedUser && (!targetEmail || targetEmail === 'ruth@theinclusionproject.com')) {
-        matchedUser = users.find(u => u.id === 'u-1') || users[0];
+      // Smart matching for Pritam and Divyanshaa or default
+      if (!matchedUser) {
+        if (!target || target.includes('pritam') || target.includes('ruth')) {
+          matchedUser = users.find(u => u.id === 'pritam') || users[0];
+        } else if (target.includes('divyanshaa')) {
+          matchedUser = users.find(u => u.id === 'divyanshaa');
+        } else {
+          matchedUser = users.find(u => u.id === 'pritam') || users[0];
+        }
       }
 
       if (matchedUser) {
@@ -182,10 +188,10 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
         localStorage.setItem(AUTH_USER_KEY, matchedUser.id);
         setIsAuthenticated(true);
       } else {
-        setAuthError(`No CRM account is linked to ${targetEmail}. Contact your admin to request access.`);
+        setAuthError(`No CRM account is linked to ${target}. Contact your admin to request access.`);
       }
       setAuthLoading(false);
-    }, 600);
+    }, 400);
   }, [users, switchUser]);
 
   const handleLogout = useCallback(() => {
