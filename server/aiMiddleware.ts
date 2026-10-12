@@ -668,6 +668,7 @@ Respond ONLY with valid JSON strictly adhering to this schema:
       }
 
       const apiKey = getApiKey();
+      const qLower = (question || '').toLowerCase();
 
       // If no Gemini key, answer deterministically based on crmSummary
       if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {

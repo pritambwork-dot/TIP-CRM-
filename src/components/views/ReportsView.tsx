@@ -86,7 +86,7 @@ export const ReportsView: React.FC = () => {
         if (!match) return false;
       }
       if (selectedProgram !== 'all' && e.programId !== selectedProgram) return false;
-      if (statusFilter !== 'all' && e.type !== statusFilter && e.status !== statusFilter) return false;
+      if (statusFilter !== 'all' && e.type !== statusFilter) return false;
       if (dateFrom && e.date < dateFrom) return false;
       if (dateTo && e.date > dateTo) return false;
       return true;

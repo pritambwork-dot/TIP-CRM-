@@ -153,6 +153,7 @@ export async function sendIntelligenceQuery(params: {
     programs: Program[];
     people: Person[];
     funding: FundingRecord[];
+    organizations?: Organization[];
     referenceDate?: string;
   };
   dataVersion?: number;

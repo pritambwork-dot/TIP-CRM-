@@ -233,9 +233,9 @@ export function buildRoleScopedCrmContext(
     id: p.id,
     name: scrubPii(p.name),
     status: p.status,
-    targetCohort: p.targetCohort ? scrubPii(p.targetCohort) : undefined,
+    focusAreas: p.focusAreas ? p.focusAreas.map(scrubPii) : undefined,
     description: p.description ? scrubPii(p.description.slice(0, 150)) : undefined,
-    progressPercent: p.progress
+    progressPercent: p.progressPercent
   }));
 
   // 3. Scoped Events
@@ -253,8 +253,7 @@ export function buildRoleScopedCrmContext(
     name: scrubPii(e.name),
     date: e.date,
     type: e.type,
-    registeredCount: e.participants ? e.participants.length : 0,
-    status: e.status
+    registeredCount: (e as any).participants ? (e as any).participants.length : 0
   }));
 
   // 4. People / Stakeholder Aggregates (Zero PII, Category Breakdown)
@@ -289,11 +288,11 @@ export function buildRoleScopedCrmContext(
     totalFundingCad = allFunding.reduce((sum, f) => sum + (f.amountCad || 0), 0);
     activeGrantsCount = allFunding.length;
     fundingList = allFunding.map(f => ({
-      grantName: scrubPii(f.grantName || f.opportunityName || 'Grant Allocation'),
+      grantName: scrubPii(f.grantDeliverableNote || f.donorOrFunder || 'Grant Allocation'),
       funderName: scrubPii(f.donorOrFunder || f.funderName || 'Funder Partner'),
       amountCad: f.amountCad || 0,
       status: f.status,
-      reportingDeadline: f.reportingDeadline
+      reportingDeadline: f.reportingDeadline || f.reportDueDate
     }));
   }
 

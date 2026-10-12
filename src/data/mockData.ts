@@ -2081,6 +2081,8 @@ export const INITIAL_DOCUMENTS: DocumentItem[] = [
     relatedName: 'Civic Accessibility & Digital Inclusion Lab',
     addedBy: 'Maya Lin',
     addedAt: '2026-09-10',
+    isConfidential: false,
+    accessTier: 'all',
     description: 'Master guideline document used for testing community center and charity website accessibility.'
   },
   {
@@ -2093,6 +2095,8 @@ export const INITIAL_DOCUMENTS: DocumentItem[] = [
     relatedName: 'Youth Leadership & Civic Equity Initiative',
     addedBy: 'Marcus Chen',
     addedAt: '2026-09-02',
+    isConfidential: true,
+    accessTier: 'staff',
     description: 'Attendance records, workshop milestones, and verified direct-deposit payment references.'
   },
   {
@@ -2105,6 +2109,8 @@ export const INITIAL_DOCUMENTS: DocumentItem[] = [
     relatedName: 'Systems-Level Racial Equity in Nonprofits Research',
     addedBy: 'Maya Lin',
     addedAt: '2026-08-18',
+    isConfidential: false,
+    accessTier: 'all',
     description: 'Ethics board review documents, survey instruments, and literature review folder.'
   },
   {
@@ -2117,6 +2123,8 @@ export const INITIAL_DOCUMENTS: DocumentItem[] = [
     relatedName: 'OTF Seed Grant 2026-27',
     addedBy: 'Maya Lin',
     addedAt: '2026-01-20',
+    isConfidential: true,
+    accessTier: 'management',
     description: 'Official countersigned contract #SED-2025-0914.'
   },
   {
@@ -2129,6 +2137,8 @@ export const INITIAL_DOCUMENTS: DocumentItem[] = [
     relatedName: 'Community Accessibility & Plain Language Workshop',
     addedBy: 'Kendra Redsky',
     addedAt: '2026-09-14',
+    isConfidential: false,
+    accessTier: 'all',
     description: 'High-contrast large print presentation slides and accessible PDF participant handouts.'
   }
 ];

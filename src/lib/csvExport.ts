@@ -5,10 +5,12 @@
 
 export function sanitizeCsvCell(cell: string | number | null | undefined): string {
   if (cell === null || cell === undefined) return '""';
-  let str = String(cell).trim();
+  let str = String(cell);
   // Formula injection check: if cell starts with =, +, -, @, \t, or \r, prepend a single quote
   if (/^[=+\-@\t\r]/.test(str)) {
-    str = `'${str}`;
+    str = `'${str.trim()}`;
+  } else {
+    str = str.trim();
   }
   // Escape inner double quotes
   const escaped = str.replace(/"/g, '""');

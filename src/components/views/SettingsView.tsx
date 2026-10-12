@@ -72,7 +72,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
     updateAiUserSettings,
     aiBudgetConfig,
     updateAiBudgetConfig,
-    incrementAiDataVersion
+    incrementAiDataVersion,
+    dbHealth,
+    isDbSyncing,
+    dbSyncError,
+    refreshDatabase
   } = useCrm();
 
   const [activeTab, setActiveTab] = useState<'users' | 'posts' | 'ai' | 'profile' | 'backup'>(defaultSubTab);
@@ -613,8 +617,73 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
 
           {/* Connected Services */}
           <div className="pt-4 border-t border-border space-y-3">
-            <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">Connected Cloud Services</h4>
-            <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">Connected Cloud & Database Services</h4>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={refreshDatabase}
+                disabled={isDbSyncing}
+                className="h-7 text-xs gap-1.5"
+              >
+                <RefreshCw className={`w-3 h-3 ${isDbSyncing ? 'animate-spin' : ''}`} />
+                <span>{isDbSyncing ? 'Testing...' : 'Test Connection'}</span>
+              </Button>
+            </div>
+
+            <div className="space-y-3">
+              {/* Supabase PostgreSQL & Storage */}
+              <div className="p-3.5 rounded-xl border border-border bg-card flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${dbHealth?.connected ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'}`}>
+                      <Database className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-foreground flex items-center gap-2">
+                        Supabase PostgreSQL & Storage
+                        {dbHealth?.connected ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                            Connected ({dbHealth.latencyMs || 0}ms)
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                            Local Storage Mode
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {dbHealth?.connected 
+                          ? 'Persistent cloud PostgreSQL database, Realtime sync, and private document storage.'
+                          : 'Currently using local browser storage. Changes remain saved on this device.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {!dbHealth?.connected && (
+                  <div className="mt-1 p-2.5 rounded-lg bg-muted/40 border border-border text-[11px] space-y-1 text-muted-foreground">
+                    <p className="font-semibold text-foreground flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-500" /> Connecting to Production Supabase:
+                    </p>
+                    <p>Provide your TIP Supabase credentials in the root <code className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">.env</code> file:</p>
+                    <p className="font-mono text-[10px] bg-background/80 p-1.5 rounded border border-border">
+                      VITE_SUPABASE_URL=https://your-project.supabase.co<br />
+                      VITE_SUPABASE_ANON_KEY=your-publishable-anon-key
+                    </p>
+                    <p>Once set, refresh the page to automatically connect to PostgreSQL with Row-Level Security.</p>
+                  </div>
+                )}
+
+                {dbSyncError && (
+                  <p className="text-[11px] text-red-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" /> {dbSyncError}
+                  </p>
+                )}
+              </div>
+
+              {/* Google Drive / Workspace */}
               <div className="p-3 rounded-xl border border-border flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-7 h-7 rounded-md bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold text-xs">

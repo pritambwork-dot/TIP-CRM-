@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Person, 
   Organization, 
@@ -77,7 +77,15 @@ import {
   INITIAL_AI_MESSAGES,
   INITIAL_AI_USER_SETTINGS
 } from '../data/mockData';
-import { SupabaseAuthEngine } from '../lib/supabase';
+import { SupabaseAuthEngine, SupabaseStorageEngine } from '../lib/supabase';
+import { 
+  DatabaseHealthStatus, 
+  checkDatabaseHealth, 
+  isSupabaseConfigured, 
+  SupabaseDb, 
+  DbMappers, 
+  subscribeToTableRealtime 
+} from '../lib/supabaseDb';
 import { 
   calculateUserBehaviorSnapshot, 
   calculateOrgBehaviorSnapshot, 
@@ -187,6 +195,7 @@ interface CrmContextType {
   scopedPrograms: Program[];
   scopedEvents: EventItem[];
   scopedTasks: TaskItem[];
+  scopedDocuments: DocumentItem[];
   
   // Raw records (available for super admins / calculations)
   people: Person[];
@@ -274,6 +283,7 @@ interface CrmContextType {
   
   // Documents
   addDocument: (doc: Omit<DocumentItem, 'id' | 'addedAt'>) => DocumentItem;
+  deleteDocument: (id: string) => Promise<boolean>;
   
   // Import
   batchImportPeople: (imported: Array<{
@@ -311,6 +321,12 @@ interface CrmContextType {
   
   // Reset demo data
   resetAllData: () => void;
+
+  // Supabase Database & Realtime Cloud Sync (Master Prompt 7)
+  dbHealth: DatabaseHealthStatus | null;
+  isDbSyncing: boolean;
+  dbSyncError: string | null;
+  refreshDatabase: () => Promise<void>;
 }
 
 const CrmContext = createContext<CrmContextType | undefined>(undefined);
@@ -575,6 +591,183 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { saveToStorage('ai_budget', aiBudgetConfig); }, [aiBudgetConfig]);
   useEffect(() => { saveToStorage('ai_dismissed_hashes', dismissedSuggestionHashes); }, [dismissedSuggestionHashes]);
 
+  // Supabase Database & Realtime Cloud Sync State (Master Prompt 7)
+  const [dbHealth, setDbHealth] = useState<DatabaseHealthStatus | null>(null);
+  const [isDbSyncing, setIsDbSyncing] = useState<boolean>(false);
+  const [dbSyncError, setDbSyncError] = useState<string | null>(null);
+
+  const refreshDatabase = useCallback(async () => {
+    if (!isSupabaseConfigured()) {
+      setDbHealth({
+        connected: false,
+        isLiveCloud: false,
+        error: 'Supabase credentials not configured in environment (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY required).'
+      });
+      return;
+    }
+
+    setIsDbSyncing(true);
+    setDbSyncError(null);
+    try {
+      const health = await checkDatabaseHealth();
+      setDbHealth(health);
+
+      if (health.connected) {
+        const [
+          peopleRes,
+          orgsRes,
+          programsRes,
+          projectsRes,
+          eventsRes,
+          participantsRes,
+          tasksRes,
+          fundingRes,
+          documentsRes,
+          auditLogsRes
+        ] = await Promise.all([
+          SupabaseDb.people.getAll(),
+          SupabaseDb.organizations.getAll(),
+          SupabaseDb.programs.getAll(),
+          SupabaseDb.projects.getAll(),
+          SupabaseDb.events.getAll(),
+          SupabaseDb.participants.getAll(),
+          SupabaseDb.tasks.getAll(),
+          SupabaseDb.funding.getAll(),
+          SupabaseDb.documents.getAll(),
+          SupabaseDb.auditLogs.getAll()
+        ]);
+
+        if (!peopleRes.error && peopleRes.data && peopleRes.data.length > 0) setPeople(peopleRes.data);
+        if (!orgsRes.error && orgsRes.data && orgsRes.data.length > 0) setOrganizations(orgsRes.data);
+        if (!programsRes.error && programsRes.data && programsRes.data.length > 0) setPrograms(programsRes.data);
+        if (!projectsRes.error && projectsRes.data && projectsRes.data.length > 0) setProjects(projectsRes.data);
+        if (!eventsRes.error && eventsRes.data && eventsRes.data.length > 0) setEvents(eventsRes.data);
+        if (!participantsRes.error && participantsRes.data && participantsRes.data.length > 0) setParticipants(participantsRes.data);
+        if (!tasksRes.error && tasksRes.data && tasksRes.data.length > 0) setTasks(tasksRes.data);
+        if (!fundingRes.error && fundingRes.data && fundingRes.data.length > 0) setFunding(fundingRes.data);
+        if (!documentsRes.error && documentsRes.data && documentsRes.data.length > 0) setDocuments(documentsRes.data);
+        if (!auditLogsRes.error && auditLogsRes.data && auditLogsRes.data.length > 0) setAuditLogs(auditLogsRes.data);
+      }
+    } catch (err: any) {
+      console.error('Error synchronizing database with Supabase:', err);
+      setDbSyncError(err?.message || 'Database synchronization failed.');
+    } finally {
+      setIsDbSyncing(false);
+    }
+  }, []);
+
+  // Hydrate from live Supabase if connected
+  useEffect(() => {
+    refreshDatabase();
+  }, [refreshDatabase]);
+
+  // Realtime subscriptions across core tables
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !dbHealth?.connected) return;
+
+    const cleanups: Array<() => void> = [];
+
+    cleanups.push(subscribeToTableRealtime('people', ({ eventType, new: n, old: o }) => {
+      if (eventType === 'INSERT' && n) {
+        const p = DbMappers.personFromRow(n);
+        setPeople(prev => prev.some(item => item.id === p.id) ? prev : [p, ...prev]);
+      } else if (eventType === 'UPDATE' && n) {
+        const p = DbMappers.personFromRow(n);
+        setPeople(prev => prev.map(item => item.id === p.id ? p : item));
+      } else if (eventType === 'DELETE' && o) {
+        setPeople(prev => prev.filter(item => item.id !== o.id));
+      }
+    }));
+
+    cleanups.push(subscribeToTableRealtime('organizations', ({ eventType, new: n, old: o }) => {
+      if (eventType === 'INSERT' && n) {
+        const org = DbMappers.orgFromRow(n);
+        setOrganizations(prev => prev.some(item => item.id === org.id) ? prev : [org, ...prev]);
+      } else if (eventType === 'UPDATE' && n) {
+        const org = DbMappers.orgFromRow(n);
+        setOrganizations(prev => prev.map(item => item.id === org.id ? org : item));
+      } else if (eventType === 'DELETE' && o) {
+        setOrganizations(prev => prev.filter(item => item.id !== o.id));
+      }
+    }));
+
+    cleanups.push(subscribeToTableRealtime('programs', ({ eventType, new: n, old: o }) => {
+      if (eventType === 'INSERT' && n) {
+        const prog = DbMappers.programFromRow(n);
+        setPrograms(prev => prev.some(item => item.id === prog.id) ? prev : [prog, ...prev]);
+      } else if (eventType === 'UPDATE' && n) {
+        const prog = DbMappers.programFromRow(n);
+        setPrograms(prev => prev.map(item => item.id === prog.id ? prog : item));
+      } else if (eventType === 'DELETE' && o) {
+        setPrograms(prev => prev.filter(item => item.id !== o.id));
+      }
+    }));
+
+    cleanups.push(subscribeToTableRealtime('projects', ({ eventType, new: n, old: o }) => {
+      if (eventType === 'INSERT' && n) {
+        const proj = DbMappers.projectFromRow(n);
+        setProjects(prev => prev.some(item => item.id === proj.id) ? prev : [proj, ...prev]);
+      } else if (eventType === 'UPDATE' && n) {
+        const proj = DbMappers.projectFromRow(n);
+        setProjects(prev => prev.map(item => item.id === proj.id ? proj : item));
+      } else if (eventType === 'DELETE' && o) {
+        setProjects(prev => prev.filter(item => item.id !== o.id));
+      }
+    }));
+
+    cleanups.push(subscribeToTableRealtime('events', ({ eventType, new: n, old: o }) => {
+      if (eventType === 'INSERT' && n) {
+        const ev = DbMappers.eventFromRow(n);
+        setEvents(prev => prev.some(item => item.id === ev.id) ? prev : [ev, ...prev]);
+      } else if (eventType === 'UPDATE' && n) {
+        const ev = DbMappers.eventFromRow(n);
+        setEvents(prev => prev.map(item => item.id === ev.id ? ev : item));
+      } else if (eventType === 'DELETE' && o) {
+        setEvents(prev => prev.filter(item => item.id !== o.id));
+      }
+    }));
+
+    cleanups.push(subscribeToTableRealtime('tasks', ({ eventType, new: n, old: o }) => {
+      if (eventType === 'INSERT' && n) {
+        const t = DbMappers.taskFromRow(n);
+        setTasks(prev => prev.some(item => item.id === t.id) ? prev : [t, ...prev]);
+      } else if (eventType === 'UPDATE' && n) {
+        const t = DbMappers.taskFromRow(n);
+        setTasks(prev => prev.map(item => item.id === t.id ? t : item));
+      } else if (eventType === 'DELETE' && o) {
+        setTasks(prev => prev.filter(item => item.id !== o.id));
+      }
+    }));
+
+    cleanups.push(subscribeToTableRealtime('funding_records', ({ eventType, new: n, old: o }) => {
+      if (eventType === 'INSERT' && n) {
+        const f = DbMappers.fundingFromRow(n);
+        setFunding(prev => prev.some(item => item.id === f.id) ? prev : [f, ...prev]);
+      } else if (eventType === 'UPDATE' && n) {
+        const f = DbMappers.fundingFromRow(n);
+        setFunding(prev => prev.map(item => item.id === f.id ? f : item));
+      } else if (eventType === 'DELETE' && o) {
+        setFunding(prev => prev.filter(item => item.id !== o.id));
+      }
+    }));
+
+    cleanups.push(subscribeToTableRealtime('documents', ({ eventType, new: n, old: o }) => {
+      if (eventType === 'INSERT' && n) {
+        const d = DbMappers.documentFromRow(n);
+        setDocuments(prev => prev.some(item => item.id === d.id) ? prev : [d, ...prev]);
+      } else if (eventType === 'UPDATE' && n) {
+        const d = DbMappers.documentFromRow(n);
+        setDocuments(prev => prev.map(item => item.id === d.id ? d : item));
+      } else if (eventType === 'DELETE' && o) {
+        setDocuments(prev => prev.filter(item => item.id !== o.id));
+      }
+    }));
+
+    return () => {
+      cleanups.forEach(c => c());
+    };
+  }, [dbHealth?.connected]);
+
   const logAction = (action: string, entityType: string, entityName: string, details?: string) => {
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0] + ' ' + now.toTimeString().substring(0, 5);
@@ -588,6 +781,16 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       details
     };
     setAuditLogs(prev => [newLog, ...prev.slice(0, 49)]);
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.auditLogs.create({
+        action,
+        entityType,
+        entityName,
+        userName: currentUser.name,
+        details
+      }).catch(err => console.warn('SupabaseDb.auditLogs.create failed:', err));
+    }
   };
 
   const switchUser = (userId: string) => {
@@ -896,6 +1099,26 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const scopedPrograms = useMemo(() => filterProgramsByScope(programs, currentUser), [programs, currentUser]);
   const scopedEvents = useMemo(() => filterEventsByScope(events, currentUser), [events, currentUser]);
   const scopedTasks = useMemo(() => filterTasksByScope(tasks, currentUser), [tasks, currentUser]);
+  const scopedDocuments = useMemo(() => {
+    const roleId = currentUser.roleId || 'volunteer';
+    const isSuperAdmin = roleId === 'super_admin';
+    const isManager = roleId === 'staff_manager';
+    const isStaff = roleId === 'staff_member' || roleId === 'program_coordinator' || roleId === 'event_coordinator';
+
+    return documents.filter(doc => {
+      // 1. Super Admin and Management can access all documents
+      if (isSuperAdmin || isManager) return true;
+
+      // 2. Staff members can access non-confidential or general staff-tier documents
+      if (isStaff) {
+        if (!doc.isConfidential) return true;
+        return doc.accessTier === 'staff' || doc.accessTier === 'all';
+      }
+
+      // 3. Volunteers can only access non-confidential public documents
+      return !doc.isConfidential && doc.accessTier === 'all';
+    });
+  }, [documents, currentUser]);
 
   // Person CRUD
   const addPerson = (data: Omit<Person, 'id' | 'createdAt'>): Person => {
@@ -907,6 +1130,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPeople(prev => [newPerson, ...prev]);
     logAction('Added Person', 'Person', newPerson.name, `${newPerson.role || 'Contact'} (${newPerson.email})`);
     incrementAiDataVersion();
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.people.create(data).then(res => {
+        if (res.data) setPeople(prev => prev.map(p => p.id === newPerson.id ? res.data! : p));
+      }).catch(err => console.warn('SupabaseDb.people.create error:', err));
+    }
+
     return newPerson;
   };
 
@@ -920,6 +1150,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return p;
     }));
     incrementAiDataVersion();
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.people.update(id, updates).catch(err => console.warn('SupabaseDb.people.update error:', err));
+    }
   };
 
   const deletePerson = (id: string) => {
@@ -932,6 +1166,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setPeople(prev => prev.filter(p => p.id !== id));
       logAction('Removed Person', 'Person', person.name);
       incrementAiDataVersion();
+
+      if (isSupabaseConfigured()) {
+        SupabaseDb.people.delete(id).catch(err => console.warn('SupabaseDb.people.delete error:', err));
+      }
     }
   };
 
@@ -944,6 +1182,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setOrganizations(prev => [newOrg, ...prev]);
     logAction('Added Organization', 'Organization', newOrg.name, `${newOrg.sector} (${newOrg.type})`);
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.organizations.create(data).then(res => {
+        if (res.data) setOrganizations(prev => prev.map(o => o.id === newOrg.id ? res.data! : o));
+      }).catch(err => console.warn('SupabaseDb.organizations.create error:', err));
+    }
+
     return newOrg;
   };
 
@@ -956,6 +1201,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return org;
     }));
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.organizations.update(id, updates).catch(err => console.warn('SupabaseDb.organizations.update error:', err));
+    }
   };
 
   const deleteOrganization = (id: string) => {
@@ -967,6 +1216,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (org) {
       setOrganizations(prev => prev.filter(o => o.id !== id));
       logAction('Deleted Organization', 'Organization', org.name, `Removed organization record`);
+
+      if (isSupabaseConfigured()) {
+        SupabaseDb.organizations.delete(id).catch(err => console.warn('SupabaseDb.organizations.delete error:', err));
+      }
     }
   };
 
@@ -979,6 +1232,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setPrograms(prev => [newProg, ...prev]);
     logAction('Created Program', 'Program', newProg.name, `Status: ${newProg.status}`);
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.programs.create(data).then(res => {
+        if (res.data) setPrograms(prev => prev.map(p => p.id === newProg.id ? res.data! : p));
+      }).catch(err => console.warn('SupabaseDb.programs.create error:', err));
+    }
+
     return newProg;
   };
 
@@ -991,6 +1251,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return prog;
     }));
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.programs.update(id, updates).catch(err => console.warn('SupabaseDb.programs.update error:', err));
+    }
   };
 
   const deleteProgram = (id: string) => {
@@ -1002,6 +1266,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (prog) {
       setPrograms(prev => prev.filter(p => p.id !== id));
       logAction('Deleted Program', 'Program', prog.name, 'Removed program record');
+
+      if (isSupabaseConfigured()) {
+        SupabaseDb.programs.delete(id).catch(err => console.warn('SupabaseDb.programs.delete error:', err));
+      }
     }
   };
 
@@ -1023,6 +1291,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }));
     }
     logAction('Created Project', 'Project', newProj.name, `Program: ${newProj.programName || newProj.programId}`);
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.projects.create(data).then(res => {
+        if (res.data) setProjects(prev => prev.map(p => p.id === newProj.id ? res.data! : p));
+      }).catch(err => console.warn('SupabaseDb.projects.create error:', err));
+    }
+
     return newProj;
   };
 
@@ -1035,6 +1310,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return proj;
     }));
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.projects.update(id, updates).catch(err => console.warn('SupabaseDb.projects.update error:', err));
+    }
   };
 
   const deleteProject = (id: string) => {
@@ -1054,6 +1333,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }));
       }
       logAction('Deleted Project', 'Project', proj.name, 'Removed project record');
+
+      if (isSupabaseConfigured()) {
+        SupabaseDb.projects.delete(id).catch(err => console.warn('SupabaseDb.projects.delete error:', err));
+      }
     }
   };
 
@@ -1067,6 +1350,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setEvents(prev => [newEvt, ...prev]);
     logAction('Created Event', 'Event', newEvt.name, `${newEvt.date} | Facilitator: ${newEvt.facilitator}`);
     incrementAiDataVersion();
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.events.create(data).then(res => {
+        if (res.data) setEvents(prev => prev.map(e => e.id === newEvt.id ? res.data! : e));
+      }).catch(err => console.warn('SupabaseDb.events.create error:', err));
+    }
+
     return newEvt;
   };
 
@@ -1080,6 +1370,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return evt;
     }));
     incrementAiDataVersion();
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.events.update(id, updates).catch(err => console.warn('SupabaseDb.events.update error:', err));
+    }
   };
 
   const deleteEvent = (id: string) => {
@@ -1092,23 +1386,32 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setEvents(prev => prev.filter(e => e.id !== id));
       logAction('Deleted Event', 'Event', evt.name, `Cancelled and deleted event record for ${evt.date}`);
       incrementAiDataVersion();
+
+      if (isSupabaseConfigured()) {
+        SupabaseDb.events.delete(id).catch(err => console.warn('SupabaseDb.events.delete error:', err));
+      }
     }
   };
 
   // Participant & Attendance
   const updateParticipantStatus = (id: string, status: ParticipantStatus) => {
+    const attendedAt = status === 'Attended' ? new Date().toISOString().split('T')[0] : undefined;
     setParticipants(prev => prev.map(pt => {
       if (pt.id === id) {
         const updated: ParticipantRecord = {
           ...pt,
           status,
-          attendedAt: status === 'Attended' ? new Date().toISOString().split('T')[0] : pt.attendedAt
+          attendedAt: attendedAt || pt.attendedAt
         };
         logAction('Recorded Attendance', 'Participant', pt.personName, `${status} for ${pt.eventName || 'event'}`);
         return updated;
       }
       return pt;
     }));
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.participants.update(id, { status, attendedAt }).catch((err: any) => console.warn('SupabaseDb.participants.update error:', err));
+    }
   };
 
   const addParticipant = (data: Omit<ParticipantRecord, 'id' | 'registeredAt'>) => {
@@ -1169,6 +1472,12 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     logAction('Added Participant', 'Participant', newRecord.personName, `Registered for ${newRecord.eventName || newRecord.programName || 'program'}`);
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.participants.create(data).then((res: any) => {
+        if (res.data) setParticipants(prev => prev.map(pt => pt.id === newRecord.id ? res.data! : pt));
+      }).catch((err: any) => console.warn('SupabaseDb.participants.create error:', err));
+    }
   };
 
   const deleteParticipant = (id: string) => {
@@ -1192,6 +1501,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }));
       }
       logAction('Removed Participant', 'Participant', pt.personName, `Removed from ${pt.eventName || 'event'}`);
+
+      if (isSupabaseConfigured()) {
+        SupabaseDb.participants.delete(id).catch((err: any) => console.warn('SupabaseDb.participants.delete error:', err));
+      }
     }
   };
 
@@ -1207,25 +1520,42 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTasks(prev => [newTask, ...prev]);
     logAction('Created Task', 'Task', newTask.title, `Due: ${newTask.dueDate}, Owner: ${newTask.owner}`);
     incrementAiDataVersion();
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.tasks.create(data).then(res => {
+        if (res.data) setTasks(prev => prev.map(t => t.id === newTask.id ? res.data! : t));
+      }).catch(err => console.warn('SupabaseDb.tasks.create error:', err));
+    }
+
     return newTask;
   };
 
   const toggleTaskStatus = (id: string) => {
+    let updatedStatus: TaskStatus = 'To Do';
+    let completedAt: string | undefined = undefined;
     setTasks(prev => prev.map(t => {
       if (t.id === id) {
-        const newStatus: TaskStatus = t.status === 'Completed' ? 'To Do' : 'Completed';
-        const completedAt = newStatus === 'Completed' ? new Date().toISOString().split('T')[0] : undefined;
-        logAction(newStatus === 'Completed' ? 'Task Completed' : 'Task Reopened', 'Task', t.title);
-        return { ...t, status: newStatus, completedAt };
+        updatedStatus = t.status === 'Completed' ? 'To Do' : 'Completed';
+        completedAt = updatedStatus === 'Completed' ? new Date().toISOString().split('T')[0] : undefined;
+        logAction(updatedStatus === 'Completed' ? 'Task Completed' : 'Task Reopened', 'Task', t.title);
+        return { ...t, status: updatedStatus, completedAt };
       }
       return t;
     }));
     incrementAiDataVersion();
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.tasks.update(id, { status: updatedStatus, completedAt }).catch(err => console.warn('SupabaseDb.tasks.update error:', err));
+    }
   };
 
   const updateTask = (id: string, updates: Partial<TaskItem>) => {
     setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...updates } : t)));
     incrementAiDataVersion();
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.tasks.update(id, updates).catch(err => console.warn('SupabaseDb.tasks.update error:', err));
+    }
   };
 
   const deleteTask = (id: string) => {
@@ -1238,6 +1568,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setTasks(prev => prev.filter(t => t.id !== id));
       logAction('Deleted Task', 'Task', task.title);
       incrementAiDataVersion();
+
+      if (isSupabaseConfigured()) {
+        SupabaseDb.tasks.delete(id).catch(err => console.warn('SupabaseDb.tasks.delete error:', err));
+      }
     }
   };
 
@@ -1444,6 +1778,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setFunding(prev => [newFunding, ...prev]);
     logAction('Added Funding Record', 'Funding', newFunding.donorOrFunder, `$${newFunding.amountCad.toLocaleString('en-CA')} CAD (${newFunding.fundingType})`);
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.funding.create(data).then(res => {
+        if (res.data) setFunding(prev => prev.map(f => f.id === newFunding.id ? res.data! : f));
+      }).catch(err => console.warn('SupabaseDb.funding.create error:', err));
+    }
+
     return newFunding;
   };
 
@@ -1453,6 +1794,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     setFunding(prev => prev.map(f => (f.id === id ? { ...f, ...updates } : f)));
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.funding.update(id, updates).catch(err => console.warn('SupabaseDb.funding.update error:', err));
+    }
   };
 
   const deleteFunding = (id: string) => {
@@ -1464,6 +1809,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (item) {
       setFunding(prev => prev.filter(f => f.id !== id));
       logAction('Deleted Funding Record', 'Funding', item.donorOrFunder, `Removed grant/allocation of $${item.amountCad.toLocaleString('en-CA')} CAD`);
+
+      if (isSupabaseConfigured()) {
+        SupabaseDb.funding.delete(id).catch(err => console.warn('SupabaseDb.funding.delete error:', err));
+      }
     }
   };
 
@@ -1496,14 +1845,52 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Documents
   const addDocument = (data: Omit<DocumentItem, 'id' | 'addedAt'>): DocumentItem => {
+    const isConfidential = data.isConfidential !== undefined
+      ? data.isConfidential
+      : (data.accessTier === 'management' || data.accessTier === 'super_admin' || data.relatedType === 'Funding');
+    const accessTier = data.accessTier || (data.relatedType === 'Funding' ? 'management' : 'all');
+
     const newDoc: DocumentItem = {
       ...data,
       id: 'doc-' + Date.now(),
-      addedAt: new Date().toISOString().split('T')[0]
+      addedAt: new Date().toISOString().split('T')[0],
+      isConfidential,
+      accessTier
     };
     setDocuments(prev => [newDoc, ...prev]);
-    logAction('Added Document Reference', 'Document', newDoc.title, `${newDoc.type} linked to ${newDoc.relatedName || newDoc.relatedType}`);
+    logAction('document.upload', 'Document', newDoc.title, `${newDoc.type} (Confidential: ${isConfidential ? 'Yes' : 'No'}, Tier: ${accessTier})`);
+
+    if (isSupabaseConfigured()) {
+      SupabaseDb.documents.create(newDoc).then(res => {
+        if (res.data) setDocuments(prev => prev.map(d => d.id === newDoc.id ? res.data! : d));
+      }).catch(err => console.warn('SupabaseDb.documents.create error:', err));
+    }
+
     return newDoc;
+  };
+
+  const deleteDocument = async (id: string): Promise<boolean> => {
+    const doc = documents.find(d => d.id === id);
+    if (!doc) return false;
+
+    // Permissions check: super_admin, staff_manager, or creator
+    const canDelete = isSuperAdmin || isStaffManager || doc.addedBy === currentUser.name;
+    if (!canDelete) {
+      console.warn('Unauthorized: Missing permission to delete document', id);
+      return false;
+    }
+
+    if (doc.storagePath) {
+      await SupabaseStorageEngine.deletePrivateDocument(doc.storagePath);
+    }
+
+    if (isSupabaseConfigured()) {
+      await SupabaseDb.documents.delete(id).catch(err => console.warn('SupabaseDb.documents.delete error:', err));
+    }
+
+    setDocuments(prev => prev.filter(d => d.id !== id));
+    logAction('document.delete', 'Document', doc.title, `Removed document reference`);
+    return true;
   };
 
   // Batch import people
@@ -1903,6 +2290,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       scopedPrograms,
       scopedEvents,
       scopedTasks,
+      scopedDocuments,
       people,
       organizations,
       programs,
@@ -1964,8 +2352,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       deleteFunding,
       addInteraction,
       addDocument,
+      deleteDocument,
       batchImportPeople,
       resetAllData,
+      dbHealth,
+      isDbSyncing,
+      dbSyncError,
+      refreshDatabase,
       aiSuggestions,
       aiConversations,
       aiMessages,

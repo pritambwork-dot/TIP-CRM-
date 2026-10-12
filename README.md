@@ -47,7 +47,7 @@ The system serves four primary internal operational tiers:
 | **Reports & Exports** | Deterministic reporting across 5 core areas with multi-criteria filtering, printable PDF stylesheets, and CSV exports. | **Implemented & Verified** | [`src/components/views/ReportsView.tsx`](src/components/views/ReportsView.tsx), [`src/lib/csvExport.ts`](src/lib/csvExport.ts) |
 | **CSV Analytics** | 3-step CSV profiling: upload &rarr; deterministic hygiene/mapping &rarr; interactive Recharts dashboard + insights. | **Implemented & Verified** | [`src/components/views/IntelligenceView.tsx`](src/components/views/IntelligenceView.tsx), [`src/lib/dataProfiler.ts`](src/lib/dataProfiler.ts), [`src/lib/analyticsEngine.ts`](src/lib/analyticsEngine.ts) |
 | **AI Work Intelligence** | Context-grounded assistant with slide-out drawer, proactive suggestions ("The One Thing Right Now"), and role framing. | **Implemented & Verified** | [`src/components/intelligence/TipIntelligenceDrawer.tsx`](src/components/intelligence/TipIntelligenceDrawer.tsx), [`server/aiMiddleware.ts`](server/aiMiddleware.ts) |
-| **Documents & Links** | Cloud storage reference repository for Google Drive/Docs/Sheets/Slides and PDF links attached to CRM records. | **Implemented & Verified** | [`src/components/views/DocumentsView.tsx`](src/components/views/DocumentsView.tsx) |
+| **Documents & Storage Security** | Private Supabase Storage bucket, 60-second signed URLs, magic-byte inspection, file size/extension controls, and role-governed confidentiality. | **Implemented & Verified** | [`src/components/views/DocumentsView.tsx`](src/components/views/DocumentsView.tsx), [`src/lib/fileSecurity.ts`](src/lib/fileSecurity.ts), [`src/lib/supabaseDb.ts`](src/lib/supabaseDb.ts) |
 | **User & Access Management** | Role assignment, data scope configuration, account activation/deactivation, access requests, and audit logging. | **Implemented & Verified** | [`src/components/views/UsersAndAccessView.tsx`](src/components/views/UsersAndAccessView.tsx), [`src/components/views/SettingsView.tsx`](src/components/views/SettingsView.tsx) |
 | **Four-Layer Post Hierarchy** | Separation of Security Role from Organizational Post, automated rule-based task suggestions, and post responsibilities. | **Implemented & Verified** | [`src/components/views/SettingsView.tsx`](src/components/views/SettingsView.tsx), [`src/lib/workBehaviorEngine.ts`](src/lib/workBehaviorEngine.ts) |
 | **Database Schema** | Complete PostgreSQL production schema with tables, enums, triggers, and Row-Level Security policies. | **Implemented (SQL File)** | [`src/db/schema.sql`](src/db/schema.sql) |
@@ -407,6 +407,9 @@ npm run build
 # Run TypeScript static analysis across all files
 npm run lint
 
+# Run automated security, file protection & production integration tests
+npm run test:security
+
 # Preview production build locally
 npm run preview
 
@@ -415,8 +418,9 @@ npm run clean
 ```
 
 ### Verified Test Executions
-- **Production Build (`npm run build`)**: Exits `0` cleanly in **430ms** generating optimized production assets in `dist/`.
-- **Static Analysis (`npm run lint`)**: Passed without syntax or type errors.
+- **Production Build (`npm run build`)**: Exits `0` cleanly in **318ms** generating optimized production assets in `dist/`.
+- **Static Analysis (`npm run lint` / `tsc --noEmit`)**: Passed with 0 syntax or type errors.
+- **Automated Security & Integration Test Suite (`npm run test:security`)**: Passed **15 of 15 tests (100%)** verifying path traversal protection, magic-byte inspection, file size limits, protocol enforcement, SSRF defenses, CSV injection neutralization, role-based document scoping, and signed URL generation.
 - **AI Gateway & Scope Tests**: Verified in-process via test runners that out-of-scope queries (`python code`, `tell me a joke`) and unauthorized funding queries resolve with **0 tokens** and **0 ms** latency.
 
 ---
@@ -433,12 +437,29 @@ npm run clean
    - Ensure `GEMINI_API_KEY` is configured as a server environment variable.
 3. **Database Deployment (Supabase)**:
    - Create a new project in the Supabase Dashboard.
-   - Execute [`src/db/schema.sql`](src/db/schema.sql) in the Supabase SQL Editor.
+   - Execute base schema [`src/db/schema.sql`](src/db/schema.sql) in the Supabase SQL Editor.
+   - Execute migration [`src/db/migrations/20261012_document_storage_security.sql`](src/db/migrations/20261012_document_storage_security.sql) to provision private bucket `tip-crm-private-documents` and role-governed document RLS policies.
    - Copy Project URL and Anon Key into `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
 
 ### Sovereign Data Backups
 - In `Settings` &rarr; `Backups & Sovereign Data`, administrators can export a full JSON snapshot of all CRM records with a single click.
 - Backups can be restored deterministically to guarantee complete data sovereignty under TIP's long-term control.
+
+---
+
+## 14. File Security, Confidential Documents & Data Protection
+
+| Security Layer | Implementation Mechanism | Governing File / Policy |
+| :--- | :--- | :--- |
+| **Storage Bucket Isolation** | Private Supabase bucket (`tip-crm-private-documents`) with `public = FALSE`. Zero unauthenticated access. | `src/db/migrations/20261012_document_storage_security.sql` |
+| **Object Path Unpredictability** | Server-controlled paths: `{org_id}/documents/{doc_uuid}/{sanitized_filename}`. Neutralizes `../` traversal. | `src/lib/fileSecurity.ts` |
+| **Binary Magic-Byte Inspection** | Header byte analysis verifies PDF (`%PDF-`), PNG, JPEG, WEBP, and XLSX/DOCX ZIP headers; blocks disguised executables. | `src/lib/fileSecurity.ts` |
+| **Format & Size Whitelist** | Enforces max 10MB; blocks dangerous scripts (`.exe`, `.sh`, `.bat`, `.php`, `.py`, `.svg`, `.html`). | `src/lib/fileSecurity.ts` |
+| **External Link Safeguards** | Validates HTTPS-only schemes; blocks `javascript:`, `data:`, `file:`, and SSRF intranet endpoints (`169.254.169.254`, `127.0.0.1`). | `src/lib/fileSecurity.ts` |
+| **Confidentiality & Role Scoping** | RLS & context filtering shield confidential documents and funding agreements from volunteers and unapproved users. | `src/context/CrmContext.tsx`, `src/components/views/DocumentsView.tsx` |
+| **60s Authorized Signed URLs** | Private files served strictly via temporary 60-second signed tokens, requiring authenticated CRM permissions. | `src/lib/supabase.ts`, `src/lib/supabaseDb.ts` |
+| **CSV Formula Injection Defense** | Sanitizes cells starting with `=, +, -, @, \t, \r` with prepended single quote (`'`). | `src/lib/csvExport.ts`, `src/lib/fileSecurity.ts` |
+| **Tamper-Resistant Audit Trail** | Logs `document.upload`, `document.download`, `document.delete` without leaking confidential file bodies or URLs. | `src/context/CrmContext.tsx` |
 
 ---
 

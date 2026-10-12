@@ -169,3 +169,116 @@ export class SupabaseAuthEngine {
     this.saveSession(null);
   }
 }
+
+import { 
+  validateFileUpload, 
+  generateSecureStoragePath, 
+  PRIVATE_STORAGE_BUCKET,
+  FileValidationInput 
+} from './fileSecurity';
+
+/**
+ * Supabase Private Document Storage Engine
+ * Handles authorized uploads, 60s signed URL generation, and storage cleanup.
+ */
+export class SupabaseStorageEngine {
+  static async createSignedDocumentUrl(
+    storagePath: string, 
+    expiresInSeconds: number = 60
+  ): Promise<{ signedUrl?: string; error?: string }> {
+    if (!storagePath) {
+      return { error: 'Invalid storage path provided.' };
+    }
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.storage
+          .from(PRIVATE_STORAGE_BUCKET)
+          .createSignedUrl(storagePath, expiresInSeconds);
+        if (error) {
+          return { error: error.message };
+        }
+        return { signedUrl: data?.signedUrl };
+      } catch (err: any) {
+        return { error: err?.message || 'Storage service unavailable.' };
+      }
+    }
+
+    // Local / Dev Fallback: Return a simulated authorized signed link
+    const token = `sig_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const expiresAt = Date.now() + expiresInSeconds * 1000;
+    return {
+      signedUrl: `#download-authorized?path=${encodeURIComponent(storagePath)}&token=${token}&expires=${expiresAt}`
+    };
+  }
+
+  static async uploadPrivateDocument(params: {
+    file: File | FileValidationInput;
+    documentId: string;
+    organizationId?: string;
+  }): Promise<{
+    success: boolean;
+    storagePath?: string;
+    url?: string;
+    error?: string;
+    fileSize?: number;
+    mimeType?: string;
+    checksum?: string;
+  }> {
+    const { file, documentId, organizationId = 'org-tip' } = params;
+
+    const validation = validateFileUpload(file);
+    if (!validation.valid) {
+      return { success: false, error: validation.error };
+    }
+
+    const storagePath = generateSecureStoragePath(
+      organizationId,
+      documentId,
+      validation.sanitizedName
+    );
+
+    if (supabase) {
+      try {
+        const fileBody = (file as any).bytes || file;
+        const { error } = await supabase.storage
+          .from(PRIVATE_STORAGE_BUCKET)
+          .upload(storagePath, fileBody, {
+            contentType: validation.detectedMime,
+            upsert: false
+          });
+
+        if (error) {
+          return { success: false, error: `Upload rejected: ${error.message}` };
+        }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Storage upload failed.' };
+      }
+    }
+
+    return {
+      success: true,
+      storagePath,
+      url: `storage://${PRIVATE_STORAGE_BUCKET}/${storagePath}`,
+      fileSize: file.size,
+      mimeType: validation.detectedMime
+    };
+  }
+
+  static async deletePrivateDocument(storagePath: string): Promise<{ success: boolean; error?: string }> {
+    if (!storagePath) return { success: false, error: 'No storage path provided.' };
+
+    if (supabase) {
+      try {
+        const { error } = await supabase.storage
+          .from(PRIVATE_STORAGE_BUCKET)
+          .remove([storagePath]);
+        if (error) return { success: false, error: error.message };
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Deletion failed.' };
+      }
+    }
+
+    return { success: true };
+  }
+}

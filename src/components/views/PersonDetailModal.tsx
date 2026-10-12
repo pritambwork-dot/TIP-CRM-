@@ -103,7 +103,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   if (!isOpen) return null;
 
   // Scope Enforcement: Ensure current user has permission to access this contact
-  const isAccessible = currentUser.roleId === 'super_admin' || currentUser.dataScope === 'all' || scopedPeople.some(p => p.id === personId);
+  const isAccessible = currentUser.roleId === 'super_admin' || currentUser.dataScope.people === 'GLOBAL' || scopedPeople.some(p => p.id === personId);
   if (!person || !isAccessible) {
     return (
       <div 

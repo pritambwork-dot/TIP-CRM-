@@ -324,6 +324,8 @@ export interface ParticipantRecord {
   eventName?: string;
   programId?: string;
   programName?: string;
+  projectId?: string;
+  projectName?: string;
   status: ParticipantStatus;
   registeredAt: string;
   attendedAt?: string;
@@ -528,8 +530,16 @@ export interface InteractionItem {
 export interface DocumentItem {
   id: string;
   title: string;
-  type: 'Google Drive' | 'Google Docs' | 'Google Sheets' | 'Google Slides' | 'Cloud Link' | 'PDF / File';
+  type: 'Google Drive' | 'Google Docs' | 'Google Sheets' | 'Google Slides' | 'Cloud Link' | 'PDF / File' | 'Uploaded File';
   url: string;
+  storagePath?: string;
+  storageBucket?: string;
+  fileSize?: number;
+  mimeType?: string;
+  isConfidential?: boolean;
+  accessTier?: 'all' | 'staff' | 'management' | 'super_admin';
+  checksum?: string;
+  isDirectUpload?: boolean;
   relatedType: 'Person' | 'Organization' | 'Program' | 'Event' | 'Funding' | 'General';
   relatedId?: string;
   relatedName?: string;

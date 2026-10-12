@@ -53,7 +53,9 @@ export const TopBar: React.FC<TopBarProps> = ({
     hasPermission,
     isAiDrawerOpen,
     setIsAiDrawerOpen,
-    aiSuggestions
+    aiSuggestions,
+    dbHealth,
+    isDbSyncing
   } = useCrm();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserSwitcher, setShowUserSwitcher] = useState(false);
@@ -112,9 +114,27 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         {/* Section Title & Scope Breadcrumb */}
         <div className="min-w-0 pl-0.5">
-          <h1 className="text-sm sm:text-base font-semibold text-zinc-900 truncate tracking-tight font-serif">
-            {currentSectionTitle}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-sm sm:text-base font-semibold text-zinc-900 truncate tracking-tight font-serif">
+              {currentSectionTitle}
+            </h1>
+            {isDbSyncing ? (
+              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                Syncing...
+              </span>
+            ) : dbHealth?.connected ? (
+              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200" title={`Live Supabase PostgreSQL (${dbHealth.latencyMs || 0}ms)`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Cloud DB
+              </span>
+            ) : (
+              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-amber-50 text-amber-700 border border-amber-200" title="Local Storage Mode Active (Offline/Demo)">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                Local Mode
+              </span>
+            )}
+          </div>
           <p className="hidden sm:block text-[11px] text-zinc-500 font-medium truncate">
             {currentUser?.dataScope?.people === 'GLOBAL' ? 'Global Scope' : 'Assigned Scope'} • {currentUser.name}
           </p>
