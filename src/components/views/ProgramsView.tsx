@@ -27,7 +27,8 @@ import {
   CardDescription, 
   CardContent, 
   CardFooter, 
-  Input
+  Input,
+  OneUiSearchBar
 } from '../ui';
 
 const STATUS_FILTERS: Array<ProgramStatus | 'All'> = [
@@ -161,25 +162,12 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <Input 
-            type="text"
+        <div className="flex-1 max-w-md">
+          <OneUiSearchBar 
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={setSearchQuery}
             placeholder="Search programs by name, description, lead, or focus area..."
-            className="pl-9 pr-9 bg-white"
           />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 text-xs p-1 rounded-full hover:bg-zinc-100 transition-colors"
-              title="Clear search"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
         </div>
 
         <div className="text-xs text-zinc-500 self-center">

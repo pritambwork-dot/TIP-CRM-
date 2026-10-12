@@ -23,7 +23,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
-import { downloadCsv } from '../../lib/csvExport';
+import { OneUiSearchBar } from '../ui/OneUiSearchBar';
 
 const STATUS_FILTERS: Array<FundingStatus | 'All'> = [
   'All',
@@ -36,13 +36,11 @@ const STATUS_FILTERS: Array<FundingStatus | 'All'> = [
 ];
 
 interface FundingViewProps {
-  selectedFundingId?: string | null;
   onSelectPerson?: (personId: string) => void;
   onSelectProgram?: (programId: string) => void;
 }
 
 export const FundingView: React.FC<FundingViewProps> = ({
-  selectedFundingId,
   onSelectPerson,
   onSelectProgram
 }) => {
@@ -58,17 +56,6 @@ export const FundingView: React.FC<FundingViewProps> = ({
   } = useCrm();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<FundingStatus | 'All'>('All');
-
-  // Handle selected funding record from global search
-  React.useEffect(() => {
-    if (selectedFundingId) {
-      const f = funding.find(item => item.id === selectedFundingId);
-      if (f) {
-        setSelectedStatus('All');
-        setSearchQuery(f.funderName || f.donorOrFunder || '');
-      }
-    }
-  }, [selectedFundingId, funding]);
 
   const canCreateFunding = hasPermission('funding', 'create');
   const canDeleteFunding = hasPermission('funding', 'delete');
@@ -110,11 +97,7 @@ export const FundingView: React.FC<FundingViewProps> = ({
     const matchesQuery = q === '' ? true :
       funder.toLowerCase().includes(q) ||
       ftype.toLowerCase().includes(q) ||
-      fyear.toLowerCase().includes(q) ||
-      (f.status && f.status.toLowerCase().includes(q)) ||
-      (f.relatedProgramName && f.relatedProgramName.toLowerCase().includes(q)) ||
-      (f.notes && f.notes.toLowerCase().includes(q)) ||
-      (f.amountCad && f.amountCad.toString().includes(q));
+      fyear.toLowerCase().includes(q);
     return matchesStatus && matchesQuery;
   });
 
@@ -155,7 +138,6 @@ export const FundingView: React.FC<FundingViewProps> = ({
   };
 
   const exportFundingCSV = () => {
-    if (!canExport) return;
     const rows = [
       ['Funder Name', 'Type', 'Amount (CAD)', 'Status', 'Fiscal Year', 'Reporting Deadline', 'Notes'],
       ...funding.map(f => [
@@ -169,7 +151,14 @@ export const FundingView: React.FC<FundingViewProps> = ({
       ])
     ];
 
-    downloadCsv(`TIP_Funding_Ledger_2026.csv`, rows);
+    const csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.map(cell => `"${cell}"`).join(",")).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `TIP_Funding_Ledger_2026.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const getStatusBadgeVariant = (status: FundingStatus) => {
@@ -282,25 +271,12 @@ export const FundingView: React.FC<FundingViewProps> = ({
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <Input 
-            type="text"
+        <div className="flex-1 max-w-md">
+          <OneUiSearchBar 
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search by funder name, type, program, or amount..."
-            className="pl-9 pr-9 text-xs sm:text-sm"
+            onChange={setSearchQuery}
+            placeholder="Search by funder name, type, or fiscal year..."
           />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs p-1 rounded-full hover:bg-muted/80 transition-colors"
-              title="Clear search"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">

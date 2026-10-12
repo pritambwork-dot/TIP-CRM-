@@ -18,9 +18,10 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useCrm } from '../context/CrmContext';
+import { NavTab } from './Sidebar';
 import { TipLogo } from './TipLogo';
 import { Button, Badge } from './ui';
-import { RoleId, NavTab } from '../types';
+import { RoleId } from '../types';
 import { ROLE_DEFINITIONS } from '../lib/permissions';
 
 interface TopBarProps {
@@ -53,9 +54,7 @@ export const TopBar: React.FC<TopBarProps> = ({
     hasPermission,
     isAiDrawerOpen,
     setIsAiDrawerOpen,
-    aiSuggestions,
-    dbHealth,
-    isDbSyncing
+    aiSuggestions
   } = useCrm();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserSwitcher, setShowUserSwitcher] = useState(false);
@@ -114,27 +113,9 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         {/* Section Title & Scope Breadcrumb */}
         <div className="min-w-0 pl-0.5">
-          <div className="flex items-center gap-2">
-            <h1 className="text-sm sm:text-base font-semibold text-zinc-900 truncate tracking-tight font-serif">
-              {currentSectionTitle}
-            </h1>
-            {isDbSyncing ? (
-              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                Syncing...
-              </span>
-            ) : dbHealth?.connected ? (
-              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200" title={`Live Supabase PostgreSQL (${dbHealth.latencyMs || 0}ms)`}>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Cloud DB
-              </span>
-            ) : (
-              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-amber-50 text-amber-700 border border-amber-200" title="Local Storage Mode Active (Offline/Demo)">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                Local Mode
-              </span>
-            )}
-          </div>
+          <h1 className="text-sm sm:text-base font-semibold text-zinc-900 truncate tracking-tight font-serif">
+            {currentSectionTitle}
+          </h1>
           <p className="hidden sm:block text-[11px] text-zinc-500 font-medium truncate">
             {currentUser?.dataScope?.people === 'GLOBAL' ? 'Global Scope' : 'Assigned Scope'} • {currentUser.name}
           </p>
@@ -143,21 +124,21 @@ export const TopBar: React.FC<TopBarProps> = ({
 
       {/* Right Section: Spotlight Search, Import, Add New, Notifications, User */}
       <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-        {/* Spotlight Global Search Bar */}
+        {/* Glassmorphic Light Search Capsule */}
         <button
           type="button"
           onClick={onOpenSearch}
           id="btn-global-search"
-          className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-100/90 hover:bg-zinc-200/80 border border-zinc-200/90 text-zinc-500 hover:text-zinc-900 transition-all cursor-pointer shadow-2xs group w-36 sm:w-52 md:w-64 lg:w-72"
-          title="Search TIP records across people, programs, grants, events, tasks (⌘K / Ctrl+K)"
+          className="relative flex items-center gap-2.5 h-9 sm:h-9.5 px-3 sm:px-4 rounded-full bg-white/65 hover:bg-white/85 active:scale-[0.99] backdrop-blur-md border border-white/90 shadow-[0_2px_8px_rgba(0,0,0,0.04),0_0_0_1px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_16px_rgba(20,10,142,0.08),0_0_0_1px_rgba(20,10,142,0.2)] text-zinc-600 hover:text-zinc-900 transition-all duration-200 cursor-pointer group"
+          title="Search TIP records"
         >
-          <Search className="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-700 shrink-0" />
-          <span className="text-xs text-zinc-500 group-hover:text-zinc-800 truncate flex-1 text-left font-normal">
+          <div className="w-5 h-5 rounded-full bg-white/80 border border-white/90 flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+            <Search className="w-3 h-3 text-zinc-400 group-hover:text-[#140a8e] transition-colors" />
+          </div>
+
+          <span className="text-xs sm:text-[13px] font-normal text-zinc-600 group-hover:text-zinc-900 tracking-tight">
             Search records...
           </span>
-          <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono font-medium text-zinc-400 bg-white border border-zinc-200 rounded-md shadow-2xs group-hover:text-zinc-600 shrink-0">
-            <span className="text-[11px]">⌘</span>K
-          </kbd>
         </button>
 
         {/* TIP Intelligence Companion Trigger */}
@@ -200,7 +181,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             onClick={onOpenImport}
             id="btn-topbar-import"
             className="hidden md:flex gap-1.5"
-            title="Import contacts from CSV or Excel"
+            title="Import contacts from Google Sheets or Excel"
           >
             <Upload className="w-3.5 h-3.5 text-zinc-500" />
             <span>Import</span>

@@ -27,6 +27,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
+import { OneUiSearchBar } from '../ui/OneUiSearchBar';
 import { 
   validateFileUpload, 
   validateExternalDocumentUrl, 
@@ -350,25 +351,12 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
 
       {/* Filter and Search */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <Input 
-            type="text"
+        <div className="flex-1 max-w-md">
+          <OneUiSearchBar 
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={setSearchQuery}
             placeholder="Search documents by title, attached program, or note..."
-            className="pl-9 pr-9 text-xs sm:text-sm"
           />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs p-1 rounded-full hover:bg-muted/80 transition-colors"
-              title="Clear search"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
         </div>
 
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">

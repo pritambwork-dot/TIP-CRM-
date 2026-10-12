@@ -24,6 +24,7 @@ import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 import { Card, CardContent } from '../ui/card';
 import { Avatar, AvatarFallback } from '../ui/avatar';
+import { OneUiSearchBar } from '../ui/OneUiSearchBar';
 
 const RELATIONSHIP_FILTERS: Array<RelationshipType | 'All'> = [
   'All',
@@ -100,7 +101,8 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
       interests: newInterests.split(',').map(s => s.trim()).filter(Boolean),
       notes: newNotes.trim() || undefined,
       programIds: [],
-      eventIds: []
+      eventIds: [],
+      mailchimpStatus: 'subscribed'
     });
 
     // Reset form
@@ -151,26 +153,13 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
 
       {/* Search and Filters Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        {/* Search */}
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <Input 
-            type="text"
+        {/* Search Bar */}
+        <div className="flex-1 max-w-md">
+          <OneUiSearchBar 
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search by name, organization, city, role, or interests..."
-            className="pl-9 pr-9 bg-card border-border/80 text-xs sm:text-sm h-10 shadow-xs"
+            onChange={setSearchQuery}
+            placeholder="Search by name, organization, email, or interests..."
           />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs p-1 rounded-full hover:bg-muted/80 transition-colors"
-              title="Clear search"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
         </div>
 
         {/* Count summary & Scope badge */}

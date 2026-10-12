@@ -4,3 +4,4 @@ export * from './card';
 export * from './input';
 export * from './separator';
 export * from './avatar';
+export * from './OneUiSearchBar';

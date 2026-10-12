@@ -552,46 +552,57 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start justify-center p-3 sm:p-4 pt-12 sm:pt-16"
           onClick={onClose}
         >
+          {/* Glassmorphic Light-Themed Modal Container */}
           <motion.div 
             initial={{ opacity: 0, scale: 0.96, y: -10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: -10 }}
             transition={{ type: 'spring', damping: 28, stiffness: 380 }}
-            className="w-full max-w-2xl bg-card rounded-2xl shadow-2xl border border-border/80 overflow-hidden flex flex-col max-h-[85vh]"
+            className="w-full max-w-2xl bg-white/90 dark:bg-zinc-900/90 backdrop-blur-2xl rounded-3xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.15),0_0_0_1px_rgba(255,255,255,0.9)] border border-white/80 overflow-hidden flex flex-col max-h-[85vh]"
             onClick={e => e.stopPropagation()}
           >
-            {/* Top Search Input Bar */}
-            <div className="relative border-b border-border flex items-center px-4 py-3.5 bg-background gap-3 shrink-0">
-              <Search className="w-5 h-5 text-muted-foreground shrink-0" />
-              <input
-                ref={inputRef}
-                type="text"
-                value={query}
-                onChange={e => {
-                  setQuery(e.target.value);
-                  setSelectedIndex(0);
-                }}
-                onKeyDown={handleKeyDown}
-                placeholder="Search across people, programs, grants, events, tasks, documents..."
-                className="w-full bg-transparent text-sm sm:text-base text-foreground placeholder:text-muted-foreground focus:outline-hidden font-sans"
-              />
+            {/* Glassmorphic Top Search Input Bar */}
+            <div className="p-3.5 sm:p-4 border-b border-zinc-100/80 bg-white/40 backdrop-blur-xs flex items-center gap-2.5 shrink-0">
+              <div className="relative flex-1 flex items-center bg-white/70 hover:bg-white/85 focus-within:bg-white backdrop-blur-md focus-within:backdrop-blur-xl rounded-full px-4 py-2 border border-white/90 hover:border-zinc-200/80 focus-within:border-[#140a8e]/40 focus-within:ring-3 focus-within:ring-[#140a8e]/10 transition-all duration-200 shadow-[0_2px_8px_rgba(0,0,0,0.03),0_0_0_1px_rgba(0,0,0,0.04)] focus-within:shadow-[0_6px_20px_rgba(20,10,142,0.08)]">
+                {/* Glassmorphic Search Icon */}
+                <div className="w-6 h-6 rounded-full bg-white/80 border border-white/90 flex items-center justify-center shrink-0 mr-2.5 shadow-2xs">
+                  <Search className="w-3.5 h-3.5 text-zinc-500" />
+                </div>
 
-              {query ? (
-                <button 
-                  onClick={() => {
-                    setQuery('');
-                    inputRef.current?.focus();
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={query}
+                  onChange={e => {
+                    setQuery(e.target.value);
+                    setSelectedIndex(0);
                   }}
-                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer shrink-0"
-                  title="Clear search"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              ) : (
-                <kbd className="hidden sm:inline-flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted border border-border rounded-md shrink-0">
-                  ESC
-                </kbd>
-              )}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Search across people, programs, grants, events, tasks, documents..."
+                  className="w-full bg-transparent text-sm sm:text-base text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-hidden font-sans tracking-tight"
+                />
+
+                {query ? (
+                  <button 
+                    onClick={() => {
+                      setQuery('');
+                      inputRef.current?.focus();
+                    }}
+                    className="w-6 h-6 rounded-full bg-white/80 hover:bg-white border border-white/90 text-zinc-500 hover:text-zinc-900 flex items-center justify-center transition-all shadow-2xs active:scale-90 cursor-pointer shrink-0"
+                    title="Clear search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={onClose}
+                    className="w-6 h-6 rounded-full hover:bg-zinc-200/70 text-zinc-400 hover:text-zinc-700 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                    title="Close"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Category Filter Pills (Visible when there are results or a query) */}
@@ -912,11 +923,6 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                           <Badge variant={item.badgeVariant} className="text-[10px] capitalize font-medium">
                             {item.tag}
                           </Badge>
-                          <div className={`w-5 h-5 rounded flex items-center justify-center transition-opacity ${
-                            isSelected ? 'opacity-100 text-zinc-900 dark:text-zinc-100' : 'opacity-20 text-muted-foreground'
-                          }`}>
-                            <CornerDownLeft className="w-3.5 h-3.5" />
-                          </div>
                         </div>
                       </div>
                     );
@@ -929,13 +935,6 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
             <div className="px-4 py-2.5 bg-muted/40 border-t border-border flex items-center justify-between text-[11px] text-muted-foreground shrink-0">
               <div className="flex items-center gap-3">
                 <span>{filteredResults.length > 0 ? `${filteredResults.length} match${filteredResults.length > 1 ? 'es' : ''}` : 'TIP Spotlight Search'}</span>
-                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-zinc-400 font-mono">
-                  <span>Use ↑↓ to navigate</span>
-                  <span>•</span>
-                  <span>↵ to open</span>
-                  <span>•</span>
-                  <span>ESC to exit</span>
-                </span>
               </div>
               <span className="font-serif italic text-primary font-semibold text-xs">The Inclusion Project</span>
             </div>
