@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { clientSafeLogger, mapToSafeErrorMessage } from '../../lib/safeErrors';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -25,7 +26,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    console.error('[ErrorBoundary caught error]:', error, errorInfo);
+    clientSafeLogger.error('[ErrorBoundary caught error]:', error);
   }
 
   handleReset = () => {
@@ -41,6 +42,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         return this.props.fallback;
       }
 
+      const safeMessage = this.state.error
+        ? mapToSafeErrorMessage(this.state.error, 'A component rendering error occurred.')
+        : '';
+
       return (
         <div className="p-6 my-4 bg-amber-50/80 border border-amber-200 rounded-2xl text-left shadow-2xs space-y-3">
           <div className="flex items-center gap-2 text-amber-900 font-semibold text-sm">
@@ -51,9 +56,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             {this.props.fallbackMessage ||
               'A rendering issue occurred in this section. Your underlying data and calculation results remain completely safe.'}
           </p>
-          {this.state.error?.message && (
+          {safeMessage && (
             <p className="text-[11px] font-mono text-amber-700 bg-amber-100/60 p-2 rounded-lg break-all">
-              {this.state.error.message}
+              {safeMessage}
             </p>
           )}
           <button

@@ -17,7 +17,8 @@ import {
 import { useCrm } from '../../context/CrmContext';
 import { ParticipantStatus } from '../../types';
 import { ProtectedAction } from '../common/ProtectedAction';
-import { downloadCsv } from '../../lib/csvExport';
+import { exportToCsv } from '../../lib/csvExport';
+import { sanitizeExternalUrl } from '../../lib/safeUrls';
 
 interface EventDetailModalProps {
   eventId: string | null;
@@ -45,7 +46,6 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
     participants,
     updateParticipantStatus,
     addParticipant,
-    deleteParticipant,
     deleteEvent,
     people, 
     programs,
@@ -59,7 +59,6 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
 
   const canEditEvent = hasPermission('events', 'edit');
   const canDeleteEvent = hasPermission('events', 'delete');
-  const canDeleteParticipant = hasPermission('participants', 'delete');
   const canExport = hasPermission('reports', 'export');
 
   const event = events.find(e => e.id === eventId);
@@ -100,7 +99,6 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
 
   // Export attendance list as CSV
   const handleExportCSV = () => {
-    if (!canExport) return;
     const rows = [
       ['Person Name', 'Email', 'Organization', 'Status', 'Registered Date', 'Attended Date'],
       ...eventParticipants.map(p => [
@@ -113,7 +111,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
       ])
     ];
 
-    downloadCsv(`TIP_${event.name.replace(/\s+/g, '_')}_Attendance.csv`, rows);
+    exportToCsv(`TIP_${event.name.replace(/\s+/g, '_')}_Attendance.csv`, rows);
   };
 
   return (
@@ -153,11 +151,11 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                   <MapPin className="w-3.5 h-3.5 text-zinc-400" />
                 )}
                 <span>{event.location}</span>
-                {event.meetingLink && (
+                {event.meetingLink && sanitizeExternalUrl(event.meetingLink) && (
                   <a 
-                    href={event.meetingLink} 
+                    href={sanitizeExternalUrl(event.meetingLink)!} 
                     target="_blank" 
-                    rel="noreferrer" 
+                    rel="noopener noreferrer" 
                     className="text-blue-600 hover:underline inline-flex items-center gap-0.5 ml-1"
                   >
                     Join link <ExternalLink className="w-3 h-3" />
@@ -326,15 +324,6 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                               {st}
                             </button>
                           ))}
-                          {canDeleteParticipant && (
-                            <button
-                              onClick={() => deleteParticipant(part.id)}
-                              className="p-1 text-zinc-400 hover:text-rose-600 rounded cursor-pointer transition-colors ml-1"
-                              title="Remove attendee"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -356,24 +345,43 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
             <h4 className="text-sm font-semibold text-zinc-900">Event Agendas & Presentation Links</h4>
             {eventDocs.length > 0 ? (
               <div className="space-y-2">
-                {eventDocs.map(doc => (
-                  <a
-                    key={doc.id}
-                    href={doc.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center justify-between p-3 rounded-lg border border-zinc-200 hover:bg-zinc-50 group"
-                  >
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-zinc-400 group-hover:text-zinc-900" />
-                      <div>
-                        <p className="text-xs font-semibold text-zinc-900">{doc.title}</p>
-                        <p className="text-[11px] text-zinc-500">{doc.type}</p>
+                {eventDocs.map(doc => {
+                  const safeUrl = sanitizeExternalUrl(doc.url);
+                  if (!safeUrl) {
+                    return (
+                      <div
+                        key={doc.id}
+                        className="flex items-center justify-between p-3 rounded-lg border border-zinc-200 bg-zinc-50 opacity-75"
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-zinc-400" />
+                          <div>
+                            <p className="text-xs font-semibold text-zinc-700">{doc.title}</p>
+                            <p className="text-[11px] text-zinc-500">{doc.type} • Insecure URL blocked</p>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <ExternalLink className="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-800" />
-                  </a>
-                ))}
+                    );
+                  }
+                  return (
+                    <a
+                      key={doc.id}
+                      href={safeUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between p-3 rounded-lg border border-zinc-200 hover:bg-zinc-50 group"
+                    >
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-zinc-400 group-hover:text-zinc-900" />
+                        <div>
+                          <p className="text-xs font-semibold text-zinc-900">{doc.title}</p>
+                          <p className="text-[11px] text-zinc-500">{doc.type}</p>
+                        </div>
+                      </div>
+                      <ExternalLink className="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-800" />
+                    </a>
+                  );
+                })}
               </div>
             ) : (
               <p className="text-xs text-zinc-400 italic">No external agendas attached.</p>

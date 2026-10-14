@@ -22,7 +22,8 @@ import {
   Trash2,
   Play,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  AlertTriangle
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useCrm } from '../../context/CrmContext';
@@ -34,6 +35,7 @@ import { Badge } from '../ui/badge';
 import { fetchAiUsageStats } from '../../lib/aiOrchestrator';
 import { aiCache } from '../../lib/aiCache';
 import { AiUsageStats, AiPrivacyMode } from '../../types';
+import { validateBackupStructure } from '../../lib/fileValidation';
 
 interface SettingsViewProps {
   onOpenImport: () => void;
@@ -73,10 +75,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
     aiBudgetConfig,
     updateAiBudgetConfig,
     incrementAiDataVersion,
-    dbHealth,
-    isDbSyncing,
-    dbSyncError,
-    refreshDatabase
+    restoreDatabaseFromBackup
   } = useCrm();
 
   const [activeTab, setActiveTab] = useState<'users' | 'posts' | 'ai' | 'profile' | 'backup'>(defaultSubTab);
@@ -99,6 +98,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
   });
   const [budgetSavedSuccess, setBudgetSavedSuccess] = useState(false);
   const [cacheClearSuccess, setCacheClearSuccess] = useState(false);
+
+  // Backup & Restore State (Check 13)
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoreParsedData, setRestoreParsedData] = useState<any | null>(null);
+  const [restoreValidation, setRestoreValidation] = useState<{
+    valid: boolean;
+    error?: string;
+    counts?: Record<string, number>;
+  } | null>(null);
+  const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
 
   useEffect(() => {
     if (activeTab === 'ai') {
@@ -136,11 +148,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
   };
 
   const canManageSettings = isSuperAdmin || hasPermission('settings', 'manage');
-  const canExportBackup = isSuperAdmin || hasPermission('reports', 'export');
+  const canManageBackups = isSuperAdmin || hasPermission('settings', 'manage');
+  const canExportBackup = canManageBackups;
   const canImport = hasPermission('people', 'import');
 
   // Export Full JSON Backup
   const handleExportBackup = () => {
+    if (!canManageBackups) {
+      alert('Access Denied: Only Super Administrators can export complete sovereign database backups.');
+      return;
+    }
+
     const backupData = {
       exportedAt: new Date().toISOString(),
       organization: orgName,
@@ -160,6 +178,72 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleRestoreFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    setRestoreSuccess(null);
+    setRestoreError(null);
+    setRestoreParsedData(null);
+    setRestoreValidation(null);
+
+    const file = e.target.files?.[0];
+    if (!file) {
+      setRestoreFile(null);
+      return;
+    }
+
+    if (file.size > 25 * 1024 * 1024) {
+      setRestoreError('Backup file exceeds maximum permitted size of 25MB.');
+      setRestoreFile(null);
+      return;
+    }
+
+    setRestoreFile(file);
+    try {
+      const text = await file.text();
+      let parsed: any;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        setRestoreError('Uploaded file is not valid JSON.');
+        return;
+      }
+
+      const val = validateBackupStructure(parsed);
+      setRestoreValidation(val);
+      if (val.valid) {
+        setRestoreParsedData(parsed);
+      } else {
+        setRestoreError(val.error || 'Invalid backup file structure.');
+      }
+    } catch {
+      setRestoreError('Failed to read backup file.');
+    }
+  };
+
+  const handleExecuteRestore = () => {
+    if (!restoreParsedData) return;
+    setIsRestoring(true);
+    try {
+      const result = restoreDatabaseFromBackup(restoreParsedData);
+      if (result.success) {
+        const countsStr = result.restoredCounts 
+          ? Object.entries(result.restoredCounts).map(([k, v]) => `${v} ${k}`).join(', ')
+          : 'All records';
+        setRestoreSuccess(`Database restore completed successfully! Restored: ${countsStr}.`);
+        setRestoreParsedData(null);
+        setRestoreFile(null);
+        setRestoreValidation(null);
+        setConfirmRestoreOpen(false);
+      } else {
+        setRestoreError(result.error || 'Restore failed.');
+      }
+    } catch (err: any) {
+      setRestoreError(err?.message || 'Unexpected error during restore.');
+    } finally {
+      setIsRestoring(false);
+    }
   };
 
   const handleSaveProfile = (e: React.FormEvent) => {
@@ -268,7 +352,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
               </div>
               <div className="p-3 rounded-xl bg-white border border-zinc-200 shadow-2xs">
                 <span className="font-bold text-indigo-700 block text-[11px] uppercase">4. Work Assignments</span>
-                <p className="text-[11px] text-zinc-600 mt-1">Projects, events, and day-to-day tasks</p>
+                <p className="text-[11px] text-zinc-600 mt-1">Cohorts, events, and day-to-day tasks</p>
               </div>
             </div>
           </div>
@@ -353,7 +437,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
                   Standard Operational Task Templates ({taskTemplates.length})
                 </h3>
                 <p className="text-xs text-muted-foreground">
-                  Reusable templates mapped to employee posts for consistent project execution
+                  Reusable templates mapped to employee posts for consistent cohort execution
                 </p>
               </div>
             </div>
@@ -615,75 +699,126 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
             </div>
           </div>
 
-          {/* Connected Services */}
+          {/* Database Restore Section (Check 13) */}
           <div className="pt-4 border-t border-border space-y-3">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">Connected Cloud & Database Services</h4>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={refreshDatabase}
-                disabled={isDbSyncing}
-                className="h-7 text-xs gap-1.5"
-              >
-                <RefreshCw className={`w-3 h-3 ${isDbSyncing ? 'animate-spin' : ''}`} />
-                <span>{isDbSyncing ? 'Testing...' : 'Test Connection'}</span>
-              </Button>
+              <div>
+                <h4 className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <Database className="w-3.5 h-3.5 text-primary" />
+                  <span>Restore Sovereign Database Backup</span>
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 border border-amber-500/20 uppercase">
+                    Super Admin Only
+                  </span>
+                </h4>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Restore previously exported CRM JSON data. Verifies schema integrity and prototype pollution defense.
+                </p>
+              </div>
             </div>
 
-            <div className="space-y-3">
-              {/* Supabase PostgreSQL & Storage */}
-              <div className="p-3.5 rounded-xl border border-border bg-card flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${dbHealth?.connected ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'}`}>
-                      <Database className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-foreground flex items-center gap-2">
-                        Supabase PostgreSQL & Storage
-                        {dbHealth?.connected ? (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                            Connected ({dbHealth.latencyMs || 0}ms)
-                          </span>
-                        ) : (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/20">
-                            Local Storage Mode
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {dbHealth?.connected 
-                          ? 'Persistent cloud PostgreSQL database, Realtime sync, and private document storage.'
-                          : 'Currently using local browser storage. Changes remain saved on this device.'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {!dbHealth?.connected && (
-                  <div className="mt-1 p-2.5 rounded-lg bg-muted/40 border border-border text-[11px] space-y-1 text-muted-foreground">
-                    <p className="font-semibold text-foreground flex items-center gap-1.5">
-                      <AlertCircle className="w-3.5 h-3.5 text-amber-500" /> Connecting to Production Supabase:
-                    </p>
-                    <p>Provide your TIP Supabase credentials in the root <code className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">.env</code> file:</p>
-                    <p className="font-mono text-[10px] bg-background/80 p-1.5 rounded border border-border">
-                      VITE_SUPABASE_URL=https://your-project.supabase.co<br />
-                      VITE_SUPABASE_ANON_KEY=your-publishable-anon-key
-                    </p>
-                    <p>Once set, refresh the page to automatically connect to PostgreSQL with Row-Level Security.</p>
-                  </div>
-                )}
-
-                {dbSyncError && (
-                  <p className="text-[11px] text-red-600 font-medium flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" /> {dbSyncError}
-                  </p>
-                )}
+            {restoreSuccess && (
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 text-xs flex items-center gap-2 font-medium">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span>{restoreSuccess}</span>
               </div>
+            )}
 
-              {/* Google Drive / Workspace */}
+            {restoreError && (
+              <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-700 text-xs flex items-center gap-2 font-medium">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{restoreError}</span>
+              </div>
+            )}
+
+            <div className="p-4 rounded-xl border border-border bg-card space-y-3">
+              {canManageBackups ? (
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1.5">
+                    Select JSON Backup File (Max 25MB)
+                  </label>
+                  <input
+                    type="file"
+                    accept=".json"
+                    id="input-restore-backup"
+                    onChange={handleRestoreFileSelected}
+                    className="w-full text-xs p-2 rounded-lg border border-input bg-background text-foreground file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-muted file:text-foreground hover:file:bg-muted/80 cursor-pointer"
+                  />
+
+                  {restoreValidation?.valid && restoreValidation.counts && (
+                    <div className="mt-3 p-3 rounded-lg bg-muted/40 border border-border text-xs space-y-1.5">
+                      <p className="font-semibold text-foreground flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        Valid Backup Payload Verified:
+                      </p>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {Object.entries(restoreValidation.counts).map(([ent, count]) => (
+                          <span key={ent} className="px-2 py-0.5 rounded bg-background border border-border text-[11px] font-mono">
+                            {ent}: <strong>{count}</strong>
+                          </span>
+                        ))}
+                      </div>
+
+                      {!confirmRestoreOpen ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          id="btn-prepare-restore"
+                          onClick={() => setConfirmRestoreOpen(true)}
+                          className="mt-3 gap-1.5 text-xs text-rose-600 border-rose-200 hover:bg-rose-50 cursor-pointer"
+                        >
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                          <span>Review & Restore Data...</span>
+                        </Button>
+                      ) : (
+                        <div className="mt-3 p-3 rounded-lg border border-rose-200 bg-rose-50/70 text-rose-950 space-y-2">
+                          <p className="text-xs font-bold flex items-center gap-1.5 text-rose-700">
+                            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                            Warning: Destructive Operation
+                          </p>
+                          <p className="text-[11px] text-rose-800 leading-relaxed">
+                            Restoring will overwrite current contacts, organizations, events, tasks, and funding records with the backup file data. Please confirm you wish to proceed.
+                          </p>
+                          <div className="flex items-center gap-2 pt-1">
+                            <Button
+                              type="button"
+                              variant="crimson"
+                              size="sm"
+                              id="btn-confirm-restore"
+                              disabled={isRestoring}
+                              onClick={handleExecuteRestore}
+                              className="text-xs font-semibold cursor-pointer gap-1.5 bg-rose-600 hover:bg-rose-700 text-white"
+                            >
+                              {isRestoring ? 'Restoring Records...' : 'Confirm Overwrite & Restore'}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setConfirmRestoreOpen(false)}
+                              className="text-xs cursor-pointer"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Lock className="w-4 h-4 text-muted-foreground shrink-0" />
+                  <span>Database restoration is restricted exclusively to Super Administrators.</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Connected Services */}
+          <div className="pt-4 border-t border-border space-y-3">
+            <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">Connected Cloud Services</h4>
+            <div className="space-y-2">
               <div className="p-3 rounded-xl border border-border flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-7 h-7 rounded-md bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold text-xs">
@@ -696,6 +831,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
                 </div>
                 <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                   Active
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl border border-border flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-md bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold text-xs">
+                    M
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-foreground">Mailchimp Newsletter Sync</p>
+                    <p className="text-[11px] text-muted-foreground">Subscribed contacts tag synced for community announcements</p>
+                  </div>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-muted text-muted-foreground">
+                  Connected
                 </span>
               </div>
             </div>
@@ -711,70 +861,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-base font-serif font-bold text-foreground">
-                    TIP AI Gateway Status
+                    Google Gemini AI Gateway Status
                   </h3>
-                  {(aiUserSettings?.aiEnabled ?? true) ? (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                      Active Gateway
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20">
-                      Gateway Paused (Offline Mode)
-                    </span>
-                  )}
+                  <span className="px-2 py-0.5 rounded-full text-xs font-mono font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                    Active Gateway
+                  </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Server-side connection to AI Gateway. Zero API key exposure to client browser network or bundles.
+                  Server-side connection to Gemini API. Zero API key exposure to client browser network or bundles.
                 </p>
               </div>
 
               <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
-                Model: <strong className="text-foreground">{liveUsageStats?.model ? 'tip-intelligence-core' : 'tip-intelligence-core'}</strong>
-              </div>
-            </div>
-
-            {/* Master AI Assistance Switch (Section 45, 55) */}
-            <div className={`p-4 rounded-xl border transition-colors ${
-              (aiUserSettings?.aiEnabled ?? true)
-                ? 'bg-emerald-500/5 border-emerald-500/20'
-                : 'bg-amber-500/5 border-amber-500/20'
-            } flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h4 className="text-sm font-bold text-foreground">
-                    Master AI Assistance Switch
-                  </h4>
-                  {(aiUserSettings?.aiEnabled ?? true) ? (
-                    <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
-                      ✓ Enabled
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-600 border-amber-500/20">
-                      Disabled (Offline Deterministic Mode)
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed max-w-2xl">
-                  {(aiUserSettings?.aiEnabled ?? true)
-                    ? 'Optional AI assistance is enabled. All counts, financial totals, and reports continue to calculate deterministically via code before optional AI summaries.'
-                    : 'AI assistance is completely turned off. The entire CRM operates in 100% Offline Deterministic Mode with zero external API calls or cost.'}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 shrink-0">
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    id="toggle-master-ai"
-                    checked={aiUserSettings?.aiEnabled ?? true}
-                    onChange={(e) => updateAiUserSettings({ aiEnabled: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#ea0543]"></div>
-                </label>
-                <span className="text-xs font-semibold text-foreground">
-                  {(aiUserSettings?.aiEnabled ?? true) ? 'Active' : 'Offline'}
-                </span>
+                Model: <strong className="text-foreground">{liveUsageStats?.model || 'gemini-3.6-flash'}</strong>
               </div>
             </div>
 
@@ -1044,7 +1143,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
               </div>
             </div>
 
-            {/* AI Data Governance & Grounding Controls */}
+            {/* AI Security & Anti-Hallucination Guarantees (Section 2, 3, 23, 42) */}
             <div className="p-4 rounded-xl bg-muted/30 border border-border text-xs space-y-2">
               <span className="font-bold text-foreground block font-mono text-[11px]">
                 Active AI Data Governance Guarantees:
@@ -1056,7 +1155,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
                 </div>
                 <div className="flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>AI API Gateway isolated to secure server-side Node.js</span>
+                  <span>GEMINI_API_KEY isolated to server-side Node.js</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />

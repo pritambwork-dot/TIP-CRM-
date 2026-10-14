@@ -11,7 +11,6 @@ coverage/
 *.log
 .vercel
 .antigravity
-.vscode/
 
 # Secrets & Environment Files (Strictly server-side and never committed)
 .env

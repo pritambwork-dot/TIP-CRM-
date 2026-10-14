@@ -14,8 +14,7 @@ import {
   Target,
   Trash2,
   Lock,
-  ArrowRight,
-  Briefcase
+  ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Program, ProgramStatus } from '../../types';
@@ -53,9 +52,6 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
     programs, 
     updateProgram, 
     deleteProgram,
-    projects,
-    addProject,
-    deleteProject,
     people, 
     events, 
     tasks, 
@@ -67,7 +63,7 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
     hasPermission
   } = useCrm();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'projects' | 'participants' | 'events' | 'tasks' | 'documents'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'participants' | 'events' | 'tasks' | 'documents'>('overview');
   const [isEditing, setIsEditing] = useState(false);
 
   const program = programs.find(p => p.id === programId);
@@ -77,14 +73,6 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
   const [editDesc, setEditDesc] = useState('');
   const [editStatus, setEditStatus] = useState<ProgramStatus>('Active');
   const [editProgress, setEditProgress] = useState(0);
-
-  // New project form state
-  const [showAddProject, setShowAddProject] = useState(false);
-  const [newProjectName, setNewProjectName] = useState('');
-  const [newProjectDesc, setNewProjectDesc] = useState('');
-  const [newProjectOwner, setNewProjectOwner] = useState('');
-  const [newProjectStartDate, setNewProjectStartDate] = useState('');
-  const [newProjectEndDate, setNewProjectEndDate] = useState('');
 
   // New task form state
   const [showAddTask, setShowAddTask] = useState(false);
@@ -131,31 +119,6 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
     setShowAddTask(false);
   };
 
-  const handleCreateProject = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newProjectName.trim()) return;
-
-    addProject({
-      programId: program.id,
-      programName: program.name,
-      name: newProjectName.trim(),
-      description: newProjectDesc.trim(),
-      status: 'Active',
-      ownerName: newProjectOwner.trim() || currentUser.name,
-      startDate: newProjectStartDate || new Date().toISOString().split('T')[0],
-      endDate: newProjectEndDate || '2026-12-31',
-      participantIds: []
-    });
-
-    setNewProjectName('');
-    setNewProjectDesc('');
-    setNewProjectOwner('');
-    setNewProjectStartDate('');
-    setNewProjectEndDate('');
-    setShowAddProject(false);
-  };
-
-  const programProjects = projects.filter(prj => prj.programId === program.id);
   const programParticipants = people.filter(p => program.participantIds.includes(p.id) || p.programIds.includes(program.id));
   const programEvents = events.filter(e => e.programId === program.id);
   const programTasks = tasks.filter(t => t.relatedRecordId === program.id);
@@ -164,7 +127,6 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
 
   const tabsConfig = [
     { id: 'overview', label: 'Overview & Goals' },
-    { id: 'projects', label: `Projects (${programProjects.length})` },
     { id: 'participants', label: `Participants (${programParticipants.length})` },
     { id: 'events', label: `Workshops & Events (${programEvents.length})` },
     { id: 'tasks', label: `Tasks & Milestones (${programTasks.length})` },
@@ -319,8 +281,6 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-3 text-zinc-500 text-[11px]">
-            <span>{programProjects.length} projects</span>
-            <span>•</span>
             <span>{programParticipants.length} participants</span>
             <span>•</span>
             <span>{programEvents.length} events</span>
@@ -412,165 +372,7 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
             </motion.div>
           )}
 
-          {/* TAB 2: Projects */}
-          {activeTab === 'projects' && (
-            <motion.div 
-              key="projects"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
-              className="space-y-4"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-semibold text-zinc-900 font-serif">Program Projects</h4>
-                  <p className="text-xs text-zinc-500">Structured projects and initiatives delivering this program</p>
-                </div>
-                <ProtectedAction resource="projects" action="create">
-                  <Button
-                    onClick={() => setShowAddProject(!showAddProject)}
-                    id="btn-add-project"
-                    variant="crimson"
-                    size="sm"
-                    className="gap-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Project</span>
-                  </Button>
-                </ProtectedAction>
-              </div>
-
-              {showAddProject && (
-                <Card className="p-4 bg-zinc-50 border-zinc-200">
-                  <form onSubmit={handleCreateProject} className="space-y-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Project Name *</label>
-                      <Input 
-                        type="text"
-                        required
-                        placeholder="e.g. Youth Civic Tech Fellowship 2026"
-                        value={newProjectName}
-                        onChange={e => setNewProjectName(e.target.value)}
-                        className="bg-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Description</label>
-                      <Input 
-                        type="text"
-                        placeholder="Key milestones, objectives or cohort focus"
-                        value={newProjectDesc}
-                        onChange={e => setNewProjectDesc(e.target.value)}
-                        className="bg-white"
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Project Lead</label>
-                        <Input 
-                          type="text"
-                          placeholder={currentUser.name}
-                          value={newProjectOwner}
-                          onChange={e => setNewProjectOwner(e.target.value)}
-                          className="bg-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Start Date</label>
-                        <Input 
-                          type="date"
-                          value={newProjectStartDate}
-                          onChange={e => setNewProjectStartDate(e.target.value)}
-                          className="bg-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Target End Date</label>
-                        <Input 
-                          type="date"
-                          value={newProjectEndDate}
-                          onChange={e => setNewProjectEndDate(e.target.value)}
-                          className="bg-white"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end gap-2 pt-1">
-                      <Button type="button" variant="ghost" size="sm" onClick={() => setShowAddProject(false)}>
-                        Cancel
-                      </Button>
-                      <Button type="submit" variant="crimson" size="sm">
-                        Create Project
-                      </Button>
-                    </div>
-                  </form>
-                </Card>
-              )}
-
-              {programProjects.length === 0 ? (
-                <div className="p-8 text-center bg-zinc-50/60 rounded-2xl border border-dashed border-zinc-200">
-                  <Briefcase className="w-8 h-8 text-zinc-300 mx-auto mb-2" />
-                  <p className="text-xs font-medium text-zinc-600">No projects created under this program yet.</p>
-                  <p className="text-[11px] text-zinc-400 mt-1">Add projects to break this program down into specific deliverables or cohort cycles.</p>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {programProjects.map(prj => (
-                    <Card key={prj.id} className="p-4 hover:border-zinc-300 transition-colors">
-                      <div className="flex items-start justify-between">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <h5 className="text-sm font-semibold text-zinc-900">{prj.name}</h5>
-                            <Badge 
-                              variant={
-                                prj.status === 'Active' ? 'crimson' :
-                                prj.status === 'Planning' ? 'indigo' :
-                                prj.status === 'Completed' ? 'secondary' : 'outline'
-                              }
-                              className="text-[10px]"
-                            >
-                              {prj.status}
-                            </Badge>
-                          </div>
-                          {prj.description && (
-                            <p className="text-xs text-zinc-600 leading-relaxed">{prj.description}</p>
-                          )}
-                          <div className="flex items-center gap-3 text-[11px] text-zinc-400 pt-1">
-                            <span>Lead: <strong className="text-zinc-600 font-medium">{prj.ownerName}</strong></span>
-                            <span>•</span>
-                            <span>Timeline: {prj.startDate} - {prj.endDate}</span>
-                            {prj.participantIds && prj.participantIds.length > 0 && (
-                              <>
-                                <span>•</span>
-                                <span>{prj.participantIds.length} participants</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-
-                        <ProtectedAction resource="projects" action="delete" mode="disable" showLockIcon={false}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              if (confirm(`Are you sure you want to delete project "${prj.name}"?`)) {
-                                deleteProject(prj.id);
-                              }
-                            }}
-                            className="text-zinc-400 hover:text-rose-600 hover:bg-rose-50 -mt-1 -mr-1"
-                            title="Delete Project"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
-                        </ProtectedAction>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </motion.div>
-          )}
-
-          {/* TAB 3: Participants */}
+          {/* TAB 2: Participants */}
           {activeTab === 'participants' && (
             <motion.div 
               key="participants"
@@ -580,7 +382,7 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
               className="space-y-3"
             >
               <div>
-                <h4 className="text-sm font-semibold text-zinc-900 font-serif">Program Participants & Roster</h4>
+                <h4 className="text-sm font-semibold text-zinc-900 font-serif">Program Participants & Cohort</h4>
                 <p className="text-xs text-zinc-500">People enrolled in or actively participating in this program</p>
               </div>
 

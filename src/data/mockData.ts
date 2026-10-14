@@ -2,7 +2,6 @@ import {
   Person, 
   Organization, 
   Program, 
-  Project,
   EventItem, 
   ParticipantRecord, 
   TaskItem, 
@@ -28,11 +27,11 @@ import {
 
 export const INITIAL_USERS: UserProfile[] = [
   {
-    id: 'pritam',
+    id: 'u-1',
     authUserId: 'auth-pritam-001',
     organizationId: 'org-tip',
-    name: 'Pritam',
-    email: 'pritam@theinclusionproject.ca',
+    name: 'Pritam Biswas',
+    email: 'pritam@gmail.com',
     phone: '+1 (604) 555-0100',
     roleId: 'super_admin',
     role: 'staff',
@@ -47,14 +46,12 @@ export const INITIAL_USERS: UserProfile[] = [
       'High-impact philanthropic partnerships',
       'Team post, rule & AI orchestration configuration'
     ],
-    avatarInitials: 'P',
+    avatarInitials: 'PB',
     status: 'approved',
     isActive: true,
     emailVerified: true,
     adminApproved: true,
     mustChangePassword: false,
-    tempPassword: 'rkumar07',
-    passwordHash: 'rkumar07',
     onboardingCompleted: true,
     provider: 'google',
     approvedBy: 'System Seed',
@@ -71,17 +68,17 @@ export const INITIAL_USERS: UserProfile[] = [
     lastLogin: '2026-09-18T05:40:00Z'
   },
   {
-    id: 'divyanshaa',
-    authUserId: 'auth-divyanshaa-002',
+    id: 'u-2',
+    authUserId: 'auth-marcus-002',
     organizationId: 'org-tip',
-    name: 'Divyanshaa',
-    email: 'divyanshaa@theinclusionproject.ca',
+    name: 'Marcus Chen',
+    email: 'marcus.chen@inclusionproject.ca',
     phone: '+1 (604) 555-0142',
     roleId: 'staff_manager',
     role: 'staff',
     assignedRoleIds: ['staff_manager'],
     activeRoleId: 'staff_manager',
-    title: 'Operations & Programs Lead',
+    title: 'Operations & Programs Manager',
     postId: 'post-pm',
     postTitle: 'Program Manager',
     responsibilities: [
@@ -90,17 +87,15 @@ export const INITIAL_USERS: UserProfile[] = [
       'Grant deliverable and milestone tracking',
       'Cohort milestone reviews and evaluations'
     ],
-    avatarInitials: 'D',
+    avatarInitials: 'MC',
     status: 'approved',
     isActive: true,
     emailVerified: true,
     adminApproved: true,
     mustChangePassword: false,
-    tempPassword: 'rkumar07',
-    passwordHash: 'rkumar07',
     onboardingCompleted: true,
-    provider: 'google',
-    approvedBy: 'Pritam',
+    provider: 'email',
+    approvedBy: 'Pritam Biswas',
     approvedAt: '2025-02-01T09:00:00Z',
     assignedProgramIds: ['prog-1', 'prog-2', 'prog-3'],
     assignedEventIds: ['evt-1', 'evt-2', 'evt-3'],
@@ -112,6 +107,220 @@ export const INITIAL_USERS: UserProfile[] = [
     },
     createdAt: '2025-02-01T09:00:00Z',
     lastLogin: '2026-09-17T16:45:00Z'
+  },
+  {
+    id: 'u-3',
+    authUserId: 'auth-sarah-003',
+    organizationId: 'org-tip',
+    name: 'Sarah Thompson',
+    email: 'sarah.thompson@inclusionproject.ca',
+    phone: '+1 (416) 555-0192',
+    roleId: 'program_coordinator',
+    role: 'staff',
+    assignedRoleIds: ['program_coordinator', 'event_coordinator'],
+    activeRoleId: 'program_coordinator',
+    title: 'Youth Program Coordinator',
+    postId: 'post-pc',
+    postTitle: 'Program Coordinator',
+    responsibilities: [
+      'Manage day-to-day program activities',
+      'Coordinate cohort participants and outreach',
+      'Lead workshop and event logistics',
+      'Track attendance and manage honoraria eligibility',
+      'Execute follow-up check-ins within 48 hours'
+    ],
+    avatarInitials: 'ST',
+    status: 'approved',
+    isActive: true,
+    emailVerified: true,
+    adminApproved: true,
+    mustChangePassword: false,
+    onboardingCompleted: true,
+    provider: 'google',
+    approvedBy: 'Pritam Biswas',
+    approvedAt: '2025-03-10T10:15:00Z',
+    assignedProgramIds: ['prog-1', 'prog-2'],
+    assignedEventIds: ['evt-1', 'evt-2'],
+    dataScope: {
+      people: 'ASSIGNED',
+      programs: 'ASSIGNED',
+      events: 'ASSIGNED',
+      funding: 'NONE'
+    },
+    createdAt: '2025-03-10T10:15:00Z',
+    lastLogin: '2026-09-18T08:20:00Z'
+  },
+  {
+    id: 'u-4',
+    authUserId: 'auth-jordan-004',
+    organizationId: 'org-tip',
+    name: 'Jordan Patel',
+    email: 'jordan.volunteer@inclusionproject.ca',
+    phone: '+1 (604) 555-0188',
+    roleId: 'volunteer',
+    role: 'volunteer',
+    assignedRoleIds: ['volunteer'],
+    activeRoleId: 'volunteer',
+    title: 'Community Workshop Facilitator (Volunteer)',
+    postId: 'post-vol',
+    postTitle: 'Volunteer',
+    responsibilities: [
+      'Event registration check-in support',
+      'Participant welcome and materials distribution',
+      'Workshop breakout note-taking'
+    ],
+    avatarInitials: 'JP',
+    status: 'approved',
+    isActive: true,
+    emailVerified: true,
+    adminApproved: true,
+    mustChangePassword: false,
+    onboardingCompleted: true,
+    provider: 'google',
+    approvedBy: 'Marcus Chen',
+    approvedAt: '2025-05-12T14:00:00Z',
+    assignedProgramIds: ['prog-1'],
+    assignedEventIds: ['evt-1'],
+    dataScope: {
+      people: 'ASSIGNED',
+      programs: 'ASSIGNED',
+      events: 'ASSIGNED',
+      funding: 'NONE'
+    },
+    createdAt: '2025-05-12T14:00:00Z',
+    lastLogin: '2026-09-16T11:00:00Z'
+  },
+  {
+    id: 'u-5',
+    authUserId: 'auth-elena-005',
+    organizationId: 'org-tip',
+    name: 'Elena Rostova',
+    email: 'elena.rostova@gmail.com',
+    phone: '+1 (416) 555-0177',
+    roleId: 'staff_member',
+    role: 'staff',
+    assignedRoleIds: ['staff_member'],
+    activeRoleId: 'staff_member',
+    title: 'Applicant (Access Pending)',
+    avatarInitials: 'ER',
+    status: 'pending',
+    isActive: false,
+    emailVerified: true,
+    adminApproved: false,
+    mustChangePassword: false,
+    onboardingCompleted: false,
+    provider: 'google',
+    requestedAt: '2026-09-18T04:30:00Z',
+    assignedProgramIds: ['prog-1'],
+    assignedEventIds: ['evt-1'],
+    dataScope: {
+      people: 'ASSIGNED',
+      programs: 'ASSIGNED',
+      events: 'ASSIGNED',
+      funding: 'NONE'
+    },
+    createdAt: '2026-09-18T04:30:00Z'
+  },
+  {
+    id: 'u-6',
+    authUserId: 'auth-david-006',
+    organizationId: 'org-tip',
+    name: 'David Kalu',
+    email: 'david.kalu@gmail.com',
+    roleId: 'volunteer',
+    role: 'volunteer',
+    assignedRoleIds: ['volunteer'],
+    activeRoleId: 'volunteer',
+    title: 'Applicant (Rejected)',
+    avatarInitials: 'DK',
+    status: 'rejected',
+    isActive: false,
+    emailVerified: true,
+    adminApproved: false,
+    mustChangePassword: false,
+    onboardingCompleted: false,
+    provider: 'google',
+    requestedAt: '2026-09-15T11:20:00Z',
+    rejectionReason: 'User is not currently associated with TIP active programs.',
+    assignedProgramIds: [],
+    assignedEventIds: [],
+    dataScope: {
+      people: 'ASSIGNED',
+      programs: 'ASSIGNED',
+      events: 'ASSIGNED',
+      funding: 'NONE'
+    },
+    createdAt: '2026-09-15T11:20:00Z'
+  },
+  {
+    id: 'u-7',
+    authUserId: 'auth-alex-007',
+    organizationId: 'org-tip',
+    name: 'Alex Mercer',
+    email: 'alex.mercer@gmail.com',
+    roleId: 'staff_member',
+    role: 'staff',
+    assignedRoleIds: ['staff_member'],
+    activeRoleId: 'staff_member',
+    title: 'Former Coordinator (Disabled)',
+    avatarInitials: 'AM',
+    status: 'disabled',
+    isActive: false,
+    emailVerified: true,
+    adminApproved: true,
+    mustChangePassword: false,
+    onboardingCompleted: false,
+    provider: 'email',
+    assignedProgramIds: [],
+    assignedEventIds: [],
+    dataScope: {
+      people: 'ASSIGNED',
+      programs: 'ASSIGNED',
+      events: 'ASSIGNED',
+      funding: 'NONE'
+    },
+    createdAt: '2025-04-10T10:00:00Z'
+  },
+  {
+    id: 'u-8',
+    authUserId: 'auth-chloe-008',
+    organizationId: 'org-tip',
+    name: 'Chloe Vance',
+    email: 'chloe.vance@inclusionproject.ca',
+    phone: '+1 (604) 555-0199',
+    roleId: 'program_coordinator',
+    role: 'staff',
+    assignedRoleIds: ['program_coordinator', 'event_coordinator'],
+    activeRoleId: 'program_coordinator',
+    title: 'Program Coordinator',
+    postId: 'post-pc',
+    postTitle: 'Program Coordinator',
+    responsibilities: [
+      'Support youth program sessions',
+      'Track participant registration and attendance',
+      'Follow up on post-workshop surveys'
+    ],
+    avatarInitials: 'CV',
+    status: 'approved',
+    isActive: true,
+    emailVerified: true,
+    adminApproved: true,
+    mustChangePassword: true,
+    tempPassword: 'TempPassword123!',
+    onboardingCompleted: false,
+    provider: 'email',
+    approvedBy: 'Pritam Biswas',
+    approvedAt: '2026-09-23T10:00:00Z',
+    assignedProgramIds: ['prog-1', 'prog-2'],
+    assignedEventIds: ['evt-1'],
+    dataScope: {
+      people: 'ASSIGNED',
+      programs: 'ASSIGNED',
+      events: 'ASSIGNED',
+      funding: 'NONE'
+    },
+    createdAt: '2026-09-23T10:00:00Z',
+    lastLogin: undefined
   }
 ];
 
@@ -379,7 +588,6 @@ export const INITIAL_PROGRAMS: Program[] = [
     ownerEmail: 'marcus.chen@inclusionproject.ca',
     participantIds: ['p-1', 'p-6'],
     partnerIds: ['org-4', 'org-2'],
-    projectIds: ['proj-1', 'proj-2'],
     progressPercent: 78,
     focusAreas: ['Employment Equity', 'Workplace Scorecards', 'Workforce Diversity'],
     budgetCad: 125000,
@@ -397,7 +605,6 @@ export const INITIAL_PROGRAMS: Program[] = [
     ownerEmail: 'maya.lin@inclusionproject.ca',
     participantIds: ['p-4', 'p-7'],
     partnerIds: ['org-1', 'org-3', 'org-6'],
-    projectIds: ['proj-3'],
     progressPercent: 64,
     focusAreas: ['Youth Leadership', 'Climate Justice', 'Design Justice'],
     budgetCad: 85000,
@@ -415,7 +622,6 @@ export const INITIAL_PROGRAMS: Program[] = [
     ownerEmail: 'maya.lin@inclusionproject.ca',
     participantIds: ['p-2'],
     partnerIds: ['org-5', 'org-2'],
-    projectIds: ['proj-4'],
     progressPercent: 52,
     focusAreas: ['REDI Baseline Assessment', 'Intersectional Analytics', 'Systems Change'],
     budgetCad: 95000,
@@ -433,67 +639,11 @@ export const INITIAL_PROGRAMS: Program[] = [
     ownerEmail: 'marcus.chen@inclusionproject.ca',
     participantIds: [],
     partnerIds: ['org-4'],
-    projectIds: [],
     progressPercent: 20,
     focusAreas: ['Executive Summits', 'Multi-Sector Partnerships', 'Policy Briefs'],
     budgetCad: 60000,
     outcomes: 'Annual national partners roundtable in Toronto & Vancouver; ministerial policy recommendations presented.',
     createdAt: '2026-08-10'
-  }
-];
-
-export const INITIAL_PROJECTS: Project[] = [
-  {
-    id: 'proj-1',
-    programId: 'prog-1',
-    programName: 'Employment Equity Partnership (EEP)',
-    name: 'Workplace Equity Scorecard (WES) 2026 Cohort',
-    description: 'Data collection, organizational audit, and benchmarking for 12 corporate employer partners.',
-    status: 'Active',
-    ownerName: 'Marcus Chen',
-    startDate: '2026-04-15',
-    endDate: '2026-09-30',
-    participantIds: ['p-1', 'p-6'],
-    createdAt: '2026-04-01'
-  },
-  {
-    id: 'proj-2',
-    programId: 'prog-1',
-    programName: 'Employment Equity Partnership (EEP)',
-    name: 'Racialized Talent Career Pathways Pilot',
-    description: 'Mentorship and leadership accelerator connecting Black and Indigenous professionals with senior executives.',
-    status: 'Active',
-    ownerName: 'Marcus Chen',
-    startDate: '2026-05-01',
-    endDate: '2026-11-15',
-    participantIds: ['p-1'],
-    createdAt: '2026-04-20'
-  },
-  {
-    id: 'proj-3',
-    programId: 'prog-2',
-    programName: 'Youth-Led Community of Practice (YCoP)',
-    name: 'Youth Climate & Design Justice Lab',
-    description: 'Bi-weekly collaborative workshops for 40 young leaders on climate equity and grassroots organizing.',
-    status: 'Active',
-    ownerName: 'Maya Lin',
-    startDate: '2026-02-01',
-    endDate: '2026-08-31',
-    participantIds: ['p-4', 'p-7'],
-    createdAt: '2026-01-20'
-  },
-  {
-    id: 'proj-4',
-    programId: 'prog-3',
-    programName: 'REDI Framework Solutions (Racial Equity, Diversity & Inclusion)',
-    name: 'Municipal Institutional REDI Audit',
-    description: 'Comprehensive equity audit and policy review for municipal government partners in Ontario.',
-    status: 'Active',
-    ownerName: 'Maya Lin',
-    startDate: '2026-03-15',
-    endDate: '2026-10-31',
-    participantIds: ['p-2'],
-    createdAt: '2026-03-01'
   }
 ];
 
@@ -836,11 +986,11 @@ export const INITIAL_TASK_ASSIGNMENT_RULES: TaskAssignmentRule[] = [
     taskTemplateName: 'Record attendance and participation metrics',
     postId: 'post-pc',
     postName: 'Program Coordinator',
-    defaultAssigneeId: 'divyanshaa',
-    defaultAssigneeName: 'Divyanshaa',
+    defaultAssigneeId: 'u-3',
+    defaultAssigneeName: 'Sarah Thompson',
     assignmentMode: 'Suggested',
     isActive: true,
-    createdBy: 'Pritam',
+    createdBy: 'Pritam Biswas',
     createdAt: '2025-01-15'
   },
   {
@@ -853,11 +1003,11 @@ export const INITIAL_TASK_ASSIGNMENT_RULES: TaskAssignmentRule[] = [
     taskTemplateName: 'Follow up with workshop participants',
     postId: 'post-pc',
     postName: 'Program Coordinator',
-    defaultAssigneeId: 'divyanshaa',
-    defaultAssigneeName: 'Divyanshaa',
+    defaultAssigneeId: 'u-3',
+    defaultAssigneeName: 'Sarah Thompson',
     assignmentMode: 'Suggested',
     isActive: true,
-    createdBy: 'Pritam',
+    createdBy: 'Pritam Biswas',
     createdAt: '2025-01-15'
   },
   {
@@ -869,25 +1019,25 @@ export const INITIAL_TASK_ASSIGNMENT_RULES: TaskAssignmentRule[] = [
     taskTemplateName: 'Prepare monthly program report',
     postId: 'post-pm',
     postName: 'Program Manager',
-    defaultAssigneeId: 'divyanshaa',
-    defaultAssigneeName: 'Divyanshaa',
+    defaultAssigneeId: 'u-2',
+    defaultAssigneeName: 'Marcus Chen',
     assignmentMode: 'Suggested',
     isActive: true,
-    createdBy: 'Pritam',
+    createdBy: 'Pritam Biswas',
     createdAt: '2025-01-15'
   }
 ];
 
 export const INITIAL_TASKS: TaskItem[] = [
-  // 1. Divyanshaa (Operations & Programs Lead) - Overdue
+  // 1. Sarah Thompson (Program Coordinator) - Overdue
   {
     id: 'tsk-101',
     title: 'Prepare participant onboarding list for Youth Leadership Initiative',
     description: 'Verify youth contact info, consent agreements, and dietary/transit subsidy requests.',
-    owner: 'Divyanshaa',
-    assignedToId: 'divyanshaa',
-    assignedPostId: 'post-pm',
-    assignedPostName: 'Program Manager',
+    owner: 'Sarah Thompson',
+    assignedToId: 'u-3',
+    assignedPostId: 'post-pc',
+    assignedPostName: 'Program Coordinator',
     programId: 'prog-1',
     programName: 'Youth Leadership & Civic Equity Initiative',
     dueDate: '2026-09-21', // Overdue
@@ -895,20 +1045,20 @@ export const INITIAL_TASKS: TaskItem[] = [
     status: 'To Do',
     source: 'PROGRAM',
     assignmentMethod: 'SUGGESTED',
-    suggestedReason: 'Assigned post: Program Manager for Youth Leadership',
+    suggestedReason: 'Assigned post: Program Coordinator for Youth Leadership',
     aiAssisted: true,
     notes: '3 participants pending confirmation; phone outreach completed.',
     createdAt: '2026-09-12'
   },
-  // 2. Divyanshaa - Due Today #1
+  // 2. Sarah Thompson - Due Today #1
   {
     id: 'tsk-102',
     title: 'Follow up with workshop participants from Fall Kickoff',
     description: 'Distribute summary notes, slide deck, and 48-hour pulse check survey.',
-    owner: 'Divyanshaa',
-    assignedToId: 'divyanshaa',
-    assignedPostId: 'post-pm',
-    assignedPostName: 'Program Manager',
+    owner: 'Sarah Thompson',
+    assignedToId: 'u-3',
+    assignedPostId: 'post-pc',
+    assignedPostName: 'Program Coordinator',
     eventId: 'evt-1',
     eventName: 'Community Accessibility & Plain Language Workshop',
     programId: 'prog-2',
@@ -923,15 +1073,15 @@ export const INITIAL_TASKS: TaskItem[] = [
     notes: 'Draft follow-up template prepared by AI Assistant.',
     createdAt: '2026-09-16'
   },
-  // 3. Divyanshaa - Due Today #2
+  // 3. Sarah Thompson - Due Today #2
   {
     id: 'tsk-103',
     title: 'Confirm ASL interpreter & stage captioning for Youth Civic Policy Lab',
     description: 'Ensure captioning technician and two ASL interpreters are confirmed.',
-    owner: 'Divyanshaa',
-    assignedToId: 'divyanshaa',
-    assignedPostId: 'post-pm',
-    assignedPostName: 'Program Manager',
+    owner: 'Sarah Thompson',
+    assignedToId: 'u-3',
+    assignedPostId: 'post-pc',
+    assignedPostName: 'Program Coordinator',
     eventId: 'evt-2',
     eventName: 'Youth Civic Policy & Deputation Lab',
     dueDate: '2026-09-23', // Due today
@@ -942,15 +1092,15 @@ export const INITIAL_TASKS: TaskItem[] = [
     notes: 'Booking code: ASL-TOR-2026.',
     createdAt: '2026-09-15'
   },
-  // 4. Divyanshaa - Due Soon
+  // 4. Sarah Thompson - Due Soon
   {
     id: 'tsk-104',
     title: 'Review attendance & honorarium eligibility from summer training module',
     description: 'Reconcile attendance logs with youth stipend eligibility threshold (min 80%).',
-    owner: 'Divyanshaa',
-    assignedToId: 'divyanshaa',
-    assignedPostId: 'post-pm',
-    assignedPostName: 'Program Manager',
+    owner: 'Sarah Thompson',
+    assignedToId: 'u-3',
+    assignedPostId: 'post-pc',
+    assignedPostName: 'Program Coordinator',
     programId: 'prog-1',
     programName: 'Youth Leadership & Civic Equity Initiative',
     dueDate: '2026-09-26', // Due soon
@@ -961,13 +1111,13 @@ export const INITIAL_TASKS: TaskItem[] = [
     notes: '18 youth enrolled; 14 fully eligible for completion certificate.',
     createdAt: '2026-09-10'
   },
-  // 5. Divyanshaa (Program Manager) - Due Soon
+  // 5. Marcus Chen (Program Manager) - Due Soon
   {
     id: 'tsk-105',
     title: 'Submit Q3 interim progress report to Ontario Trillium Foundation',
     description: 'Compile diversity scorecards, participant demographics, and financial variance.',
-    owner: 'Divyanshaa',
-    assignedToId: 'divyanshaa',
+    owner: 'Marcus Chen',
+    assignedToId: 'u-2',
     assignedPostId: 'post-pm',
     assignedPostName: 'Program Manager',
     relatedRecordType: 'Funding',
@@ -981,13 +1131,13 @@ export const INITIAL_TASKS: TaskItem[] = [
     notes: 'Draft financial variance and participant demographic metrics attached.',
     createdAt: '2026-09-01'
   },
-  // 6. Divyanshaa (Program Manager) - Overdue
+  // 6. Marcus Chen (Program Manager) - Overdue
   {
     id: 'tsk-106',
     title: 'Review coordinator monthly progress & milestone deliverables',
     description: 'One-on-one reviews with Program Coordinators on cohort engagement.',
-    owner: 'Divyanshaa',
-    assignedToId: 'divyanshaa',
+    owner: 'Marcus Chen',
+    assignedToId: 'u-2',
     assignedPostId: 'post-pm',
     assignedPostName: 'Program Manager',
     dueDate: '2026-09-20', // Overdue
@@ -998,13 +1148,13 @@ export const INITIAL_TASKS: TaskItem[] = [
     notes: 'Monthly manager review cadence.',
     createdAt: '2026-09-08'
   },
-  // 7. Divyanshaa (Program Manager) - Due Today
+  // 7. Marcus Chen (Program Manager) - Due Today
   {
     id: 'tsk-109',
     title: 'Approve curriculum adjustments for Civic Accessibility Lab Cohort B',
     description: 'Review Plain Language adaptation guidelines submitted by community advisors.',
-    owner: 'Divyanshaa',
-    assignedToId: 'divyanshaa',
+    owner: 'Marcus Chen',
+    assignedToId: 'u-2',
     assignedPostId: 'post-pm',
     assignedPostName: 'Program Manager',
     programId: 'prog-2',
@@ -1017,15 +1167,15 @@ export const INITIAL_TASKS: TaskItem[] = [
     notes: 'Approved in principle by advisory committee.',
     createdAt: '2026-09-19'
   },
-  // 8. Divyanshaa - Due Today
+  // 8. Jordan Patel (Volunteer) - Due Today
   {
     id: 'tsk-107',
     title: 'Confirm participant check-ins at Welcome Desk',
     description: 'Verify registrations on the check-in tablet and distribute name badges.',
-    owner: 'Divyanshaa',
-    assignedToId: 'divyanshaa',
-    assignedPostId: 'post-pm',
-    assignedPostName: 'Program Manager',
+    owner: 'Jordan Patel',
+    assignedToId: 'u-4',
+    assignedPostId: 'post-vol',
+    assignedPostName: 'Volunteer',
     eventId: 'evt-1',
     eventName: 'Community Accessibility & Plain Language Workshop',
     dueDate: '2026-09-23', // Due today
@@ -1036,13 +1186,13 @@ export const INITIAL_TASKS: TaskItem[] = [
     notes: 'Tablet #2 assigned for welcome table.',
     createdAt: '2026-09-15'
   },
-  // 9. Pritam (Executive Director & Super Admin) - Due Today
+  // 9. Pritam Biswas (Executive Director) - Due Today
   {
     id: 'tsk-108',
     title: 'Review pending community applicant access requests & post assignments',
     description: 'Confirm roles, data scopes, and designated posts for pending applicants.',
-    owner: 'Pritam',
-    assignedToId: 'pritam',
+    owner: 'Pritam Biswas',
+    assignedToId: 'u-1',
     assignedPostId: 'post-ed',
     assignedPostName: 'Executive Director',
     dueDate: '2026-09-23', // Due today
@@ -1053,13 +1203,13 @@ export const INITIAL_TASKS: TaskItem[] = [
     notes: '1 pending request awaiting approval.',
     createdAt: '2026-09-23'
   },
-  // 10. Pritam (Executive Director & Super Admin) - Overdue
+  // 10. Pritam Biswas (Executive Director) - Overdue
   {
     id: 'tsk-110',
     title: 'Sign off on Q3 Federal Heritage Multi-Year Contribution Agreement',
     description: 'Review compliance clauses and sign executive authorization for fiscal tranche 2.',
-    owner: 'Pritam',
-    assignedToId: 'pritam',
+    owner: 'Pritam Biswas',
+    assignedToId: 'u-1',
     assignedPostId: 'post-ed',
     assignedPostName: 'Executive Director',
     relatedRecordType: 'Funding',
@@ -1079,18 +1229,18 @@ export const INITIAL_TASK_ASSIGNMENTS: TaskAssignmentRecord[] = [
   {
     id: 'ta-1',
     taskId: 'tsk-101',
-    userId: 'divyanshaa',
-    userName: 'Divyanshaa',
-    assignedBy: 'Pritam',
+    userId: 'u-3',
+    userName: 'Sarah Thompson',
+    assignedBy: 'Pritam Biswas',
     assignedAt: '2026-09-12T10:00:00Z',
     isCurrent: true
   },
   {
     id: 'ta-2',
     taskId: 'tsk-102',
-    userId: 'divyanshaa',
-    userName: 'Divyanshaa',
-    assignedBy: 'Pritam',
+    userId: 'u-3',
+    userName: 'Sarah Thompson',
+    assignedBy: 'Marcus Chen',
     assignedAt: '2026-09-16T14:30:00Z',
     isCurrent: true
   }
@@ -1100,17 +1250,17 @@ export const INITIAL_TASK_ACTIVITY: TaskActivityRecord[] = [
   {
     id: 'tact-1',
     taskId: 'tsk-102',
-    userId: 'pritam',
-    userName: 'Pritam',
+    userId: 'u-2',
+    userName: 'Marcus Chen',
     activityType: 'Assigned',
-    metadata: { assignedTo: 'Divyanshaa', post: 'Program Manager' },
+    metadata: { assignedTo: 'Sarah Thompson', post: 'Program Coordinator' },
     createdAt: '2026-09-16T14:30:00Z'
   },
   {
     id: 'tact-2',
     taskId: 'tsk-102',
-    userId: 'divyanshaa',
-    userName: 'Divyanshaa',
+    userId: 'u-3',
+    userName: 'Sarah Thompson',
     activityType: 'AI Suggested',
     metadata: { note: 'Drafted follow-up outreach email with Gemini 2.5 Flash' },
     createdAt: '2026-09-17T09:15:00Z'
@@ -1229,7 +1379,7 @@ export const INITIAL_INTERACTIONS: InteractionItem[] = [
     date: '2026-09-18',
     summary: 'Hosted pilot onboarding breakout for 12 new youth cohort fellows',
     details: 'Facilitated experiential exercises on civic delegation strategy and youth-led committee representations.',
-    authorName: 'Ruth Mojeed Ramirez',
+    authorName: 'Pritam Biswas',
     createdAt: '2026-09-18'
   },
   {
@@ -1372,7 +1522,7 @@ export const INITIAL_INTERACTIONS: InteractionItem[] = [
     date: '2026-09-13',
     summary: 'Delivered mid-term research briefing on grassroots civic engagement metrics',
     details: 'Analyzed longitudinal participation metrics across non-profit leadership programs.',
-    authorName: 'Ruth Mojeed Ramirez',
+    authorName: 'Pritam Biswas',
     createdAt: '2026-09-13'
   },
   {
@@ -1547,7 +1697,7 @@ export const INITIAL_INTERACTIONS: InteractionItem[] = [
     date: '2026-09-05',
     summary: 'Funder roundtable presentation on grassroots non-profit sustainability',
     details: 'Showcased TIP impact metrics and participant empowerment case studies to regional donors.',
-    authorName: 'Ruth Mojeed Ramirez',
+    authorName: 'Pritam Biswas',
     createdAt: '2026-09-05'
   },
 
@@ -1871,8 +2021,6 @@ export const INITIAL_DOCUMENTS: DocumentItem[] = [
     relatedName: 'Civic Accessibility & Digital Inclusion Lab',
     addedBy: 'Maya Lin',
     addedAt: '2026-09-10',
-    isConfidential: false,
-    accessTier: 'all',
     description: 'Master guideline document used for testing community center and charity website accessibility.'
   },
   {
@@ -1885,8 +2033,6 @@ export const INITIAL_DOCUMENTS: DocumentItem[] = [
     relatedName: 'Youth Leadership & Civic Equity Initiative',
     addedBy: 'Marcus Chen',
     addedAt: '2026-09-02',
-    isConfidential: true,
-    accessTier: 'staff',
     description: 'Attendance records, workshop milestones, and verified direct-deposit payment references.'
   },
   {
@@ -1899,8 +2045,6 @@ export const INITIAL_DOCUMENTS: DocumentItem[] = [
     relatedName: 'Systems-Level Racial Equity in Nonprofits Research',
     addedBy: 'Maya Lin',
     addedAt: '2026-08-18',
-    isConfidential: false,
-    accessTier: 'all',
     description: 'Ethics board review documents, survey instruments, and literature review folder.'
   },
   {
@@ -1913,8 +2057,6 @@ export const INITIAL_DOCUMENTS: DocumentItem[] = [
     relatedName: 'OTF Seed Grant 2026-27',
     addedBy: 'Maya Lin',
     addedAt: '2026-01-20',
-    isConfidential: true,
-    accessTier: 'management',
     description: 'Official countersigned contract #SED-2025-0914.'
   },
   {
@@ -1927,8 +2069,6 @@ export const INITIAL_DOCUMENTS: DocumentItem[] = [
     relatedName: 'Community Accessibility & Plain Language Workshop',
     addedBy: 'Kendra Redsky',
     addedAt: '2026-09-14',
-    isConfidential: false,
-    accessTier: 'all',
     description: 'High-contrast large print presentation slides and accessible PDF participant handouts.'
   }
 ];
@@ -1997,9 +2137,9 @@ export const INITIAL_AI_SUGGESTIONS: AiSuggestion[] = [
   {
     id: 'sug-1',
     organizationId: 'org-tip',
-    userId: 'divyanshaa', // Divyanshaa
-    targetPostId: 'post-pm',
-    targetPostName: 'Program Manager',
+    userId: 'u-3', // Sarah Thompson
+    targetPostId: 'post-pc',
+    targetPostName: 'Program Coordinator',
     category: 'For You',
     suggestionType: 'event_prep',
     title: 'Pre-Event Accessibility Checklist for Saturday Workshop',
@@ -2025,8 +2165,8 @@ export const INITIAL_AI_SUGGESTIONS: AiSuggestion[] = [
         tasks: [
           {
             title: 'Verify ASL interpreter contract and audio loop compatibility for Saturday workshop',
-            assignedToId: 'divyanshaa',
-            assignedToName: 'Divyanshaa',
+            assignedToId: 'u-3',
+            assignedToName: 'Sarah Thompson',
             programId: 'prog-2',
             dueDate: '2026-09-24',
             priority: 'Urgent',
@@ -2034,8 +2174,8 @@ export const INITIAL_AI_SUGGESTIONS: AiSuggestion[] = [
           },
           {
             title: 'Dispatch dietary & sensory accommodation reminder to 14 registered participants',
-            assignedToId: 'divyanshaa',
-            assignedToName: 'Divyanshaa',
+            assignedToId: 'u-3',
+            assignedToName: 'Sarah Thompson',
             programId: 'prog-2',
             dueDate: '2026-09-24',
             priority: 'High',
@@ -2051,16 +2191,16 @@ export const INITIAL_AI_SUGGESTIONS: AiSuggestion[] = [
   {
     id: 'sug-2',
     organizationId: 'org-tip',
-    userId: 'divyanshaa', // Divyanshaa
-    targetPostId: 'post-pm',
-    targetPostName: 'Program Manager',
+    userId: 'u-3', // Sarah Thompson
+    targetPostId: 'post-pc',
+    targetPostName: 'Program Coordinator',
     category: 'For You',
     suggestionType: 'task_overdue',
     title: '2 Priority Tasks Overdue in Civic Inclusion Program',
     description: 'Tasks "Finalize workshop accessibility audit checklist" and "Speaker confirmation" are past due.',
     observed: 'Task "Finalize workshop accessibility audit checklist" was due on 2026-09-19 (4 days overdue). Task "Speaker honoraria schedule" was due on 2026-09-21 (2 days overdue).',
     interpretation: 'Unfinished audit checklists will delay slide deck production scheduled for tomorrow morning.',
-    suggestion: 'Reprioritize this morning to finalize the audit checklist draft or request assistance from Pritam to review speaker paperwork.',
+    suggestion: 'Reprioritize this morning to finalize the audit checklist draft or request assistance from Marcus Chen to review speaker paperwork.',
     severity: 'Important',
     supportingData: {
       overdueTasksCount: 2,
@@ -2077,9 +2217,9 @@ export const INITIAL_AI_SUGGESTIONS: AiSuggestion[] = [
       payload: {
         tasks: [
           {
-            title: 'Co-review workshop checklist draft with Pritam',
-            assignedToId: 'divyanshaa',
-            assignedToName: 'Divyanshaa',
+            title: 'Co-review workshop checklist draft with Marcus Chen',
+            assignedToId: 'u-3',
+            assignedToName: 'Sarah Thompson',
             programId: 'prog-2',
             dueDate: '2026-09-23',
             priority: 'High',
@@ -2102,7 +2242,7 @@ export const INITIAL_AI_SUGGESTIONS: AiSuggestion[] = [
     description: 'Critical cohort onboarding milestones currently lack an assigned team member.',
     observed: 'There are 3 open tasks created in the Youth Leadership Initiative without an assigned post or staff member. 1 of these tasks is scheduled to start within 48 hours.',
     interpretation: 'Without an assigned owner, milestone deliverables for participant stipend verification risk missing the bi-weekly accounting cutoff on Friday.',
-    suggestion: 'Assign these 3 tasks to the Program Manager (Divyanshaa) or Executive Director (Pritam) according to post responsibilities.',
+    suggestion: 'Assign these 3 tasks to the Program Coordinator (Sarah Thompson) or Program Manager (Marcus Chen) according to post responsibilities.',
     severity: 'Critical',
     supportingData: {
       unassignedCount: 3,
@@ -2111,14 +2251,14 @@ export const INITIAL_AI_SUGGESTIONS: AiSuggestion[] = [
     },
     actionPreview: {
       id: 'act-prev-3',
-      title: 'Assign Unassigned Tasks to Program Manager',
-      description: 'Route the 3 unassigned cohort tasks to Divyanshaa (post-pm).',
+      title: 'Assign Unassigned Tasks to Program Coordinator',
+      description: 'Route the 3 unassigned cohort tasks to Sarah Thompson (post-pc).',
       actionType: 'assign_task',
       targetRecordType: 'Task',
       payload: {
         taskIds: ['task-unassigned-1', 'task-unassigned-2', 'task-unassigned-3'],
-        assigneeId: 'divyanshaa',
-        assigneeName: 'Divyanshaa'
+        assigneeId: 'u-3',
+        assigneeName: 'Sarah Thompson'
       },
       requiresConfirmation: true
     },
@@ -2134,7 +2274,7 @@ export const INITIAL_AI_SUGGESTIONS: AiSuggestion[] = [
     description: 'Avoid manual checklist creation whenever an attendee flags accessibility requirements.',
     observed: 'Over the last 30 days, 6 event registrants submitted accessibility accommodations. In each case, a staff member manually created 2-3 coordination tasks 2-4 days after registration.',
     interpretation: 'A standardized trigger rule will guarantee accommodations are processed immediately without depending on manual review.',
-    suggestion: 'Create an automatic task assignment rule: "When a participant registers with accessibility requirements, automatically create an Accessibility Verification task assigned to Program Manager".',
+    suggestion: 'Create an automatic task assignment rule: "When a participant registers with accessibility requirements, automatically create an Accessibility Verification task assigned to Program Coordinator".',
     severity: 'Suggested',
     supportingData: {
       manualOccurrencesLastMonth: 6,
@@ -2150,8 +2290,8 @@ export const INITIAL_AI_SUGGESTIONS: AiSuggestion[] = [
         name: 'Auto-create Accessibility Review on Registration',
         description: 'Generates coordinator task whenever a participant registers with specific accommodations.',
         triggerType: 'EventParticipantRegistered',
-        assignedPostId: 'post-pm',
-        assignedUserId: 'divyanshaa',
+        assignedPostId: 'post-pc',
+        assignedUserId: 'u-3',
         priority: 'High',
         daysUntilDue: 2,
         taskTitleTemplate: 'Review accommodations for {{participant_name}} ({{event_name}})',
@@ -2188,16 +2328,16 @@ export const INITIAL_AI_SUGGESTIONS: AiSuggestion[] = [
         tasks: [
           {
             title: 'Schedule Q3 grant progress sync with David O\'Connor (OTF)',
-            assignedToId: 'divyanshaa',
-            assignedToName: 'Divyanshaa',
+            assignedToId: 'u-2',
+            assignedToName: 'Marcus Chen',
             dueDate: '2026-09-26',
             priority: 'Medium',
             status: 'Todo'
           },
           {
             title: 'Quarterly partner alignment check-in with Toronto Accessibility Network',
-            assignedToId: 'divyanshaa',
-            assignedToName: 'Divyanshaa',
+            assignedToId: 'u-2',
+            assignedToName: 'Marcus Chen',
             dueDate: '2026-09-28',
             priority: 'Medium',
             status: 'Todo'
@@ -2215,8 +2355,8 @@ export const INITIAL_AI_SUGGESTIONS: AiSuggestion[] = [
     category: 'Organization',
     suggestionType: 'workload_concentration',
     title: 'Workload Concentration: 72% of Active Tasks Assigned to 1 Coordinator',
-    description: 'Divyanshaa holds 8 of 11 open tasks across Civic Inclusion and Youth Leadership.',
-    observed: 'Of 11 open tasks across all programs, 8 are assigned to Divyanshaa (post-pm) and 3 to Pritam (post-ed). 3 tasks have identical due dates on 2026-09-25.',
+    description: 'Sarah Thompson holds 8 of 11 open tasks across Civic Inclusion and Youth Leadership.',
+    observed: 'Of 11 open tasks across all programs, 8 are assigned to Sarah Thompson (post-pc), 2 to Marcus Chen (post-pm), and 1 to Maya Lin. 3 tasks have identical due dates on 2026-09-25.',
     interpretation: 'Delivery bottleneck risk is elevated for the upcoming weekend workshop due to task bundling on a single coordinator.',
     suggestion: 'Rebalance logistics tasks: consider delegating participant check-in calls and catering coordination to available support team members.',
     severity: 'Important',
@@ -2234,11 +2374,11 @@ export const INITIAL_BEHAVIOR_SNAPSHOTS: AiBehaviorSnapshot[] = [
   {
     id: 'snap-sarah-1',
     organizationId: 'org-tip',
-    userId: 'divyanshaa',
-    userName: 'Divyanshaa',
-    postId: 'post-pm',
-    postTitle: 'Program Manager',
-    roleId: 'staff_manager',
+    userId: 'u-3',
+    userName: 'Sarah Thompson',
+    postId: 'post-pc',
+    postTitle: 'Program Coordinator',
+    roleId: 'staff_member',
     period: 'Current (Sep 2026)',
     metrics: {
       openTaskCount: 8,
@@ -2258,8 +2398,8 @@ export const INITIAL_BEHAVIOR_SNAPSHOTS: AiBehaviorSnapshot[] = [
   {
     id: 'snap-org-1',
     organizationId: 'org-tip',
-    userId: 'pritam',
-    userName: 'Pritam',
+    userId: 'u-1',
+    userName: 'Pritam Biswas',
     postId: 'post-ed',
     postTitle: 'Executive Director',
     roleId: 'super_admin',
@@ -2285,7 +2425,7 @@ export const INITIAL_AI_CONVERSATIONS: AiConversation[] = [
   {
     id: 'conv-1',
     organizationId: 'org-tip',
-    userId: 'divyanshaa',
+    userId: 'u-3',
     title: 'Preparing for Saturday Workshop',
     contextType: 'event',
     contextRecordId: 'evt-1',
@@ -2296,7 +2436,7 @@ export const INITIAL_AI_CONVERSATIONS: AiConversation[] = [
   {
     id: 'conv-2',
     organizationId: 'org-tip',
-    userId: 'pritam',
+    userId: 'u-1',
     title: 'Organization Workload & Unassigned Milestones',
     contextType: 'dashboard',
     createdAt: '2026-09-23T07:50:00Z',

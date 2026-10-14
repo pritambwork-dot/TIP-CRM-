@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   CheckSquare, 
-  Search,
   Plus, 
   Clock, 
   Calendar, 
@@ -31,24 +30,20 @@ import { Input } from '../ui/input';
 import { Card, CardContent } from '../ui/card';
 import { requestTaskAssistance, TaskAssistanceResponse } from '../../lib/aiOrchestrator';
 
-type TaskFilterTab = 'All' | 'Today' | 'Upcoming' | 'Overdue' | 'Suggested' | 'Completed';
+type TaskFilterTab = 'All' | 'Today' | 'Upcoming' | 'Suggested' | 'Completed';
 
 interface TasksViewProps {
-  selectedTaskId?: string | null;
   onSelectPerson?: (personId: string) => void;
   onSelectProgram?: (programId: string) => void;
 }
 
 export const TasksView: React.FC<TasksViewProps> = ({
-  selectedTaskId,
   onSelectPerson,
   onSelectProgram
 }) => {
   const { 
     tasks, 
     scopedTasks,
-    programs,
-    projects,
     addTask, 
     updateTask, 
     toggleTaskStatus, 
@@ -70,19 +65,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [ownerFilter, setOwnerFilter] = useState<string>('All');
   const [priorityFilter, setPriorityFilter] = useState<string>('All');
   const [postFilter, setPostFilter] = useState<string>('All');
-  const [searchQuery, setSearchQuery] = useState('');
-
-  // Handle selected task from global search or cross-view navigation
-  useEffect(() => {
-    if (selectedTaskId) {
-      const task = visibleTasks.find(t => t.id === selectedTaskId);
-      if (task) {
-        if (task.status === 'Completed') setActiveTab('Completed');
-        else setActiveTab('All');
-        setSearchQuery(task.title);
-      }
-    }
-  }, [selectedTaskId, visibleTasks]);
 
   // Add task inline / modal
   const [showAddModal, setShowAddModal] = useState(false);
@@ -95,8 +77,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [newSource, setNewSource] = useState<TaskSource>('MANUAL');
   const [newAssignmentMethod, setNewAssignmentMethod] = useState<TaskAssignmentMethod>('MANUAL');
   const [newNotes, setNewNotes] = useState('');
-  const [newRelatedProgramId, setNewRelatedProgramId] = useState('');
-  const [newRelatedProjectId, setNewRelatedProjectId] = useState('');
 
   // AI Task Assistant modal
   const [selectedTaskForAi, setSelectedTaskForAi] = useState<TaskItem | null>(null);
@@ -108,20 +88,18 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const today = new Date().toISOString().split('T')[0];
 
   const owners = Array.from(new Set(visibleTasks.map(t => t.owner).filter(Boolean)));
-  const suggestedTasksCount = visibleTasks.filter(t => t.assignmentMethod === 'SUGGESTED' && t.status !== 'Completed' && t.status !== 'Cancelled').length;
+  const suggestedTasksCount = visibleTasks.filter(t => t.assignmentMethod === 'SUGGESTED' && t.status !== 'Completed').length;
 
   const filteredTasks = visibleTasks.filter(task => {
     // Tab filter
     if (activeTab === 'Today') {
-      if (task.dueDate !== today || task.status === 'Completed' || task.status === 'Cancelled') return false;
+      if (task.dueDate !== today || task.status === 'Completed') return false;
     } else if (activeTab === 'Upcoming') {
-      if (task.dueDate <= today || task.status === 'Completed' || task.status === 'Cancelled') return false;
-    } else if (activeTab === 'Overdue') {
-      if (task.dueDate >= today || task.status === 'Completed' || task.status === 'Cancelled') return false;
+      if (task.dueDate < today || task.status === 'Completed') return false;
     } else if (activeTab === 'Suggested') {
-      if (task.assignmentMethod !== 'SUGGESTED' || task.status === 'Completed' || task.status === 'Cancelled') return false;
+      if (task.assignmentMethod !== 'SUGGESTED' || task.status === 'Completed') return false;
     } else if (activeTab === 'Completed') {
-      if (task.status !== 'Completed' && task.status !== 'Cancelled') return false;
+      if (task.status !== 'Completed') return false;
     }
 
     // Owner filter
@@ -132,19 +110,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
     // Post filter
     if (postFilter !== 'All' && task.assignedPostId !== postFilter) return false;
-
-    // Search query filter
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      const matches = 
-        task.title.toLowerCase().includes(q) ||
-        task.owner.toLowerCase().includes(q) ||
-        (task.notes && task.notes.toLowerCase().includes(q)) ||
-        (task.assignedPostName && task.assignedPostName.toLowerCase().includes(q)) ||
-        task.priority.toLowerCase().includes(q) ||
-        task.status.toLowerCase().includes(q);
-      if (!matches) return false;
-    }
 
     return true;
   });
@@ -164,8 +129,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
     if (!newTitle.trim()) return;
 
     const post = posts.find(p => p.id === newAssignedPostId);
-    const selProg = programs.find(p => p.id === newRelatedProgramId);
-    const selProj = projects.find(p => p.id === newRelatedProjectId);
 
     addTask({
       title: newTitle.trim(),
@@ -178,20 +141,11 @@ export const TasksView: React.FC<TasksViewProps> = ({
       status: 'To Do',
       source: newSource,
       assignmentMethod: newAssignmentMethod,
-      notes: newNotes.trim() || undefined,
-      programId: selProg?.id,
-      programName: selProg?.name,
-      projectId: selProj?.id,
-      projectName: selProj?.name,
-      relatedRecordType: selProj ? 'Project' : (selProg ? 'Program' : undefined),
-      relatedRecordId: selProj?.id || selProg?.id,
-      relatedRecordName: selProj?.name || selProg?.name
+      notes: newNotes.trim() || undefined
     });
 
     setNewTitle('');
     setNewNotes('');
-    setNewRelatedProgramId('');
-    setNewRelatedProjectId('');
     setShowAddModal(false);
   };
 
@@ -224,10 +178,10 @@ export const TasksView: React.FC<TasksViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/70 pb-5">
         <div>
           <h2 className="text-2xl sm:text-3xl font-serif font-bold text-foreground tracking-tight">
-            Tasks & Follow-ups
+            Tasks & Operational Work Engine
           </h2>
           <p className="text-sm text-muted-foreground mt-1 font-medium">
-            Track deliverables, upcoming deadlines, community follow-ups, and team assignments.
+            Post-driven assignments, automated rule triggers, and grounded AI assistance.
           </p>
         </div>
 
@@ -275,7 +229,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
       {/* Tabs & Controls */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-          {(['All', 'Today', 'Upcoming', 'Overdue', 'Suggested', 'Completed'] as TaskFilterTab[]).map(tab => {
+          {(['All', 'Today', 'Upcoming', 'Suggested', 'Completed'] as TaskFilterTab[]).map(tab => {
             const isActive = activeTab === tab;
             return (
               <button
@@ -305,29 +259,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
           })}
         </div>
 
-        {/* Filters & Search */}
+        {/* Filters */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Tasks Search Input */}
-          <div className="relative w-full sm:w-52">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search tasks..."
-              className="w-full text-xs h-8 pl-8 pr-7 rounded-lg border border-input bg-card text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                title="Clear task search"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
           {posts.length > 0 && (
             <select
               value={postFilter}
@@ -456,14 +389,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         {task.programName && (
                           <>
                             <span>•</span>
-                            <span className="text-zinc-600">Program: {task.programName}</span>
-                          </>
-                        )}
-
-                        {task.projectName && (
-                          <>
-                            <span>•</span>
-                            <span className="text-zinc-600 font-medium">Project: {task.projectName}</span>
+                            <span className="text-zinc-600">Cohort: {task.programName}</span>
                           </>
                         )}
                       </div>
@@ -550,9 +476,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
             >
               <div className="p-4 sm:p-5 border-b border-border flex items-center justify-between bg-muted/30">
                 <div>
-                  <h3 className="text-base font-serif font-bold text-foreground">Add Task or Follow-up</h3>
+                  <h3 className="text-base font-serif font-bold text-foreground">Add Operational Task</h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Assign deliverables, follow-ups, or link to specific programs and projects
+                    Assign work directly or map to designated employee posts
                   </p>
                 </div>
                 <Button 
@@ -599,43 +525,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       <option value="Low">Low</option>
                       <option value="Medium">Medium</option>
                       <option value="High">High</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Program & Project Hierarchy Links */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-foreground mb-1">Related Program</label>
-                    <select
-                      value={newRelatedProgramId}
-                      onChange={e => {
-                        setNewRelatedProgramId(e.target.value);
-                        setNewRelatedProjectId('');
-                      }}
-                      className="w-full text-xs h-9 px-2.5 rounded-md border border-input bg-card text-foreground"
-                    >
-                      <option value="">No Program (General)</option>
-                      {programs.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-foreground mb-1">Related Project</label>
-                    <select
-                      value={newRelatedProjectId}
-                      onChange={e => setNewRelatedProjectId(e.target.value)}
-                      disabled={!newRelatedProgramId}
-                      className="w-full text-xs h-9 px-2.5 rounded-md border border-input bg-card text-foreground disabled:opacity-50"
-                    >
-                      <option value="">No Project</option>
-                      {projects
-                        .filter(prj => prj.programId === newRelatedProgramId)
-                        .map(prj => (
-                          <option key={prj.id} value={prj.id}>{prj.name}</option>
-                        ))}
                     </select>
                   </div>
                 </div>

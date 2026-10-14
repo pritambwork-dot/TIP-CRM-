@@ -238,7 +238,7 @@ export function runDeterministicAnalytics(
       { label: 'Total Records Analyzed', value: totalRecords.toLocaleString('en-CA'), subtext: `${uniqueParticipants.size} unique participants` },
       { label: 'Average Attendance Rate', value: `${attendanceRate}%`, subtext: `${attendedCount.toLocaleString('en-CA')} of ${totalRecords.toLocaleString('en-CA')} attended`, trend: attendanceRate >= 75 ? 'up' : 'down', trendValue: `${attendanceRate}%` },
       { label: 'Repeat Participation', value: `${repeatRate}%`, subtext: `${repeatCount} attendees in 2+ sessions`, trend: repeatRate >= 40 ? 'up' : 'neutral', trendValue: `${repeatRate}%` },
-      { label: 'Active Programs & Projects', value: programsSet.size, subtext: `${eventsSet.size} sessions tracked` }
+      { label: 'Active Programs & Cohorts', value: programsSet.size, subtext: `${eventsSet.size} sessions tracked` }
     );
 
     // Build Recharts Data: Program Attendance Comparison (Bar Chart)

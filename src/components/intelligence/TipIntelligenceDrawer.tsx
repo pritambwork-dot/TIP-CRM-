@@ -269,7 +269,7 @@ export const TipIntelligenceDrawer: React.FC<TipIntelligenceDrawerProps> = ({
           <div className="space-y-4 pt-2">
             <div className="flex items-center justify-between text-xs text-zinc-400 font-medium px-1">
               <span>Work Intelligence Thread</span>
-              <span>Grounding: Grounded AI</span>
+              <span>Grounding: 100% Deterministic</span>
             </div>
 
             {aiMessages.length === 0 ? (
@@ -313,7 +313,12 @@ export const TipIntelligenceDrawer: React.FC<TipIntelligenceDrawerProps> = ({
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100/80 text-purple-800 border border-purple-300">
                               <Sparkles className="w-2.5 h-2.5 text-purple-600" />
-                              ✨ TIP Intelligence
+                              ✨ Gemini AI Assisted
+                            </span>
+                          )}
+                          {msg.tokensUsed !== undefined && msg.tokensUsed > 0 && (
+                            <span className="text-[10px] text-zinc-400 font-mono">
+                              ~{msg.tokensUsed} tokens
                             </span>
                           )}
                         </div>

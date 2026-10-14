@@ -18,7 +18,7 @@ import {
   ChevronRight,
   Shield
 } from 'lucide-react';
-import { NavTab } from '../../types';
+import { NavTab } from '../Sidebar';
 import { useCrm } from '../../context/CrmContext';
 import { TipLogo } from '../TipLogo';
 import { ROLE_DEFINITIONS } from '../../lib/permissions';
@@ -66,9 +66,9 @@ export const MobileNavDrawer: React.FC<MobileNavDrawerProps> = ({
     {
       group: 'Community Impact',
       items: [
-        { id: 'programs' as NavTab, label: 'Programs & Projects', short: 'Programs', icon: Compass, isVisible: hasPermission('programs', 'view') },
+        { id: 'programs' as NavTab, label: 'Programs & Cohorts', short: 'Programs', icon: Compass, isVisible: hasPermission('programs', 'view') },
         { id: 'events' as NavTab, label: 'Events & Attendance', short: 'Events', icon: Calendar, isVisible: hasPermission('events', 'view') },
-        { id: 'documents' as NavTab, label: 'Documents & Links', short: 'Documents', icon: FileText, isVisible: hasPermission('documents', 'view') },
+        { id: 'documents' as NavTab, label: 'Documents & Artifacts', short: 'Documents', icon: FileText, isVisible: hasPermission('documents', 'view') },
       ]
     },
     {
@@ -76,7 +76,7 @@ export const MobileNavDrawer: React.FC<MobileNavDrawerProps> = ({
       items: [
         { id: 'tasks' as NavTab, label: 'Tasks & Follow-ups', short: 'Tasks', icon: CheckSquare, isVisible: hasPermission('tasks', 'view'), badge: overdueTasksCount },
         { id: 'funding' as NavTab, label: 'Donors & Funding Grants', short: 'Funding', icon: HeartHandshake, isVisible: canViewFunding },
-        { id: 'reports' as NavTab, label: 'Reports', short: 'Reports', icon: BarChart3, isVisible: hasPermission('reports', 'view') },
+        { id: 'reports' as NavTab, label: 'Board & Funder Reports', short: 'Reports', icon: BarChart3, isVisible: hasPermission('reports', 'view') },
       ]
     },
     {

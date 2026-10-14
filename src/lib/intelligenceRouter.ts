@@ -16,7 +16,6 @@ import {
   FundingRecord, 
   IntelligenceTier 
 } from '../types';
-import { Permissions } from './permissions';
 
 export type QueryIntentType = 
   | 'DETERMINISTIC_TASK_COUNT'
@@ -26,10 +25,6 @@ export type QueryIntentType =
   | 'DETERMINISTIC_ATTENDANCE_METRIC'
   | 'DETERMINISTIC_FUNDING_METRIC'
   | 'DETERMINISTIC_PEOPLE_COUNT'
-  | 'DETERMINISTIC_PROGRAM_COUNT'
-  | 'DETERMINISTIC_GREETING'
-  | 'ACCESS_RESTRICTED'
-  | 'OUT_OF_SCOPE'
   | 'AI_SYNTHESIS';
 
 export interface IntentClassificationResult {
@@ -52,110 +47,13 @@ export interface DeterministicExecutionResult {
 }
 
 /**
- * Detects questions completely unrelated to TIP CRM operations or data
- */
-export function isOutOfScopeQuery(query: string): boolean {
-  const q = query.trim().toLowerCase();
-
-  // Protect genuine CRM entity questions
-  const crmKeywords = [
-    'event', 'program', 'project', 'tip', 'task', 'workshop', 'funder', 'grant', 
-    'donor', 'attendance', 'participant', 'roster', 'people', 'person', 'contact', 
-    'organization', 'stakeholder', 'cohort', 'budget', 'cad', 'follow-up', 'workload'
-  ];
-  if (crmKeywords.some(k => q.includes(k))) {
-    return false;
-  }
-
-  // Coding & software development phrases
-  const codingPhrases = [
-    'python', 'javascript', 'typescript', 'react', 'html', 'css', 'java', 'c++', 
-    'golang', 'rust', 'bash', 'powershell', 'write code', 'programming', 'coding', 
-    'code', 'script', 'algorithm', 'debug', 'regex', 'sql query', 'function', 'class '
-  ];
-
-  // Trivia, creative writing, external topics
-  const triviaPhrases = [
-    'poem', 'poetry', 'rhyme', 'song', 'joke', 'riddle', 'story', 'novel', 'essay',
-    'recipe', 'bake', 'cooking', 'cook', 'pancake', 'pizza', 'coffee', 'food',
-    'capital of', 'president', 'prime minister', 'who is the king', 'king of', 'queen of',
-    'weather', 'forecast', 'sports', 'world cup', 'super bowl', 'football', 'soccer', 'nba',
-    'how far is', 'speed of light', 'quantum physics', 'astronomy', 'who won', 'movie', 'game', 'video game',
-    'translate to', 'french', 'spanish', 'german', 'chinese', 'japanese',
-    'hack', 'sql injection', 'exploit', 'bypass'
-  ];
-
-  const matchesCoding = codingPhrases.some(p => {
-    if (p === 'c++') return q.includes('c++');
-    const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(^|\\W)${escaped}(\\W|$)`, 'i').test(q);
-  });
-
-  const matchesTrivia = triviaPhrases.some(p => q.includes(p));
-
-  return matchesCoding || matchesTrivia;
-}
-
-/**
  * 1. Intent Classifier using fast rule-based pattern matching (Section 20)
  * Evaluates whether question can be answered by normal application logic or database aggregation.
- * Enforces role security boundaries BEFORE calling AI.
  */
-export function classifyIntent(query: string, user?: UserProfile): IntentClassificationResult {
+export function classifyIntent(query: string): IntentClassificationResult {
   const q = query.trim().toLowerCase();
 
-  // 0a. Out of scope / General Knowledge Guardrail
-  if (isOutOfScopeQuery(q)) {
-    return {
-      intent: 'OUT_OF_SCOPE',
-      tier: 'DETERMINISTIC',
-      confidence: 1.0,
-      reason: 'Question is outside the boundary of The Inclusion Project (TIP) CRM.'
-    };
-  }
-
-  // 0b. Direct Greetings & Introductions (0 Tokens)
-  if (
-    q === 'hi' || 
-    q === 'hello' || 
-    q === 'hey' || 
-    q === 'good morning' || 
-    q === 'good afternoon' || 
-    q === 'good evening' ||
-    q.startsWith('hello ') || 
-    q.startsWith('hi ') || 
-    q.startsWith('hey ')
-  ) {
-    return {
-      intent: 'DETERMINISTIC_GREETING',
-      tier: 'DETERMINISTIC',
-      confidence: 1.0,
-      reason: 'Standard greeting resolved locally with 0 tokens.'
-    };
-  }
-
-  // 0c. Crucial Data RBAC Check (Funding / Grants / Financials)
-  const isFinancialQuery = (
-    q.includes('funding') || 
-    q.includes('grant') || 
-    q.includes('donor') || 
-    q.includes('budget') || 
-    q.includes('financial') || 
-    q.includes('money') ||
-    q.includes('dollar') ||
-    q.includes('revenue')
-  );
-
-  if (isFinancialQuery && user && !Permissions.check(user, 'funding', 'view')) {
-    return {
-      intent: 'ACCESS_RESTRICTED',
-      tier: 'DETERMINISTIC',
-      confidence: 1.0,
-      reason: `Role (${user.postTitle || user.roleId}) lacks funding.view authorization under TIP Data Governance.`
-    };
-  }
-
-  // Explicit AI-invoking triggers for authorized queries
+  // Explicit AI-invoking triggers always get AI
   if (
     q.startsWith('why') || 
     q.includes('what should i') || 
@@ -259,19 +157,6 @@ export function classifyIntent(query: string, user?: UserProfile): IntentClassif
     };
   }
 
-  // 8. Program & project metrics: "how many programs", "program count", "active programs"
-  if (
-    (q.includes('program') || q.includes('project')) &&
-    (q.includes('how many') || q.includes('count') || q.includes('total') || q.includes('active') || q.includes('number of') || q.includes('list'))
-  ) {
-    return {
-      intent: 'DETERMINISTIC_PROGRAM_COUNT',
-      tier: 'DETERMINISTIC',
-      confidence: 0.98,
-      reason: 'Program database aggregation. Deterministic calculation.'
-    };
-  }
-
   // Default to AI for open-ended or ambiguous questions
   return {
     intent: 'AI_SYNTHESIS',
@@ -309,56 +194,6 @@ export function executeDeterministicQuery(
   const overdueTasks = openTasks.filter(t => t.dueDate && t.dueDate < refDate);
 
   switch (intent) {
-    case 'ACCESS_RESTRICTED': {
-      const designationName = user.postTitle || user.title || (user.roleId === 'volunteer' ? 'Community Volunteer' : 'Staff Member');
-      return {
-        content: `**ACCESS RESTRICTED (Data Governance Policy)**\n` +
-                 `Information regarding organizational funding, grants, budgets, and financial contributions is restricted to Executive Directors and designated Management.\n\n` +
-                 `• **Your Verified Designation**: ${designationName}\n` +
-                 `• **Access Status**: Denied (Financial / Funding Data Scope = None)\n\n` +
-                 `To access financial data or grant summaries, please request authorization from Executive Director Ruth Mojeed Ramirez.`,
-        suggestedActions: [
-          { label: 'View My Tasks', action: 'navigate', payload: { view: 'tasks' } },
-          { label: 'View Upcoming Events', action: 'navigate', payload: { view: 'events' } }
-        ],
-        supportingData: { authorized: false, restrictedResource: 'funding' }
-      };
-    }
-
-    case 'OUT_OF_SCOPE': {
-      return {
-        content: `I am **TIP Intelligence**, dedicated exclusively to The Inclusion Project (TIP) CRM.\n\n` +
-                 `I can only assist with verified TIP CRM records, programs, events, tasks, stakeholders, and community initiatives.\n\n` +
-                 `You can ask me questions such as:\n` +
-                 `• *"What events or workshops are coming up?"*\n` +
-                 `• *"Show me my open tasks and overdue deadlines"*\n` +
-                 `• *"What is our overall attendance rate?"*\n` +
-                 `• *"Summarize our active programs and milestones"*`,
-        suggestedActions: [
-          { label: 'What are my tasks?', action: 'query', payload: { query: 'What are my tasks?' } },
-          { label: 'Upcoming events', action: 'query', payload: { query: 'Upcoming events' } },
-          { label: 'Active programs', action: 'query', payload: { query: 'How many active programs do we have?' } }
-        ],
-        supportingData: { outOfScope: true }
-      };
-    }
-
-    case 'DETERMINISTIC_GREETING': {
-      const designationName = user.postTitle || user.title || (user.roleId === 'volunteer' ? 'Community Volunteer' : 'Staff Member');
-      return {
-        content: `Hello ${user.name || 'there'}! I am **TIP Intelligence**, your work companion for The Inclusion Project CRM.\n\n` +
-                 `• **Your Designation**: ${designationName}\n` +
-                 `• **Open Tasks**: ${openTasks.length} (${overdueTasks.length} overdue)\n\n` +
-                 `How can I assist you with your active programs, workshops, or follow-ups today?`,
-        suggestedActions: [
-          { label: 'What are my tasks?', action: 'query', payload: { query: 'What are my tasks?' } },
-          { label: 'Upcoming events', action: 'query', payload: { query: 'What events are coming up?' } },
-          { label: 'Active programs', action: 'query', payload: { query: 'How many active programs do we have?' } }
-        ],
-        supportingData: { greeting: true, openTasks: openTasks.length, overdueTasks: overdueTasks.length }
-      };
-    }
-
     case 'DETERMINISTIC_TASK_COUNT': {
       return {
         content: `**OBSERVED (Deterministic Database Count)**\n` +
@@ -532,25 +367,6 @@ export function executeDeterministicQuery(
         supportingData: {
           peopleCount: crmData.people.length
         }
-      };
-    }
-
-    case 'DETERMINISTIC_PROGRAM_COUNT': {
-      const activePrograms = crmData.programs.filter(p => p.status === 'Active');
-      return {
-        content: `**OBSERVED (Programs & Projects Status)**\n` +
-                 `• Total Programs: **${crmData.programs.length}**\n` +
-                 `• Active Programs: **${activePrograms.length}** (${activePrograms.map(p => p.name).join(', ')})\n` +
-                 `• Milestone Progress: **${Math.round(crmData.programs.reduce((acc, p) => acc + (p.progressPercent || 0), 0) / (crmData.programs.length || 1))}% average**\n\n` +
-                 `*Computed deterministically from local CRM state. 0 tokens consumed.*`,
-        suggestedActions: [
-          { label: 'View All Programs', action: 'navigate', payload: { view: 'programs' } }
-        ],
-        supportingData: {
-          totalPrograms: crmData.programs.length,
-          activePrograms: activePrograms.length
-        },
-        offerAiExplanation: false
       };
     }
 

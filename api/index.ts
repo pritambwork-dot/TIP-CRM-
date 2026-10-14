@@ -1,20 +1,25 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { aiMiddlewareHandler } from '../server/aiMiddleware.ts';
+import { sendSafeError, ERROR_CODES } from '../server/lib/safeErrors.ts';
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
     const handled = await aiMiddlewareHandler(req, res);
     if (!handled) {
-      res.statusCode = 404;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: 'Endpoint not found', url: req.url }));
+      sendSafeError(
+        res,
+        404,
+        'The requested API endpoint was not found.',
+        ERROR_CODES.NOT_FOUND
+      );
     }
   } catch (error: any) {
-    console.error('[API Gateway Error]:', error);
-    if (!res.headersSent) {
-      res.statusCode = 500;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: error?.message || 'Internal Server Error' }));
-    }
+    sendSafeError(
+      res,
+      500,
+      'An unexpected internal server error occurred. Please try again or contact TIP support.',
+      ERROR_CODES.INTERNAL_SERVER_ERROR,
+      error
+    );
   }
 }

@@ -9,9 +9,7 @@ import {
   CheckCircle2,
   Lock,
   ArrowRight,
-  Sparkles,
-  Briefcase,
-  X
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Program, ProgramStatus } from '../../types';
@@ -27,7 +25,13 @@ import {
   CardDescription, 
   CardContent, 
   CardFooter, 
-  Input,
+  Input, 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription, 
+  DialogFooter,
   OneUiSearchBar
 } from '../ui';
 
@@ -77,7 +81,7 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
   onSelectPerson,
   onSelectEvent
 }) => {
-  const { programs, projects, addProgram, currentUser, people, events, hasPermission } = useCrm();
+  const { programs, addProgram, currentUser, people, events, hasPermission } = useCrm();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<ProgramStatus | 'All'>('All');
 
@@ -99,10 +103,7 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
     const matchesQuery = q === '' ? true : 
       pr.name.toLowerCase().includes(q) ||
       pr.description.toLowerCase().includes(q) ||
-      pr.ownerName.toLowerCase().includes(q) ||
-      pr.status.toLowerCase().includes(q) ||
-      (pr.focusAreas && pr.focusAreas.some(fa => fa.toLowerCase().includes(q))) ||
-      (pr.outcomes && pr.outcomes.toLowerCase().includes(q));
+      pr.ownerName.toLowerCase().includes(q);
     return matchesFilter && matchesQuery;
   });
 
@@ -140,10 +141,10 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-200/80 pb-5">
         <div>
           <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 tracking-tight font-serif">
-            Programs & Projects
+            Programs & Cohorts
           </h2>
           <p className="text-sm text-zinc-500 mt-1 font-medium">
-            Core community initiatives, projects, and participant tracking.
+            Core community initiatives, youth leadership cohorts, and accessibility research labs.
           </p>
         </div>
 
@@ -166,7 +167,7 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
           <OneUiSearchBar 
             value={searchQuery}
             onChange={setSearchQuery}
-            placeholder="Search programs by name, description, lead, or focus area..."
+            placeholder="Search programs by name, description, or lead..."
           />
         </div>
 
@@ -210,7 +211,7 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
               <Sparkles className="w-3 h-3 text-[#ea0543]" />
               <span>Program Intelligence</span>
             </span>
-            <span className="text-xs text-zinc-400 font-mono">Project & Participant Engagement Analysis</span>
+            <span className="text-xs text-zinc-400 font-mono">Cohort Engagement Analysis</span>
           </div>
           <h4 className="text-sm font-semibold text-zinc-900 font-serif">
             Youth Leadership Initiative · 18 Active Participants · 82% Avg Attendance
@@ -234,7 +235,6 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
         className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"
       >
         {filteredPrograms.map(pr => {
-          const prProjects = projects.filter(prj => prj.programId === pr.id);
           const prParticipants = people.filter(p => pr.participantIds.includes(p.id) || p.programIds.includes(pr.id));
           const prEvents = events.filter(e => e.programId === pr.id);
 
@@ -288,11 +288,7 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
                 </CardContent>
 
                 <CardFooter className="pt-3 border-t border-zinc-100 flex items-center justify-between text-xs text-zinc-500">
-                  <div className="flex items-center gap-2.5">
-                    <span className="flex items-center gap-1 font-medium text-zinc-700">
-                      <Briefcase className="w-3.5 h-3.5 text-zinc-400" />
-                      {prProjects.length} projects
-                    </span>
+                  <div className="flex items-center gap-3">
                     <span className="flex items-center gap-1 font-medium text-zinc-700">
                       <Users className="w-3.5 h-3.5 text-zinc-400" />
                       {prParticipants.length} people
@@ -314,121 +310,121 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
         })}
       </motion.div>
 
-      {/* Create Program Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl border border-zinc-200 shadow-xl max-w-lg w-full p-6 space-y-4">
-            <div className="border-b border-zinc-100 pb-3">
-              <h3 className="text-base font-bold text-zinc-900">Create New Program / Project</h3>
-              <p className="text-xs text-zinc-500">Launch a community initiative, project, or partnership.</p>
+      {/* Create Program Modal using shadcn Dialog */}
+      <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Create New Program / Cohort</DialogTitle>
+            <DialogDescription>
+              Launch a community initiative, corporate equity partnership, or youth cohort.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateProgram} className="space-y-3.5 py-2">
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">Program Name *</label>
+              <Input 
+                type="text"
+                required
+                placeholder="e.g. Immigrant Youth Leadership Initiative"
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+              />
             </div>
 
-            <form onSubmit={handleCreateProgram} className="space-y-3.5 py-2">
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">Program Description *</label>
+              <textarea 
+                rows={2}
+                required
+                placeholder="Goals, target community, and scope of this initiative..."
+                value={newDesc}
+                onChange={e => setNewDesc(e.target.value)}
+                className="w-full text-xs p-2.5 rounded-xl border border-zinc-200 focus:outline-hidden focus:ring-2 focus:ring-[#140a8e]/20 focus:border-[#140a8e] transition-colors"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-zinc-700 mb-1">Program Name *</label>
-                <Input 
-                  type="text"
-                  required
-                  placeholder="e.g. Immigrant Youth Leadership Initiative"
-                  value={newName}
-                  onChange={e => setNewName(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 mb-1">Program Description *</label>
-                <textarea 
-                  rows={2}
-                  required
-                  placeholder="Goals, target community, and scope of this initiative..."
-                  value={newDesc}
-                  onChange={e => setNewDesc(e.target.value)}
-                  className="w-full text-xs p-2.5 rounded-xl border border-zinc-200 focus:outline-hidden focus:ring-2 focus:ring-[#140a8e]/20 focus:border-[#140a8e] transition-colors"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Initial Status</label>
-                  <select 
-                    value={newStatus}
-                    onChange={e => setNewStatus(e.target.value as ProgramStatus)}
-                    className="w-full text-xs h-9 px-3 rounded-xl border border-zinc-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-[#140a8e]/20 focus:border-[#140a8e]"
-                  >
-                    <option value="Planning">Planning</option>
-                    <option value="Active">Active</option>
-                    <option value="On Hold">On Hold</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Program Lead</label>
-                  <Input 
-                    type="text"
-                    value={newOwner}
-                    onChange={e => setNewOwner(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Start Date</label>
-                  <Input 
-                    type="date"
-                    value={newStartDate}
-                    onChange={e => setNewStartDate(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">End Date</label>
-                  <Input 
-                    type="date"
-                    value={newEndDate}
-                    onChange={e => setNewEndDate(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 mb-1">Focus Areas (comma separated)</label>
-                <Input 
-                  type="text"
-                  placeholder="Youth empowerment, Civic education, Mentorship"
-                  value={newFocusAreas}
-                  onChange={e => setNewFocusAreas(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 mb-1">Target Outcomes</label>
-                <Input 
-                  type="text"
-                  placeholder="e.g. 25 youth completed, 4 community projects launched"
-                  value={newOutcomes}
-                  onChange={e => setNewOutcomes(e.target.value)}
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-100">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setShowAddModal(false)}
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Initial Status</label>
+                <select 
+                  value={newStatus}
+                  onChange={e => setNewStatus(e.target.value as ProgramStatus)}
+                  className="w-full text-xs h-9 px-3 rounded-xl border border-zinc-200 bg-white focus:outline-hidden focus:ring-2 focus:ring-[#140a8e]/20 focus:border-[#140a8e]"
                 >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  variant="crimson"
-                >
-                  Create Program
-                </Button>
+                  <option value="Planning">Planning</option>
+                  <option value="Active">Active</option>
+                  <option value="On Hold">On Hold</option>
+                </select>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Program Lead</label>
+                <Input 
+                  type="text"
+                  value={newOwner}
+                  onChange={e => setNewOwner(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">Start Date</label>
+                <Input 
+                  type="date"
+                  value={newStartDate}
+                  onChange={e => setNewStartDate(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">End Date</label>
+                <Input 
+                  type="date"
+                  value={newEndDate}
+                  onChange={e => setNewEndDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">Focus Areas (comma separated)</label>
+              <Input 
+                type="text"
+                placeholder="Youth empowerment, Civic education, Mentorship"
+                value={newFocusAreas}
+                onChange={e => setNewFocusAreas(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">Target Outcomes</label>
+              <Input 
+                type="text"
+                placeholder="e.g. 25 youth completed, 4 community projects launched"
+                value={newOutcomes}
+                onChange={e => setNewOutcomes(e.target.value)}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setShowAddModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="crimson"
+              >
+                Create Program
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Program Detail Modal */}
       {selectedProgramId && (

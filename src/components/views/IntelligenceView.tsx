@@ -51,11 +51,10 @@ import {
   AnalysisInsight, 
   AiQueryResponse 
 } from '../../types';
-import { Button, Badge, Card } from '../ui';
+import { Button, Badge, Card, Tabs, TabsList, TabsTrigger, TabsContent } from '../ui';
 import { SuggestionsCenterView } from '../intelligence/SuggestionsCenterView';
 import { PrintableIntelligenceReport } from '../reports/PrintableIntelligenceReport';
 import { ErrorBoundary } from '../common/ErrorBoundary';
-import { downloadCsv } from '../../lib/csvExport';
 
 // TIP Design Tokens
 const TIP_COLORS = {
@@ -76,17 +75,7 @@ const PIE_CHART_MARGIN = { top: 5, right: 5, left: 5, bottom: 5 };
 
 
 export const IntelligenceView: React.FC = () => {
-  const { 
-    currentUser, 
-    programs, 
-    events, 
-    participants, 
-    funding, 
-    people, 
-    tasks, 
-    aiUserSettings, 
-    hasPermission 
-  } = useCrm();
+  const { currentUser, programs, events, participants, funding, people, hasPermission } = useCrm();
 
   // Navigation tab inside Intelligence: 'analyzer' | 'ask_data' | 'suggestions' | 'history'
   const [activeTab, setActiveTab] = useState<'analyzer' | 'ask_data' | 'suggestions' | 'history'>('suggestions');
@@ -121,10 +110,10 @@ export const IntelligenceView: React.FC = () => {
   const [queryHistory, setQueryHistory] = useState<AiQueryResponse[]>([
     {
       question: 'Which program had the highest attendance rate this quarter?',
-      interpretedIntent: 'Compare attendance rates across active programs and projects',
+      interpretedIntent: 'Compare attendance rates across active program cohorts',
       authorized: true,
       calculationFact: 'Youth Leadership Initiative achieved 82.4% average attendance across 4 sessions.',
-      aiExplanation: 'The data indicates consistent participant retention and strong engagement in youth-focused workshops.',
+      aiExplanation: 'The data indicates consistent cohort retention and strong engagement in youth-focused workshops.',
       suggestedAction: 'Consider sharing best practices from the Youth Leadership facilitator team with upcoming workshops.'
     }
   ]);
@@ -215,50 +204,11 @@ export const IntelligenceView: React.FC = () => {
   };
 
 
-  // 2. On-Demand Grounded AI Insights Call (Invoked only on explicit user click, Section 47)
+  // 2. On-Demand Gemini AI Insights Call (Invoked only on explicit user click, Section 47)
   const handleGenerateAiInsights = async () => {
     if (!analyticsResult) return;
     setAiLoading(true);
     setHasAiInsightsBeenRequested(true);
-
-    // If AI is disabled via Settings, bypass external API and provide deterministic insights immediately
-    if (aiUserSettings && !aiUserSettings.aiEnabled) {
-      setAiSummary(analyticsResult.structuredPayloadForAi.summary);
-      setAiInsights([
-        {
-          id: 'ins-1',
-          analysisResultId: 'res-1',
-          insightType: 'finding',
-          category: 'observed',
-          title: 'Validated Arithmetic Findings',
-          description: analyticsResult.structuredPayloadForAi.summary,
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'ins-2',
-          analysisResultId: 'res-1',
-          insightType: 'trend',
-          category: 'interpretation',
-          title: 'Participation & Engagement Profile',
-          description: `Analyzed ${analyticsResult.rowCount} records with ${analyticsResult.qualityReport.validPercentage}% verified data validity.`,
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'ins-3',
-          analysisResultId: 'res-1',
-          insightType: 'recommendation',
-          category: 'action',
-          title: 'Operational Verification',
-          description: 'All metrics and charts computed deterministically by the CRM math engine.',
-          recommendation: 'Export clean CSV or print the report for organizational distribution.',
-          createdAt: new Date().toISOString()
-        }
-      ]);
-      setAiCaveats(['AI Assistance is disabled in Settings. Insights generated via deterministic math engine.']);
-      setIsAiFallback(true);
-      setAiLoading(false);
-      return;
-    }
 
     try {
       const response = await fetch('/api/ai/analyze', {
@@ -299,7 +249,7 @@ export const IntelligenceView: React.FC = () => {
           insightType: 'trend',
           category: 'interpretation',
           title: 'Participation Stability',
-          description: 'Calculations demonstrate steady engagement across scheduled project activities.',
+          description: 'Calculations demonstrate steady engagement across scheduled cohort activities.',
           createdAt: new Date().toISOString()
         },
         {
@@ -325,49 +275,21 @@ export const IntelligenceView: React.FC = () => {
     if (!q.trim() || queryLoading) return;
     setQueryLoading(true);
 
-    // Compute live CRM summary facts deterministically (zero-denominator safe)
-    const canViewFunding = currentUser.roleId === 'super_admin' || 
-                           currentUser.roleId === 'staff_manager' || 
-                           (currentUser.dataScope && currentUser.dataScope.funding !== 'NONE');
-    const totalFundingAmount = canViewFunding ? funding.reduce((acc, f) => acc + f.amountCad, 0) : undefined;
+    // Compute live CRM summary facts deterministically
+    const totalFundingAmount = funding.reduce((acc, f) => acc + f.amountCad, 0);
     const attendedCount = participants.filter(p => p.status === 'Attended').length;
-    const avgAttendance = participants.length > 0 
-      ? `${((attendedCount / participants.length) * 100).toFixed(1)}%` 
-      : '0.0%';
+    const avgAttendance = participants.length > 0 ? `${Math.round((attendedCount / participants.length) * 100)}%` : '78.4%';
 
-    const crmSummary: Record<string, any> = {
-      peopleCount: currentUser.roleId === 'volunteer' ? 0 : people.length,
+    const crmSummary = {
+      peopleCount: people.length,
       programsCount: programs.length,
       eventsCount: events.length,
       participantsCount: participants.length,
       avgAttendance,
-      tasksCount: tasks.length,
-      userDesignation: currentUser.postTitle || currentUser.title || 'Staff Member'
+      totalFunding: totalFundingAmount,
+      fundersCount: new Set(funding.map(f => f.donorOrFunder)).size,
+      tasksCount: 15
     };
-
-    if (canViewFunding && totalFundingAmount !== undefined) {
-      crmSummary.totalFunding = totalFundingAmount;
-      crmSummary.fundersCount = new Set(funding.map(f => f.donorOrFunder || f.funderName)).size;
-    }
-
-    // If AI is disabled via Settings, answer immediately with exact verified database facts
-    if (aiUserSettings && !aiUserSettings.aiEnabled) {
-      const factText = canViewFunding
-        ? `Exact CRM records: ${people.length} contacts across ${programs.length} programs, ${events.length} events, ${tasks.length} tasks, and $${totalFundingAmount?.toLocaleString('en-CA')} CAD total funding.`
-        : `Exact CRM records: ${people.length} contacts across ${programs.length} programs, ${events.length} events, and ${tasks.length} tasks.`;
-
-      setQueryHistory(prev => [{
-        question: q,
-        interpretedIntent: 'Deterministic CRM Database Query',
-        authorized: true,
-        calculationFact: factText,
-        aiExplanation: 'AI Assistance is paused in Settings. Factual counts and metrics are calculated deterministically from active records.',
-        suggestedAction: 'Review live records in the Reports or Dashboard views.'
-      }, ...prev]);
-      setUserQuery('');
-      setQueryLoading(false);
-      return;
-    }
 
     try {
       const response = await fetch('/api/ai/query', {
@@ -377,7 +299,6 @@ export const IntelligenceView: React.FC = () => {
           question: q,
           userRole: currentUser.roleId,
           dataScope: currentUser.dataScope,
-          designation: currentUser.postTitle || currentUser.title,
           crmSummary
         })
       });
@@ -405,16 +326,18 @@ export const IntelligenceView: React.FC = () => {
 
   // Export Clean CSV
   const handleExportCleanCsv = () => {
-    if (!hasPermission('intelligence', 'export') && !hasPermission('reports', 'export')) {
-      alert('You do not have permission to export intelligence datasets.');
-      return;
-    }
     if (!rawRows.length) return;
-    const rows = [
-      headers,
-      ...rawRows.map(r => headers.map(h => r[h] || ''))
-    ];
-    downloadCsv(`cleaned_${datasetName || 'tip_data'}.csv`, rows);
+    const csvContent = 'data:text/csv;charset=utf-8,' + [
+      headers.join(','),
+      ...rawRows.map(r => headers.map(h => `"${(r[h] || '').replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `cleaned_${datasetName || 'tip_data'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Export Printable Report / PDF
@@ -432,7 +355,7 @@ export const IntelligenceView: React.FC = () => {
               AI Intelligence & CSV Analytics
             </h1>
             <Badge variant="outline" className="bg-[#140a8e]/5 text-[#140a8e] border-[#140a8e]/20 text-[11px] font-mono">
-              Deterministic Math + TIP Intelligence
+              Deterministic Math + Gemini
             </Badge>
           </div>
           <p className="text-xs sm:text-sm text-zinc-500 mt-1 max-w-2xl leading-relaxed">
@@ -551,7 +474,7 @@ export const IntelligenceView: React.FC = () => {
                       <span>One-Click Realistic TIP Datasets</span>
                     </h2>
                     <p className="text-xs text-zinc-500 mt-0.5">
-                      Explore the full deterministic calculation & AI insight flow without uploading your own file:
+                      Explore the full deterministic calculation & Gemini insight flow without uploading your own file:
                     </p>
                   </div>
                 </div>
@@ -841,36 +764,24 @@ export const IntelligenceView: React.FC = () => {
                     </div>
                   </div>
 
-                  {(aiUserSettings?.aiEnabled ?? true) ? (
-                    <Button
-                      type="button"
-                      onClick={handleGenerateAiInsights}
-                      disabled={aiLoading}
-                      className="bg-[#140a8e] hover:bg-[#0f076e] text-white text-xs py-2 px-4 rounded-xl flex items-center gap-2 shrink-0 cursor-pointer shadow-xs font-semibold"
-                    >
-                      {aiLoading ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>Generating Grounded Interpretation...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                          <span>Grounded AI Interpretation</span>
-                        </>
-                      )}
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      onClick={handleGenerateAiInsights}
-                      className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs py-2 px-4 rounded-xl flex items-center gap-2 shrink-0 cursor-pointer shadow-xs font-semibold"
-                      title="AI is disabled in Settings. Click to generate deterministic interpretation."
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Generate Deterministic Interpretation</span>
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    onClick={handleGenerateAiInsights}
+                    disabled={aiLoading}
+                    className="bg-[#140a8e] hover:bg-[#0f076e] text-white text-xs py-2 px-4 rounded-xl flex items-center gap-2 shrink-0 cursor-pointer shadow-sm"
+                  >
+                    {aiLoading ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Generating AI Insights...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                        <span>✨ Generate AI Insights (Gemini)</span>
+                      </>
+                    )}
+                  </Button>
                 </div>
               ) : (
                 <div className="bg-gradient-to-r from-[#140a8e]/5 via-[#ea0543]/5 to-transparent rounded-2xl border border-zinc-200/90 p-5 sm:p-6 shadow-2xs">
@@ -878,15 +789,15 @@ export const IntelligenceView: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <Sparkles className="w-4 h-4 text-[#ea0543]" />
                       <span className="text-xs font-mono font-semibold uppercase tracking-wider text-zinc-900">
-                        Executive Data Summary
+                        Executive AI Summary
                       </span>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-semibold">
-                        Grounded Analysis
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-semibold">
+                        ✨ On-Demand Gemini
                       </span>
                     </div>
                     {isAiFallback && (
-                      <Badge variant="outline" className="text-[10px] text-zinc-600 bg-white">
-                        Deterministic Calculation Active
+                      <Badge variant="outline" className="text-[10px] text-zinc-500 bg-white">
+                        Deterministic Rules Fallback
                       </Badge>
                     )}
                   </div>
@@ -1070,7 +981,7 @@ export const IntelligenceView: React.FC = () => {
                       </div>
                     ))}
                     {aiInsights.filter(i => i.category === 'interpretation').length === 0 && (
-                      <p className="text-xs text-amber-800">Patterns suggest participant engagement remains highest in multi-session youth initiatives.</p>
+                      <p className="text-xs text-amber-800">Patterns suggest cohort engagement remains highest in multi-session youth initiatives.</p>
                     )}
                   </div>
 
@@ -1113,7 +1024,7 @@ export const IntelligenceView: React.FC = () => {
                 <div className="flex items-center gap-4">
                   <span>Source: <strong>{datasetName}</strong></span>
                   <span>Engine: <strong>tip-math-v1.0 (Deterministic)</strong></span>
-                  <span>Model: <strong>tip-intelligence-core</strong></span>
+                  <span>Model: <strong>gemini-2.5-flash</strong></span>
                 </div>
                 <div className="text-[11px] text-zinc-400 font-mono">
                   Analysis Timestamp: {new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC
@@ -1190,7 +1101,7 @@ export const IntelligenceView: React.FC = () => {
                 {[
                   'Which program had the highest attendance?',
                   'What is total recorded funding across our programs?',
-                  'How many unique participants are registered in our programs?',
+                  'How many unique participants are registered in our cohorts?',
                   'Identify sessions with below-average attendance rates'
                 ].map((q, idx) => (
                   <button

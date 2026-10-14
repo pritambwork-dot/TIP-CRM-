@@ -14,7 +14,7 @@ import {
   AiPrivacyMode
 } from '../types';
 import { classifyIntent, executeDeterministicQuery } from './intelligenceRouter';
-import { minimizeAiPayload, minimizeConversationHistory, buildRoleScopedCrmContext } from './contextMinimizer';
+import { minimizeAiPayload, minimizeConversationHistory } from './contextMinimizer';
 import { aiCache } from './aiCache';
 
 export interface IntelligenceChatContext {
@@ -153,7 +153,6 @@ export async function sendIntelligenceQuery(params: {
     programs: Program[];
     people: Person[];
     funding: FundingRecord[];
-    organizations?: Organization[];
     referenceDate?: string;
   };
   dataVersion?: number;
@@ -163,7 +162,7 @@ export async function sendIntelligenceQuery(params: {
 
   // 1. Level 1 & 2: Intent Classification & Deterministic Bypass (Sections 1, 2, 20)
   if (crmData) {
-    const classification = classifyIntent(message, user);
+    const classification = classifyIntent(message);
     if (classification.tier === 'DETERMINISTIC') {
       const result = executeDeterministicQuery(classification.intent, message, user, crmData);
       return {
@@ -198,10 +197,9 @@ export async function sendIntelligenceQuery(params: {
     };
   }
 
-  // 3. Minimize Payload, Build Role-Scoped Context & Scrub PII (Sections 36, 37, 38)
+  // 3. Minimize Payload & Scrub PII (Sections 36, 37, 38)
   const pMode = params.privacyMode || 'minimal';
   const cleanFacts = minimizeAiPayload(deterministicFacts, pMode);
-  const scopedCrmContext = crmData ? buildRoleScopedCrmContext(user, crmData, pMode) : undefined;
   const cleanHistory = minimizeConversationHistory(
     (history || []).map(m => ({ role: m.role, content: m.content })),
     4
@@ -220,11 +218,10 @@ export async function sendIntelligenceQuery(params: {
           roleId: user.roleId,
           role: user.role,
           postId: user.postId,
-          postTitle: user.postTitle || user.title
+          postTitle: user.postTitle
         },
         context,
         deterministicFacts: cleanFacts,
-        scopedCrmContext,
         history: cleanHistory
       })
     });
@@ -235,7 +232,7 @@ export async function sendIntelligenceQuery(params: {
         ...data,
         tier: data.tier || 'AI_GENERATED',
         cached: Boolean(data.cached),
-        source: data.cached ? 'Server Cache' : 'TIP Intelligence'
+        source: data.cached ? 'Server Cache' : 'Google Gemini AI'
       };
       aiCache.set(clientCacheKey, enhanced, currentDataVersion, 4 * 60 * 60 * 1000, 650);
       return enhanced;

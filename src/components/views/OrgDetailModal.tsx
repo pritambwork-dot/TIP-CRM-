@@ -17,6 +17,7 @@ import {
 import { Organization } from '../../types';
 import { useCrm } from '../../context/CrmContext';
 import { ProtectedAction } from '../common/ProtectedAction';
+import { sanitizeExternalUrl } from '../../lib/safeUrls';
 
 interface OrgDetailModalProps {
   orgId: string;
@@ -140,11 +141,11 @@ export const OrgDetailModal: React.FC<OrgDetailModalProps> = ({
               )}
 
               <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-zinc-500">
-                {org.website && (
+                {org.website && sanitizeExternalUrl(org.website) && (
                   <a 
-                    href={org.website.startsWith('http') ? org.website : `https://${org.website}`} 
+                    href={sanitizeExternalUrl(org.website)!} 
                     target="_blank" 
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     className="flex items-center gap-1 hover:text-zinc-900 text-zinc-700 underline underline-offset-2"
                   >
                     <Globe className="w-3.5 h-3.5" />
@@ -347,24 +348,43 @@ export const OrgDetailModal: React.FC<OrgDetailModalProps> = ({
               {connectedDocs.length === 0 ? (
                 <p className="text-xs text-zinc-400 py-4">No files or Google Drive links attached to this organization.</p>
               ) : (
-                connectedDocs.map(doc => (
-                  <a
-                    key={doc.id}
-                    href={doc.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="p-3 rounded-lg border border-zinc-200 hover:border-zinc-300 flex items-center justify-between text-xs group"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <FileText className="w-4 h-4 text-zinc-500" />
-                      <div>
-                        <p className="font-semibold text-zinc-900">{doc.title}</p>
-                        <p className="text-[11px] text-zinc-400">{doc.type}</p>
+                connectedDocs.map(doc => {
+                  const safeUrl = sanitizeExternalUrl(doc.url);
+                  if (!safeUrl) {
+                    return (
+                      <div
+                        key={doc.id}
+                        className="p-3 rounded-lg border border-zinc-200 bg-zinc-50 flex items-center justify-between text-xs opacity-75"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <FileText className="w-4 h-4 text-zinc-400" />
+                          <div>
+                            <p className="font-semibold text-zinc-700">{doc.title}</p>
+                            <p className="text-[11px] text-zinc-500">{doc.type} • Insecure URL blocked</p>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <span className="text-zinc-400 group-hover:text-zinc-800">Open &rarr;</span>
-                  </a>
-                ))
+                    );
+                  }
+                  return (
+                    <a
+                      key={doc.id}
+                      href={safeUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-3 rounded-lg border border-zinc-200 hover:border-zinc-300 flex items-center justify-between text-xs group"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <FileText className="w-4 h-4 text-zinc-500" />
+                        <div>
+                          <p className="font-semibold text-zinc-900">{doc.title}</p>
+                          <p className="text-[11px] text-zinc-400">{doc.type}</p>
+                        </div>
+                      </div>
+                      <span className="text-zinc-400 group-hover:text-zinc-800">Open &rarr;</span>
+                    </a>
+                  );
+                })
               )}
             </div>
           )}

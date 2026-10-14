@@ -25,9 +25,9 @@ export interface RoleDefinition {
 export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
   super_admin: {
     id: 'super_admin',
-    name: 'Administrator',
+    name: 'Super Admin',
     level: 1,
-    levelLabel: 'Level 1 — Administrator',
+    levelLabel: 'Level 1 — Super Admin',
     description: 'Full authority layer: controls users, security, permissions, data scopes, audit logs, and all records.',
     badgeBg: 'bg-rose-50 border-rose-200',
     badgeText: 'text-rose-700',
@@ -52,11 +52,6 @@ export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
       'programs.create': true,
       'programs.edit': true,
       'programs.delete': true,
-      'projects.view': true,
-      'projects.create': true,
-      'projects.edit': true,
-      'projects.delete': true,
-      'projects.export': true,
       'events.view': true,
       'events.create': true,
       'events.edit': true,
@@ -101,10 +96,10 @@ export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
 
   staff_manager: {
     id: 'staff_manager',
-    name: 'Staff / Project User (Lead)',
+    name: 'Staff Manager',
     level: 2,
-    levelLabel: 'Level 2 — Staff / Project User (Lead)',
-    description: 'Operations management: oversees organizational records, manages programs & projects, assigns tasks, views reports and funding.',
+    levelLabel: 'Level 2 — Staff Manager',
+    description: 'Operations management: oversees organizational records, manages programs & events, assigns tasks, views reports and funding.',
     badgeBg: 'bg-purple-50 border-purple-200',
     badgeText: 'text-purple-700',
     defaultDataScope: {
@@ -128,11 +123,6 @@ export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
       'programs.create': true,
       'programs.edit': true,
       'programs.delete': false,
-      'projects.view': true,
-      'projects.create': true,
-      'projects.edit': true,
-      'projects.delete': false,
-      'projects.export': true,
       'events.view': true,
       'events.create': true,
       'events.edit': true,
@@ -177,10 +167,10 @@ export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
 
   staff_member: {
     id: 'staff_member',
-    name: 'Staff / Project User',
+    name: 'Staff Member',
     level: 3,
-    levelLabel: 'Level 3 — Staff / Project User',
-    description: 'Frontline staff: manages assigned programs & projects, events, community interactions, and follow-ups.',
+    levelLabel: 'Level 3 — Staff Member',
+    description: 'Frontline staff: manages assigned programs & events, logs community interactions, completes tasks, and accesses relevant contacts.',
     badgeBg: 'bg-blue-50 border-blue-200',
     badgeText: 'text-blue-700',
     defaultDataScope: {
@@ -204,11 +194,6 @@ export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
       'programs.create': false,
       'programs.edit': true,
       'programs.delete': false,
-      'projects.view': true,
-      'projects.create': true,
-      'projects.edit': true,
-      'projects.delete': false,
-      'projects.export': false,
       'events.view': true,
       'events.create': true,
       'events.edit': true,
@@ -253,10 +238,10 @@ export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
 
   volunteer: {
     id: 'volunteer',
-    name: 'Limited User',
+    name: 'Volunteer',
     level: 4,
-    levelLabel: 'Level 4 — Limited User',
-    description: 'Restricted role: access controlled by Administrator. Can be granted specific permissions and data scopes across people, programs, projects, events, tasks, or documents.',
+    levelLabel: 'Level 4 — Volunteer',
+    description: 'Restricted role: strictly scoped to assigned events, tasks, and limited workshop participant info. Funding & user management are hidden.',
     badgeBg: 'bg-emerald-50 border-emerald-200',
     badgeText: 'text-emerald-700',
     defaultDataScope: {
@@ -280,10 +265,6 @@ export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
       'programs.create': false,
       'programs.edit': false,
       'programs.delete': false,
-      'projects.view': true,
-      'projects.create': false,
-      'projects.edit': false,
-      'projects.delete': false,
       'events.view': true,
       'events.create': false,
       'events.edit': false,
@@ -355,10 +336,6 @@ export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
       'programs.create': true,
       'programs.edit': true,
       'programs.delete': false,
-      'projects.view': true,
-      'projects.create': true,
-      'projects.edit': true,
-      'projects.delete': false,
       'events.view': true,
       'events.create': true,
       'events.edit': true,
@@ -430,10 +407,6 @@ export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
       'programs.create': false,
       'programs.edit': false,
       'programs.delete': false,
-      'projects.view': true,
-      'projects.create': false,
-      'projects.edit': false,
-      'projects.delete': false,
       'events.view': true,
       'events.create': true,
       'events.edit': true,
@@ -742,3 +715,139 @@ export function filterTasksByScope(
   });
 }
 
+/**
+ * Authorization Middleware Engine (Section 22)
+ * Enforces the 8-step security verification rule:
+ * 1. Authenticate user
+ * 2. Load application user
+ * 3. Verify status == 'approved'
+ * 4. Verify active flag (is_active == true)
+ * 5. Load role
+ * 6. Verify permission
+ * 7. Verify data scope
+ * 8. Continue request (or return 401/403 with exact reason)
+ */
+export interface AuthorizationResult {
+  authorized: boolean;
+  statusCode: 200 | 401 | 403;
+  reason?: string;
+  step: string;
+}
+
+export function authorizeRequest(params: {
+  user: UserProfile | null | undefined;
+  resource: ResourceType;
+  action: ActionType;
+  programId?: string;
+  eventId?: string;
+}): AuthorizationResult {
+  // Step 1: Authenticate user
+  if (!params.user) {
+    return {
+      authorized: false,
+      statusCode: 401,
+      reason: 'Authentication required. No active identity session found.',
+      step: '1. Authenticate user'
+    };
+  }
+
+  const user = params.user;
+
+  // Step 2 & 3: Load application user & verify status == 'approved'
+  if (user.status === 'pending') {
+    return {
+      authorized: false,
+      statusCode: 403,
+      reason: 'Account access is pending administrator approval.',
+      step: '3. Verify status (pending)'
+    };
+  }
+  if (user.status === 'rejected') {
+    return {
+      authorized: false,
+      statusCode: 403,
+      reason: 'Access request was not approved by a TIP administrator.',
+      step: '3. Verify status (rejected)'
+    };
+  }
+  if (user.status === 'disabled' || user.status === 'suspended') {
+    return {
+      authorized: false,
+      statusCode: 403,
+      reason: 'Your TIP CRM access has been disabled.',
+      step: '3. Verify status (disabled)'
+    };
+  }
+  if (user.status !== 'approved') {
+    return {
+      authorized: false,
+      statusCode: 403,
+      reason: `Account status is "${user.status}". Approval is required.`,
+      step: '3. Verify status'
+    };
+  }
+
+  // Step 4: Verify active flag
+  if (!user.isActive) {
+    return {
+      authorized: false,
+      statusCode: 403,
+      reason: 'Account is marked inactive.',
+      step: '4. Verify active flag'
+    };
+  }
+
+  // Step 5 & 6: Load role & verify permission
+  const permitted = checkUserPermission(user, params.resource, params.action);
+  if (!permitted) {
+    return {
+      authorized: false,
+      statusCode: 403,
+      reason: `Permission denied: Role "${ROLE_DEFINITIONS[user.roleId]?.name}" lacks permission "${params.resource}.${params.action}".`,
+      step: '6. Verify permission'
+    };
+  }
+
+  // Step 7: Verify data scope
+  if (user.roleId !== 'super_admin') {
+    if (params.resource === 'funding' && user.dataScope.funding === 'NONE') {
+      return {
+        authorized: false,
+        statusCode: 403,
+        reason: 'Funding access is forbidden under assigned data scope.',
+        step: '7. Verify data scope (funding)'
+      };
+    }
+
+    if (params.resource === 'programs' && params.programId) {
+      const allowed = user.dataScope.programs === 'ALL' || (user.assignedProgramIds || []).includes(params.programId);
+      if (!allowed) {
+        return {
+          authorized: false,
+          statusCode: 403,
+          reason: `Program "${params.programId}" is not within user's assigned programs scope.`,
+          step: '7. Verify data scope (programs)'
+        };
+      }
+    }
+
+    if (params.resource === 'events' && params.eventId) {
+      const allowed = user.dataScope.events === 'ALL' || (user.assignedEventIds || []).includes(params.eventId);
+      if (!allowed) {
+        return {
+          authorized: false,
+          statusCode: 403,
+          reason: `Event "${params.eventId}" is not within user's assigned events scope.`,
+          step: '7. Verify data scope (events)'
+        };
+      }
+    }
+  }
+
+  // Step 8: Authorization successful
+  return {
+    authorized: true,
+    statusCode: 200,
+    step: '8. Continue request'
+  };
+}

@@ -24,12 +24,11 @@ CREATE TYPE organization_type AS ENUM (
 );
 
 CREATE TYPE program_status AS ENUM ('Planning', 'Active', 'On Hold', 'Completed', 'Archived');
-CREATE TYPE project_status AS ENUM ('Planning', 'Active', 'On Hold', 'Completed', 'Archived');
 CREATE TYPE event_type AS ENUM ('Workshop', 'Consultation', 'Community Forum', 'Training', 'Panel', 'Youth Lab');
 CREATE TYPE participant_status AS ENUM ('Registered', 'Attended', 'Did not attend', 'Completed', 'Waitlisted', 'Withdrawn');
 CREATE TYPE task_priority AS ENUM ('Low', 'Medium', 'High');
-CREATE TYPE task_status AS ENUM ('To Do', 'In Progress', 'Completed', 'Cancelled');
-CREATE TYPE interaction_type AS ENUM ('Email', 'Meeting', 'Call', 'Workshop', 'Note', 'Follow-up', 'Other');
+CREATE TYPE task_status AS ENUM ('To Do', 'In Progress', 'Completed');
+CREATE TYPE interaction_type AS ENUM ('Email', 'Meeting', 'Call', 'Workshop', 'Note', 'Follow-up');
 CREATE TYPE funding_status AS ENUM ('Received', 'Pledged', 'Pending Review', 'Approved', 'Applied', 'Prospective');
 
 -- ------------------------------------------------------------------------------
@@ -213,33 +212,9 @@ CREATE TABLE program_participants (
   CONSTRAINT uq_program_person UNIQUE (program_id, person_id)
 );
 
--- Projects (Sub-initiatives & deliverables under Programs: Program -> Project -> Work)
-CREATE TABLE projects (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  program_id UUID NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
-  name VARCHAR(255) NOT NULL,
-  description TEXT,
-  status project_status DEFAULT 'Active',
-  owner_name VARCHAR(150),
-  start_date DATE,
-  end_date DATE,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Project Participants
-CREATE TABLE project_participants (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-  person_id UUID REFERENCES people(id) ON DELETE CASCADE,
-  joined_at TIMESTAMPTZ DEFAULT NOW(),
-  CONSTRAINT uq_project_person UNIQUE (project_id, person_id)
-);
-
 CREATE TABLE events (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   program_id UUID REFERENCES programs(id) ON DELETE SET NULL,
-  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
   name VARCHAR(255) NOT NULL,
   event_type event_type DEFAULT 'Workshop',
   date DATE NOT NULL,
@@ -288,7 +263,6 @@ CREATE TABLE tasks (
   created_by UUID REFERENCES users(id),
   related_person_id UUID REFERENCES people(id) ON DELETE SET NULL,
   related_program_id UUID REFERENCES programs(id) ON DELETE SET NULL,
-  related_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
   related_event_id UUID REFERENCES events(id) ON DELETE SET NULL,
   due_date DATE,
   priority task_priority DEFAULT 'Medium',
@@ -320,7 +294,6 @@ CREATE TABLE funding_records (
   donor_or_funder VARCHAR(255) NOT NULL,
   organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
   program_id UUID REFERENCES programs(id) ON DELETE SET NULL,
-  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
   amount_cad NUMERIC(12, 2) NOT NULL,
   date DATE NOT NULL,
   funding_type VARCHAR(100) NOT NULL,
@@ -352,32 +325,198 @@ CREATE TABLE documents (
 
 CREATE TABLE audit_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES users(id),
-  user_name VARCHAR(255) NOT NULL,
-  action VARCHAR(100) NOT NULL, -- e.g. 'user.create', 'role.update', 'person.delete'
-  resource VARCHAR(50) NOT NULL,
+  actor_id VARCHAR(100) NOT NULL,
+  actor_name VARCHAR(255) NOT NULL,
+  actor_role VARCHAR(100) NOT NULL,
+  action VARCHAR(100) NOT NULL, -- e.g. 'AUTH_ROLE_SWITCH', 'AUTH_PASSWORD_CHANGE', 'DATA_EXPORT_CSV', 'PERSON_DELETE'
+  resource_type VARCHAR(100) NOT NULL,
   resource_id VARCHAR(100),
   entity_name VARCHAR(255),
-  details TEXT,
+  outcome VARCHAR(20) NOT NULL DEFAULT 'SUCCESS' CHECK (outcome IN ('SUCCESS', 'FAILURE')),
+  description TEXT NOT NULL,
+  correlation_id VARCHAR(100),
   metadata JSONB,
-  timestamp TIMESTAMPTZ DEFAULT NOW()
+  ip_address VARCHAR(100),
+  timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Performance and Audit Search Indices (Check 12)
+CREATE INDEX idx_audit_logs_timestamp ON audit_logs(timestamp DESC);
+CREATE INDEX idx_audit_logs_actor_id ON audit_logs(actor_id);
+CREATE INDEX idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX idx_audit_logs_resource_type ON audit_logs(resource_type);
+CREATE INDEX idx_audit_logs_outcome ON audit_logs(outcome);
+CREATE INDEX idx_audit_logs_correlation_id ON audit_logs(correlation_id);
+
+-- PostgreSQL Immutability Trigger: Strictly Forbid UPDATE and DELETE
+CREATE OR REPLACE FUNCTION prevent_audit_log_modification()
+RETURNS TRIGGER AS $$
+BEGIN
+  RAISE EXCEPTION 'Audit logs are strictly immutable: UPDATE and DELETE operations are forbidden.';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_logs_immutable
+BEFORE UPDATE OR DELETE ON audit_logs
+FOR EACH ROW
+EXECUTE FUNCTION prevent_audit_log_modification();
+
+-- Controlled Retention Procedure (Executed only by Super Admin through verified maintenance)
+CREATE OR REPLACE FUNCTION purge_audit_logs_older_than(days_to_keep INTEGER)
+RETURNS INTEGER 
+LANGUAGE plpgsql 
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  deleted_count INTEGER;
+BEGIN
+  IF NOT is_super_admin() THEN
+    RAISE EXCEPTION 'Unauthorized: Only Super Administrators can execute audit log retention archiving.';
+  END IF;
+
+  ALTER TABLE audit_logs DISABLE TRIGGER trg_audit_logs_immutable;
+  
+  DELETE FROM audit_logs 
+  WHERE timestamp < (NOW() - (days_to_keep || ' days')::INTERVAL);
+  
+  GET DIAGNOSTICS deleted_count = ROW_COUNT;
+  
+  ALTER TABLE audit_logs ENABLE TRIGGER trg_audit_logs_immutable;
+  RETURN deleted_count;
+END;
+$$;
+
 -- ------------------------------------------------------------------------------
--- 8. ROW LEVEL SECURITY (RLS) POLICIES (Sections 25-27)
+-- 8. ROW LEVEL SECURITY (RLS) POLICIES & FUNCTIONS (Security Check 14)
 -- ------------------------------------------------------------------------------
 
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE people ENABLE ROW LEVEL SECURITY;
+-- Step 1: Enable RLS on ALL CRM tables (Default Deny for all unauthorized access)
 ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE programs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE funding_records ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE permissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE role_permissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE access_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_program_access ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_event_access ENABLE ROW LEVEL SECURITY;
+ALTER TABLE people ENABLE ROW LEVEL SECURITY;
+ALTER TABLE programs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE program_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE program_participants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_staff ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_participants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE interactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE funding_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 
--- Helper function: verify active approved user and extract identity
+-- Step 2: Trusted Helper Functions (SECURITY DEFINER with fixed search_path to prevent hijacking)
+
+-- Helper: Master Access Gate (Verify active approved user status)
+CREATE OR REPLACE FUNCTION user_has_crm_access() 
+RETURNS BOOLEAN 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM users 
+    WHERE auth_user_id = auth.uid()::text 
+      AND status = 'approved' 
+      AND is_active = TRUE
+  );
+$$;
+
+-- Helper: Extract current authenticated CRM user's primary UUID
+CREATE OR REPLACE FUNCTION current_user_id() 
+RETURNS UUID 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT id FROM users 
+  WHERE auth_user_id = auth.uid()::text 
+    AND status = 'approved' 
+    AND is_active = TRUE 
+  LIMIT 1;
+$$;
+
+-- Helper: Extract current user's organization UUID
+CREATE OR REPLACE FUNCTION current_user_org_id() 
+RETURNS UUID 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT organization_id FROM users 
+  WHERE auth_user_id = auth.uid()::text 
+    AND status = 'approved' 
+    AND is_active = TRUE 
+  LIMIT 1;
+$$;
+
+-- Helper: Super Admin Authorization Gate (Database-Verified, Never Client-Supplied)
+CREATE OR REPLACE FUNCTION is_super_admin() 
+RETURNS BOOLEAN 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM users u
+    JOIN user_roles ur ON ur.user_id = u.id
+    WHERE u.auth_user_id = auth.uid()::text 
+      AND ur.role_id = 'super_admin'
+      AND u.status = 'approved' 
+      AND u.is_active = TRUE
+  );
+$$;
+
+-- Helper: Staff Manager or Higher Gate (Levels 1 & 2)
+CREATE OR REPLACE FUNCTION is_staff_manager_or_higher() 
+RETURNS BOOLEAN 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM users u
+    JOIN user_roles ur ON ur.user_id = u.id
+    WHERE u.auth_user_id = auth.uid()::text 
+      AND ur.role_id IN ('super_admin', 'staff_manager')
+      AND u.status = 'approved' 
+      AND u.is_active = TRUE
+  );
+$$;
+
+-- Helper: Staff Member or Higher Gate (Levels 1, 2, & 3 - Excludes Volunteers)
+CREATE OR REPLACE FUNCTION is_staff_member_or_higher() 
+RETURNS BOOLEAN 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM users u
+    JOIN user_roles ur ON ur.user_id = u.id
+    WHERE u.auth_user_id = auth.uid()::text 
+      AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
+      AND u.status = 'approved' 
+      AND u.is_active = TRUE
+  );
+$$;
+
+-- Helper: Full application user identity extraction
 CREATE OR REPLACE FUNCTION get_current_app_user() 
 RETURNS TABLE (
   user_id UUID,
@@ -385,7 +524,11 @@ RETURNS TABLE (
   org_id UUID,
   is_approved BOOLEAN,
   is_active_user BOOLEAN
-) AS $$
+) 
+LANGUAGE sql 
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
   SELECT 
     id AS user_id, 
     (SELECT role_id FROM user_roles WHERE user_id = users.id LIMIT 1) AS role_id,
@@ -393,257 +536,319 @@ RETURNS TABLE (
     (status = 'approved') AS is_approved,
     is_active AS is_active_user
   FROM users 
-  WHERE auth_user_id = auth.uid();
-$$ LANGUAGE sql SECURITY DEFINER;
+  WHERE auth_user_id = auth.uid()::text;
+$$;
 
--- Master Access Gate: All access requires an approved, active user
-CREATE OR REPLACE FUNCTION user_has_crm_access() RETURNS BOOLEAN AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM users 
-    WHERE auth_user_id = auth.uid() 
-      AND status = 'approved' 
-      AND is_active = TRUE
-  );
-$$ LANGUAGE sql SECURITY DEFINER;
+-- Step 3: Trigger to prevent user self-elevation or unauthorized field modification
+CREATE OR REPLACE FUNCTION check_users_self_elevation()
+RETURNS TRIGGER 
+LANGUAGE plpgsql 
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  -- If Super Admin or service role, allow authorized administrative changes
+  IF is_super_admin() OR auth.role() = 'service_role' THEN
+    RETURN NEW;
+  END IF;
 
--- Super Admin Bypass Check
-CREATE OR REPLACE FUNCTION is_super_admin() RETURNS BOOLEAN AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM users u
-    JOIN user_roles ur ON ur.user_id = u.id
-    WHERE u.auth_user_id = auth.uid() 
-      AND ur.role_id = 'super_admin'
-      AND u.status = 'approved' 
-      AND u.is_active = TRUE
-  );
-$$ LANGUAGE sql SECURITY DEFINER;
+  -- Protect privileged authorization columns from modification by regular users
+  IF NEW.status IS DISTINCT FROM OLD.status OR
+     NEW.is_active IS DISTINCT FROM OLD.is_active OR
+     NEW.approved_by IS DISTINCT FROM OLD.approved_by OR
+     NEW.approved_at IS DISTINCT FROM OLD.approved_at OR
+     NEW.organization_id IS DISTINCT FROM OLD.organization_id OR
+     NEW.people_scope IS DISTINCT FROM OLD.people_scope OR
+     NEW.programs_scope IS DISTINCT FROM OLD.programs_scope OR
+     NEW.events_scope IS DISTINCT FROM OLD.events_scope OR
+     NEW.funding_scope IS DISTINCT FROM OLD.funding_scope OR
+     NEW.auth_user_id IS DISTINCT FROM OLD.auth_user_id THEN
+    RAISE EXCEPTION 'Security violation: Users cannot modify their own status, active state, data scopes, or organization.';
+  END IF;
 
--- Organization Isolation Helper (Section 27)
-CREATE OR REPLACE FUNCTION current_user_org_id() RETURNS UUID AS $$
-  SELECT organization_id FROM users WHERE auth_user_id = auth.uid();
-$$ LANGUAGE sql SECURITY DEFINER;
+  RETURN NEW;
+END;
+$$;
 
--- RLS: USERS TABLE
--- Super Admin can manage all users. Users can view team members in same organization.
-CREATE POLICY super_admin_all_users ON users 
-  FOR ALL USING (is_super_admin());
+DROP TRIGGER IF EXISTS trg_prevent_self_elevation_users ON users;
+CREATE TRIGGER trg_prevent_self_elevation_users
+BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE FUNCTION check_users_self_elevation();
 
-CREATE POLICY org_users_view ON users 
-  FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
+-- Step 4: Granular, Least-Privilege RLS Policies
 
--- RLS: ACCESS REQUESTS TABLE
--- Super Admins review all requests. Authenticated user can see own pending request.
-CREATE POLICY super_admin_access_requests ON access_requests 
-  FOR ALL USING (is_super_admin());
+-- --- 1. ROLES, PERMISSIONS, ROLE_PERMISSIONS ---
+DROP POLICY IF EXISTS roles_read_crm ON roles;
+CREATE POLICY roles_read_crm ON roles FOR SELECT USING (user_has_crm_access());
+DROP POLICY IF EXISTS roles_write_super_admin ON roles;
+CREATE POLICY roles_write_super_admin ON roles FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 
-CREATE POLICY own_access_request ON access_requests 
-  FOR SELECT USING (auth_user_id = auth.uid());
+DROP POLICY IF EXISTS permissions_read_crm ON permissions;
+CREATE POLICY permissions_read_crm ON permissions FOR SELECT USING (user_has_crm_access());
+DROP POLICY IF EXISTS permissions_write_super_admin ON permissions;
+CREATE POLICY permissions_write_super_admin ON permissions FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 
-CREATE POLICY insert_access_request ON access_requests 
-  FOR INSERT WITH CHECK (auth_user_id = auth.uid());
+DROP POLICY IF EXISTS role_permissions_read_crm ON role_permissions;
+CREATE POLICY role_permissions_read_crm ON role_permissions FOR SELECT USING (user_has_crm_access());
+DROP POLICY IF EXISTS role_permissions_write_super_admin ON role_permissions;
+CREATE POLICY role_permissions_write_super_admin ON role_permissions FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 
--- RLS: PEOPLE TABLE
-CREATE POLICY super_admin_all_people ON people 
-  FOR ALL USING (is_super_admin());
+-- --- 2. USER ROLES (Strictly blocks self-promotion) ---
+DROP POLICY IF EXISTS user_roles_read_authorized ON user_roles;
+CREATE POLICY user_roles_read_authorized ON user_roles FOR SELECT USING (
+  is_super_admin() OR user_id = current_user_id() OR (user_has_crm_access() AND user_id IN (SELECT id FROM users WHERE organization_id = current_user_org_id()))
+);
+DROP POLICY IF EXISTS user_roles_write_super_admin ON user_roles;
+CREATE POLICY user_roles_write_super_admin ON user_roles FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 
-CREATE POLICY people_org_and_scoped_view ON people 
-  FOR SELECT USING (
-    user_has_crm_access() AND (
-      EXISTS (
-        SELECT 1 FROM users u 
-        JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND ur.role_id IN ('super_admin', 'staff_manager')
-      ) OR
-      id IN (
-        SELECT person_id FROM program_participants WHERE program_id IN (
-          SELECT program_id FROM user_program_access WHERE user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
-        )
-        UNION
-        SELECT person_id FROM event_participants WHERE event_id IN (
-          SELECT event_id FROM user_event_access WHERE user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
-        )
-      )
-    )
-  );
-
--- RLS: FUNDING RECORDS TABLE (Strictly hidden from volunteers and restricted staff)
-CREATE POLICY super_admin_all_funding ON funding_records 
-  FOR ALL USING (is_super_admin());
-
-CREATE POLICY funding_authorized_view ON funding_records 
-  FOR SELECT USING (
-    user_has_crm_access() AND (
-      EXISTS (
-        SELECT 1 FROM users u 
-        JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND (ur.role_id IN ('super_admin', 'staff_manager') OR u.funding_scope IN ('ALL', 'VIEW'))
-      )
-    )
-  );
-
--- RLS: PROGRAMS TABLE
-CREATE POLICY super_admin_all_programs ON programs 
-  FOR ALL USING (is_super_admin());
-
-CREATE POLICY programs_scoped_view ON programs 
-  FOR SELECT USING (
-    user_has_crm_access() AND (
-      EXISTS (
-        SELECT 1 FROM users u 
-        JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND (ur.role_id IN ('super_admin', 'staff_manager') OR u.programs_scope = 'ALL')
-      ) OR
-      id IN (
-        SELECT program_id FROM user_program_access WHERE user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
-      )
-    )
-  );
-
--- RLS: PROJECTS TABLE
-ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
-ALTER TABLE project_participants ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY super_admin_all_projects ON projects 
-  FOR ALL USING (is_super_admin());
-
-CREATE POLICY projects_scoped_view ON projects 
-  FOR SELECT USING (
-    user_has_crm_access() AND (
-      EXISTS (
-        SELECT 1 FROM users u 
-        JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND (ur.role_id IN ('super_admin', 'staff_manager') OR u.programs_scope = 'ALL')
-      ) OR
-      program_id IN (
-        SELECT program_id FROM user_program_access WHERE user_id = (SELECT id FROM users WHERE auth_user_id = auth.uid())
-      )
-    )
-  );
-
--- RLS: AUDIT LOGS TABLE (Super Admin only)
-CREATE POLICY super_admin_audit_logs ON audit_logs 
-  FOR ALL USING (is_super_admin());
-
--- RLS: ORGANIZATIONS TABLE
-CREATE POLICY super_admin_all_organizations ON organizations 
-  FOR ALL USING (is_super_admin());
-
-CREATE POLICY organizations_view ON organizations 
-  FOR SELECT USING (user_has_crm_access());
-
-CREATE POLICY organizations_staff_manage ON organizations 
-  FOR ALL USING (
-    user_has_crm_access() AND EXISTS (
-      SELECT 1 FROM users u 
-      JOIN user_roles ur ON ur.user_id = u.id 
-      WHERE u.auth_user_id = auth.uid() AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
-    )
-  );
-
--- RLS: EVENTS TABLE
-CREATE POLICY super_admin_all_events ON events 
-  FOR ALL USING (is_super_admin());
-
-CREATE POLICY events_scoped_view ON events 
-  FOR SELECT USING (user_has_crm_access());
-
-CREATE POLICY events_staff_manage ON events 
-  FOR ALL USING (
-    user_has_crm_access() AND EXISTS (
-      SELECT 1 FROM users u 
-      JOIN user_roles ur ON ur.user_id = u.id 
-      WHERE u.auth_user_id = auth.uid() AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
-    )
-  );
-
--- RLS: TASKS TABLE
-CREATE POLICY super_admin_all_tasks ON tasks 
-  FOR ALL USING (is_super_admin());
-
-CREATE POLICY tasks_scoped_view ON tasks 
-  FOR SELECT USING (user_has_crm_access());
-
-CREATE POLICY tasks_manage ON tasks 
-  FOR ALL USING (user_has_crm_access());
-
--- RLS: INTERACTIONS TABLE
-ALTER TABLE interactions ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY super_admin_all_interactions ON interactions 
-  FOR ALL USING (is_super_admin());
-
-CREATE POLICY interactions_scoped_view ON interactions 
-  FOR SELECT USING (user_has_crm_access());
-
-CREATE POLICY interactions_create ON interactions 
-  FOR INSERT WITH CHECK (user_has_crm_access());
-
--- RLS: DOCUMENTS TABLE
-ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY super_admin_all_documents ON documents 
-  FOR ALL USING (is_super_admin());
-
-CREATE POLICY documents_scoped_view ON documents 
-  FOR SELECT USING (user_has_crm_access());
-
-CREATE POLICY documents_staff_manage ON documents 
-  FOR ALL USING (
-    user_has_crm_access() AND EXISTS (
-      SELECT 1 FROM users u 
-      JOIN user_roles ur ON ur.user_id = u.id 
-      WHERE u.auth_user_id = auth.uid() AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
-    )
-  );
-
--- RLS: PARTICIPANTS TABLES
-ALTER TABLE program_participants ENABLE ROW LEVEL SECURITY;
-ALTER TABLE event_participants ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY super_admin_all_prog_participants ON program_participants FOR ALL USING (is_super_admin());
-CREATE POLICY prog_participants_view ON program_participants FOR SELECT USING (user_has_crm_access());
-CREATE POLICY prog_participants_staff_manage ON program_participants FOR ALL USING (
-  user_has_crm_access() AND EXISTS (
-    SELECT 1 FROM users u JOIN user_roles ur ON ur.user_id = u.id 
-    WHERE u.auth_user_id = auth.uid() AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
-  )
+-- --- 3. USERS ---
+DROP POLICY IF EXISTS super_admin_all_users ON users;
+CREATE POLICY super_admin_all_users ON users FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS org_users_view ON users;
+CREATE POLICY org_users_view ON users FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS users_self_update ON users;
+CREATE POLICY users_self_update ON users FOR UPDATE USING (
+  auth_user_id = auth.uid()::text AND user_has_crm_access()
+) WITH CHECK (
+  auth_user_id = auth.uid()::text
 );
 
-CREATE POLICY super_admin_all_event_participants ON event_participants FOR ALL USING (is_super_admin());
-CREATE POLICY event_participants_view ON event_participants FOR SELECT USING (user_has_crm_access());
-CREATE POLICY event_participants_staff_manage ON event_participants FOR ALL USING (
-  user_has_crm_access() AND EXISTS (
-    SELECT 1 FROM users u JOIN user_roles ur ON ur.user_id = u.id 
-    WHERE u.auth_user_id = auth.uid() AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
-  )
+-- --- 4. ACCESS REQUESTS ---
+DROP POLICY IF EXISTS super_admin_access_requests ON access_requests;
+CREATE POLICY super_admin_access_requests ON access_requests FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS own_access_request ON access_requests;
+CREATE POLICY own_access_request ON access_requests FOR SELECT USING (auth_user_id = auth.uid()::text);
+DROP POLICY IF EXISTS insert_access_request ON access_requests;
+CREATE POLICY insert_access_request ON access_requests FOR INSERT WITH CHECK (auth_user_id = auth.uid()::text);
+
+-- --- 5. ORGANIZATIONS ---
+DROP POLICY IF EXISTS organizations_super_admin ON organizations;
+CREATE POLICY organizations_super_admin ON organizations FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS organizations_read_crm ON organizations;
+CREATE POLICY organizations_read_crm ON organizations FOR SELECT USING (user_has_crm_access());
+DROP POLICY IF EXISTS organizations_update_manager ON organizations;
+CREATE POLICY organizations_update_manager ON organizations FOR UPDATE USING (
+  is_staff_manager_or_higher() AND id = current_user_org_id()
+) WITH CHECK (
+  id = current_user_org_id()
 );
 
-CREATE POLICY super_admin_all_proj_participants ON project_participants FOR ALL USING (is_super_admin());
-CREATE POLICY proj_participants_view ON project_participants FOR SELECT USING (user_has_crm_access());
-CREATE POLICY proj_participants_staff_manage ON project_participants FOR ALL USING (
-  user_has_crm_access() AND EXISTS (
-    SELECT 1 FROM users u JOIN user_roles ur ON ur.user_id = u.id 
-    WHERE u.auth_user_id = auth.uid() AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
+-- --- 6. PEOPLE (Contacts Directory) ---
+DROP POLICY IF EXISTS super_admin_all_people ON people;
+CREATE POLICY super_admin_all_people ON people FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS people_read_scoped ON people;
+CREATE POLICY people_read_scoped ON people FOR SELECT USING (
+  user_has_crm_access() AND (
+    is_staff_manager_or_higher() OR 
+    EXISTS (SELECT 1 FROM users u WHERE u.id = current_user_id() AND u.people_scope = 'GLOBAL') OR
+    organization_id = current_user_org_id() OR
+    id IN (
+      SELECT person_id FROM program_participants WHERE program_id IN (SELECT program_id FROM user_program_access WHERE user_id = current_user_id())
+      UNION
+      SELECT person_id FROM event_participants WHERE event_id IN (SELECT event_id FROM user_event_access WHERE user_id = current_user_id())
+    ) OR
+    created_by = current_user_id()
   )
 );
+DROP POLICY IF EXISTS people_insert_staff ON people;
+CREATE POLICY people_insert_staff ON people FOR INSERT WITH CHECK (
+  is_staff_member_or_higher() AND (organization_id IS NULL OR organization_id = current_user_org_id())
+);
+DROP POLICY IF EXISTS people_update_staff ON people;
+CREATE POLICY people_update_staff ON people FOR UPDATE USING (
+  is_staff_member_or_higher() AND (organization_id IS NULL OR organization_id = current_user_org_id())
+) WITH CHECK (
+  organization_id IS NULL OR organization_id = current_user_org_id()
+);
+DROP POLICY IF EXISTS people_delete_manager ON people;
+CREATE POLICY people_delete_manager ON people FOR DELETE USING (
+  is_staff_manager_or_higher() AND (organization_id IS NULL OR organization_id = current_user_org_id())
+);
 
--- RLS: RBAC METADATA TABLES
-ALTER TABLE roles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE permissions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE role_permissions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
+-- --- 7. PROGRAMS & PROGRAM MEMBERS/PARTICIPANTS ---
+DROP POLICY IF EXISTS super_admin_all_programs ON programs;
+CREATE POLICY super_admin_all_programs ON programs FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS programs_scoped_view ON programs;
+CREATE POLICY programs_scoped_view ON programs FOR SELECT USING (
+  user_has_crm_access() AND (
+    is_staff_manager_or_higher() OR 
+    EXISTS (SELECT 1 FROM users u WHERE u.id = current_user_id() AND u.programs_scope = 'ALL') OR
+    id IN (SELECT program_id FROM user_program_access WHERE user_id = current_user_id()) OR
+    id IN (SELECT program_id FROM program_members WHERE user_id = current_user_id())
+  )
+);
+DROP POLICY IF EXISTS programs_insert_manager ON programs;
+CREATE POLICY programs_insert_manager ON programs FOR INSERT WITH CHECK (is_staff_manager_or_higher());
+DROP POLICY IF EXISTS programs_update_manager ON programs;
+CREATE POLICY programs_update_manager ON programs FOR UPDATE USING (
+  is_staff_manager_or_higher() OR owner_id = current_user_id()
+) WITH CHECK (
+  is_staff_manager_or_higher() OR owner_id = current_user_id()
+);
+DROP POLICY IF EXISTS programs_delete_super_admin ON programs;
+CREATE POLICY programs_delete_super_admin ON programs FOR DELETE USING (is_super_admin());
 
-CREATE POLICY super_admin_manage_roles ON roles FOR ALL USING (is_super_admin());
-CREATE POLICY view_roles ON roles FOR SELECT USING (user_has_crm_access());
+DROP POLICY IF EXISTS program_members_read ON program_members;
+CREATE POLICY program_members_read ON program_members FOR SELECT USING (user_has_crm_access());
+DROP POLICY IF EXISTS program_members_write_manager ON program_members;
+CREATE POLICY program_members_write_manager ON program_members FOR ALL USING (is_staff_manager_or_higher()) WITH CHECK (is_staff_manager_or_higher());
 
-CREATE POLICY super_admin_manage_permissions ON permissions FOR ALL USING (is_super_admin());
-CREATE POLICY view_permissions ON permissions FOR SELECT USING (user_has_crm_access());
+DROP POLICY IF EXISTS program_participants_read ON program_participants;
+CREATE POLICY program_participants_read ON program_participants FOR SELECT USING (user_has_crm_access());
+DROP POLICY IF EXISTS program_participants_write_staff ON program_participants;
+CREATE POLICY program_participants_write_staff ON program_participants FOR ALL USING (is_staff_member_or_higher()) WITH CHECK (is_staff_member_or_higher());
 
-CREATE POLICY super_admin_manage_role_permissions ON role_permissions FOR ALL USING (is_super_admin());
-CREATE POLICY view_role_permissions ON role_permissions FOR SELECT USING (user_has_crm_access());
+-- --- 8. EVENTS, EVENT STAFF & PARTICIPANTS ---
+DROP POLICY IF EXISTS super_admin_all_events ON events;
+CREATE POLICY super_admin_all_events ON events FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS events_read_scoped ON events;
+CREATE POLICY events_read_scoped ON events FOR SELECT USING (
+  user_has_crm_access() AND (
+    is_staff_manager_or_higher() OR 
+    EXISTS (SELECT 1 FROM users u WHERE u.id = current_user_id() AND u.events_scope = 'ALL') OR
+    id IN (SELECT event_id FROM user_event_access WHERE user_id = current_user_id()) OR
+    id IN (SELECT event_id FROM event_staff WHERE user_id = current_user_id())
+  )
+);
+DROP POLICY IF EXISTS events_insert_staff ON events;
+CREATE POLICY events_insert_staff ON events FOR INSERT WITH CHECK (is_staff_member_or_higher());
+DROP POLICY IF EXISTS events_update_staff ON events;
+CREATE POLICY events_update_staff ON events FOR UPDATE USING (
+  is_staff_manager_or_higher() OR facilitator_id = current_user_id()
+) WITH CHECK (
+  is_staff_manager_or_higher() OR facilitator_id = current_user_id()
+);
+DROP POLICY IF EXISTS events_delete_manager ON events;
+CREATE POLICY events_delete_manager ON events FOR DELETE USING (is_staff_manager_or_higher());
 
-CREATE POLICY super_admin_manage_user_roles ON user_roles FOR ALL USING (is_super_admin());
-CREATE POLICY view_user_roles ON user_roles FOR SELECT USING (user_has_crm_access());
+DROP POLICY IF EXISTS event_staff_read ON event_staff;
+CREATE POLICY event_staff_read ON event_staff FOR SELECT USING (user_has_crm_access());
+DROP POLICY IF EXISTS event_staff_write_manager ON event_staff;
+CREATE POLICY event_staff_write_manager ON event_staff FOR ALL USING (is_staff_manager_or_higher()) WITH CHECK (is_staff_manager_or_higher());
+
+DROP POLICY IF EXISTS event_participants_read ON event_participants;
+CREATE POLICY event_participants_read ON event_participants FOR SELECT USING (user_has_crm_access());
+DROP POLICY IF EXISTS event_participants_write_staff ON event_participants;
+CREATE POLICY event_participants_write_staff ON event_participants FOR ALL USING (is_staff_member_or_higher()) WITH CHECK (is_staff_member_or_higher());
+
+-- --- 9. TASKS ---
+DROP POLICY IF EXISTS tasks_super_admin ON tasks;
+CREATE POLICY tasks_super_admin ON tasks FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS tasks_read_scoped ON tasks;
+CREATE POLICY tasks_read_scoped ON tasks FOR SELECT USING (
+  user_has_crm_access() AND (
+    is_staff_manager_or_higher() OR assigned_to = current_user_id() OR created_by = current_user_id()
+  )
+);
+DROP POLICY IF EXISTS tasks_insert_staff ON tasks;
+CREATE POLICY tasks_insert_staff ON tasks FOR INSERT WITH CHECK (
+  is_staff_member_or_higher() AND (created_by IS NULL OR created_by = current_user_id())
+);
+DROP POLICY IF EXISTS tasks_update_staff ON tasks;
+CREATE POLICY tasks_update_staff ON tasks FOR UPDATE USING (
+  is_staff_manager_or_higher() OR assigned_to = current_user_id() OR created_by = current_user_id()
+) WITH CHECK (
+  is_staff_manager_or_higher() OR assigned_to = current_user_id() OR created_by = current_user_id()
+);
+DROP POLICY IF EXISTS tasks_delete_manager ON tasks;
+CREATE POLICY tasks_delete_manager ON tasks FOR DELETE USING (
+  is_staff_manager_or_higher() OR created_by = current_user_id()
+);
+
+-- --- 10. INTERACTIONS ---
+DROP POLICY IF EXISTS interactions_super_admin ON interactions;
+CREATE POLICY interactions_super_admin ON interactions FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS interactions_read_staff ON interactions;
+CREATE POLICY interactions_read_staff ON interactions FOR SELECT USING (
+  user_has_crm_access() AND (is_staff_member_or_higher() OR user_id = current_user_id())
+);
+DROP POLICY IF EXISTS interactions_insert_staff ON interactions;
+CREATE POLICY interactions_insert_staff ON interactions FOR INSERT WITH CHECK (
+  is_staff_member_or_higher() AND (user_id IS NULL OR user_id = current_user_id())
+);
+DROP POLICY IF EXISTS interactions_update_author ON interactions;
+CREATE POLICY interactions_update_author ON interactions FOR UPDATE USING (
+  is_super_admin() OR user_id = current_user_id()
+) WITH CHECK (
+  is_super_admin() OR user_id = current_user_id()
+);
+DROP POLICY IF EXISTS interactions_delete_super_admin ON interactions;
+CREATE POLICY interactions_delete_super_admin ON interactions FOR DELETE USING (is_super_admin());
+
+-- --- 11. FUNDING RECORDS (Hidden from Volunteers & Unscoped Staff) ---
+DROP POLICY IF EXISTS super_admin_all_funding ON funding_records;
+CREATE POLICY super_admin_all_funding ON funding_records FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS funding_authorized_view ON funding_records;
+CREATE POLICY funding_authorized_view ON funding_records FOR SELECT USING (
+  user_has_crm_access() AND (
+    is_staff_manager_or_higher() OR 
+    EXISTS (SELECT 1 FROM users u WHERE u.id = current_user_id() AND u.funding_scope IN ('ALL', 'VIEW'))
+  )
+);
+DROP POLICY IF EXISTS funding_insert_manager ON funding_records;
+CREATE POLICY funding_insert_manager ON funding_records FOR INSERT WITH CHECK (
+  is_staff_manager_or_higher() OR 
+  EXISTS (SELECT 1 FROM users u WHERE u.id = current_user_id() AND u.funding_scope = 'ALL')
+);
+DROP POLICY IF EXISTS funding_update_manager ON funding_records;
+CREATE POLICY funding_update_manager ON funding_records FOR UPDATE USING (
+  is_staff_manager_or_higher() OR 
+  EXISTS (SELECT 1 FROM users u WHERE u.id = current_user_id() AND u.funding_scope = 'ALL')
+) WITH CHECK (
+  is_staff_manager_or_higher() OR 
+  EXISTS (SELECT 1 FROM users u WHERE u.id = current_user_id() AND u.funding_scope = 'ALL')
+);
+DROP POLICY IF EXISTS funding_delete_super_admin ON funding_records;
+CREATE POLICY funding_delete_super_admin ON funding_records FOR DELETE USING (is_super_admin());
+
+-- --- 12. DOCUMENTS ---
+DROP POLICY IF EXISTS documents_super_admin ON documents;
+CREATE POLICY documents_super_admin ON documents FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS documents_read_staff ON documents;
+CREATE POLICY documents_read_staff ON documents FOR SELECT USING (
+  user_has_crm_access() AND is_staff_member_or_higher()
+);
+DROP POLICY IF EXISTS documents_insert_staff ON documents;
+CREATE POLICY documents_insert_staff ON documents FOR INSERT WITH CHECK (is_staff_member_or_higher());
+DROP POLICY IF EXISTS documents_update_author ON documents;
+CREATE POLICY documents_update_author ON documents FOR UPDATE USING (
+  is_staff_manager_or_higher() OR added_by = current_user_id()
+) WITH CHECK (
+  is_staff_manager_or_higher() OR added_by = current_user_id()
+);
+DROP POLICY IF EXISTS documents_delete_manager ON documents;
+CREATE POLICY documents_delete_manager ON documents FOR DELETE USING (is_staff_manager_or_higher());
+
+-- --- 13. USER PROGRAM & EVENT SCOPING ACCESS TABLES ---
+DROP POLICY IF EXISTS user_program_access_read ON user_program_access;
+CREATE POLICY user_program_access_read ON user_program_access FOR SELECT USING (
+  is_staff_manager_or_higher() OR user_id = current_user_id()
+);
+DROP POLICY IF EXISTS user_program_access_write ON user_program_access;
+CREATE POLICY user_program_access_write ON user_program_access FOR ALL USING (is_staff_manager_or_higher()) WITH CHECK (is_staff_manager_or_higher());
+
+DROP POLICY IF EXISTS user_event_access_read ON user_event_access;
+CREATE POLICY user_event_access_read ON user_event_access FOR SELECT USING (
+  is_staff_manager_or_higher() OR user_id = current_user_id()
+);
+DROP POLICY IF EXISTS user_event_access_write ON user_event_access;
+CREATE POLICY user_event_access_write ON user_event_access FOR ALL USING (is_staff_manager_or_higher()) WITH CHECK (is_staff_manager_or_higher());
+
+-- --- 14. AUDIT LOGS (Check 12: Strictly Immutable & Append-Only) ---
+DROP POLICY IF EXISTS audit_logs_read_authorized ON audit_logs;
+CREATE POLICY audit_logs_read_authorized ON audit_logs FOR SELECT USING (
+  is_super_admin() OR is_staff_manager_or_higher()
+);
+DROP POLICY IF EXISTS audit_logs_insert_append ON audit_logs;
+CREATE POLICY audit_logs_insert_append ON audit_logs FOR INSERT WITH CHECK (
+  auth.role() IN ('authenticated', 'service_role') OR user_has_crm_access()
+);
+-- Note: Zero UPDATE or DELETE policies exist for audit_logs.
+
+-- Step 5: Revoke default public execution privileges on administrative procedures
+REVOKE EXECUTE ON FUNCTION purge_audit_logs_older_than(INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION purge_audit_logs_older_than(INTEGER) TO authenticated;
 
 -- ==============================================================================
 -- 9. AI INTELLIGENCE & CSV ANALYTICS TABLES (Sections 48-55)
@@ -752,8 +957,148 @@ ALTER TABLE analysis_insights ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY super_admin_all_intelligence ON analysis_jobs FOR ALL USING (is_super_admin());
-CREATE POLICY staff_intelligence_access ON analysis_jobs FOR SELECT USING (user_has_crm_access());
-CREATE POLICY super_admin_ai_logs ON ai_requests FOR ALL USING (is_super_admin());
-CREATE POLICY super_admin_ai_usage ON ai_usage_logs FOR ALL USING (is_super_admin());
+-- Policies for analysis_files
+DROP POLICY IF EXISTS analysis_files_super_admin ON analysis_files;
+CREATE POLICY analysis_files_super_admin ON analysis_files FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS analysis_files_read ON analysis_files;
+CREATE POLICY analysis_files_read ON analysis_files FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS analysis_files_insert ON analysis_files FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS analysis_files_delete ON analysis_files FOR DELETE USING (is_staff_manager_or_higher() AND organization_id = current_user_org_id());
+
+-- Policies for analysis_jobs
+DROP POLICY IF EXISTS super_admin_all_intelligence ON analysis_jobs;
+CREATE POLICY super_admin_all_intelligence ON analysis_jobs FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS staff_intelligence_access ON analysis_jobs;
+CREATE POLICY staff_intelligence_access ON analysis_jobs FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS staff_intelligence_insert ON analysis_jobs FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+
+-- Policies for analysis_results
+DROP POLICY IF EXISTS analysis_results_super_admin ON analysis_results;
+CREATE POLICY analysis_results_super_admin ON analysis_results FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS analysis_results_read ON analysis_results;
+CREATE POLICY analysis_results_read ON analysis_results FOR SELECT USING (
+  user_has_crm_access() AND analysis_job_id IN (SELECT id FROM analysis_jobs WHERE organization_id = current_user_org_id())
+);
+
+-- Policies for analysis_metrics
+DROP POLICY IF EXISTS analysis_metrics_super_admin ON analysis_metrics;
+CREATE POLICY analysis_metrics_super_admin ON analysis_metrics FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS analysis_metrics_read ON analysis_metrics;
+CREATE POLICY analysis_metrics_read ON analysis_metrics FOR SELECT USING (user_has_crm_access());
+
+-- Policies for analysis_insights
+DROP POLICY IF EXISTS analysis_insights_super_admin ON analysis_insights;
+CREATE POLICY analysis_insights_super_admin ON analysis_insights FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS analysis_insights_read ON analysis_insights;
+CREATE POLICY analysis_insights_read ON analysis_insights FOR SELECT USING (user_has_crm_access());
+
+-- Policies for ai_requests
+DROP POLICY IF EXISTS super_admin_ai_logs ON ai_requests;
+CREATE POLICY super_admin_ai_logs ON ai_requests FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS ai_requests_staff_insert ON ai_requests;
+CREATE POLICY ai_requests_staff_insert ON ai_requests FOR INSERT WITH CHECK (user_has_crm_access() AND user_id = current_user_id());
+
+-- Policies for ai_usage_logs
+DROP POLICY IF EXISTS super_admin_ai_usage ON ai_usage_logs;
+CREATE POLICY super_admin_ai_usage ON ai_usage_logs FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+DROP POLICY IF EXISTS staff_ai_usage_read ON ai_usage_logs;
+CREATE POLICY staff_ai_usage_read ON ai_usage_logs FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
+
+-- ==============================================================================
+-- 10. SUPABASE STORAGE BUCKETS & ACCESS POLICIES (Security Check 13)
+-- ==============================================================================
+
+-- 1. Register Private Storage Buckets
+-- Buckets: crm_documents, crm_attachments, crm_backups (Strictly public = false)
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES 
+  (
+    'crm_documents', 
+    'crm_documents', 
+    false, 
+    10485760, -- 10MB limit
+    ARRAY[
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/csv',
+      'text/plain',
+      'image/png',
+      'image/jpeg',
+      'image/webp'
+    ]
+  ),
+  (
+    'crm_attachments', 
+    'crm_attachments', 
+    false, 
+    10485760, -- 10MB limit
+    ARRAY[
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/csv',
+      'text/plain',
+      'image/png',
+      'image/jpeg',
+      'image/webp'
+    ]
+  ),
+  (
+    'crm_backups', 
+    'crm_backups', 
+    false, 
+    26214400, -- 25MB limit
+    ARRAY['application/json']
+  )
+ON CONFLICT (id) DO UPDATE SET
+  public = false,
+  file_size_limit = EXCLUDED.file_size_limit,
+  allowed_mime_types = EXCLUDED.allowed_mime_types;
+
+-- 2. Storage Row Level Security (RLS) Policies on storage.objects
+ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+
+-- Policy: Documents & Attachments Read Scoping (Restricted to authorized roles; volunteers cannot read general documents)
+DROP POLICY IF EXISTS storage_documents_read ON storage.objects;
+CREATE POLICY storage_documents_read ON storage.objects
+  FOR SELECT USING (
+    bucket_id IN ('crm_documents', 'crm_attachments') AND (
+      is_super_admin() OR EXISTS (
+        SELECT 1 FROM users u
+        JOIN user_roles ur ON ur.user_id = u.id
+        WHERE u.auth_user_id = auth.uid()::text AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
+      )
+    )
+  );
+
+-- Policy: Documents & Attachments Upload (Restricted to staff with documents.create permission)
+DROP POLICY IF EXISTS storage_documents_insert ON storage.objects;
+CREATE POLICY storage_documents_insert ON storage.objects
+  FOR INSERT WITH CHECK (
+    bucket_id IN ('crm_documents', 'crm_attachments') AND (
+      is_super_admin() OR EXISTS (
+        SELECT 1 FROM users u
+        JOIN user_roles ur ON ur.user_id = u.id
+        WHERE u.auth_user_id = auth.uid()::text AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
+      )
+    )
+  );
+
+-- Policy: Documents & Attachments Deletion (Super Admin only)
+DROP POLICY IF EXISTS storage_documents_delete ON storage.objects;
+CREATE POLICY storage_documents_delete ON storage.objects
+  FOR DELETE USING (
+    bucket_id IN ('crm_documents', 'crm_attachments') AND is_super_admin()
+  );
+
+-- Policy: Database Backups (Strictly Restricted to Super Admin ONLY)
+DROP POLICY IF EXISTS storage_backups_super_admin ON storage.objects;
+CREATE POLICY storage_backups_super_admin ON storage.objects
+  FOR ALL USING (
+    bucket_id = 'crm_backups' AND is_super_admin()
+  );
+
+-- NOTE: Public and anonymous access to storage objects is unconditionally DENIED.
+
 

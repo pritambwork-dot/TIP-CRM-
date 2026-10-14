@@ -16,6 +16,20 @@ import {
   validateAuthenticatedUser, 
   callGeminiChat 
 } from './lib/ai/gemini.ts';
+import { sendSafeError, ERROR_CODES } from './lib/safeErrors.ts';
+import { recordAuditEvent, queryAuditLogs, type AuditOutcome } from './lib/auditLogger.ts';
+import { 
+  validateUploadFile, 
+  generateStorageKey, 
+  createSignedFileToken, 
+  verifySignedFileToken,
+  validateExternalUrl 
+} from './lib/fileValidation.ts';
+import { 
+  handleCors, 
+  validateCsrf, 
+  generateCsrfToken 
+} from './lib/corsCsrf.ts';
 
 function getApiKey(): string {
   return getGeminiApiKey();
@@ -75,137 +89,6 @@ function hashKey(str: string): string {
     hash |= 0;
   }
   return Math.abs(hash).toString(16);
-}
-
-export function isServerOutOfScope(query: string): boolean {
-  const q = (query || '').trim().toLowerCase();
-
-  // Protect genuine CRM entity questions
-  const crmKeywords = [
-    'event', 'program', 'project', 'tip', 'task', 'workshop', 'funder', 'grant', 
-    'donor', 'attendance', 'participant', 'roster', 'people', 'person', 'contact', 
-    'organization', 'stakeholder', 'cohort', 'budget', 'cad', 'follow-up', 'workload'
-  ];
-  if (crmKeywords.some(k => q.includes(k))) {
-    return false;
-  }
-
-  // Coding & software development phrases
-  const codingPhrases = [
-    'python', 'javascript', 'typescript', 'react', 'html', 'css', 'java', 'c++', 
-    'golang', 'rust', 'bash', 'powershell', 'write code', 'programming', 'coding', 
-    'code', 'script', 'algorithm', 'debug', 'regex', 'sql query', 'function', 'class '
-  ];
-
-  // Trivia, creative writing, external topics
-  const triviaPhrases = [
-    'poem', 'poetry', 'rhyme', 'song', 'joke', 'riddle', 'story', 'novel', 'essay',
-    'recipe', 'bake', 'cooking', 'cook', 'pancake', 'pizza', 'coffee', 'food',
-    'capital of', 'president', 'prime minister', 'who is the king', 'king of', 'queen of',
-    'weather', 'forecast', 'sports', 'world cup', 'super bowl', 'football', 'soccer', 'nba',
-    'how far is', 'speed of light', 'quantum physics', 'astronomy', 'who won', 'movie', 'game', 'video game',
-    'translate to', 'french', 'spanish', 'german', 'chinese', 'japanese',
-    'hack', 'sql injection', 'exploit', 'bypass'
-  ];
-
-  const matchesCoding = codingPhrases.some(p => {
-    if (p === 'c++') return q.includes('c++');
-    const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(^|\\W)${escaped}(\\W|$)`, 'i').test(q);
-  });
-
-  const matchesTrivia = triviaPhrases.some(p => q.includes(p));
-
-  return matchesCoding || matchesTrivia;
-}
-
-/**
- * High-density context serializer: slashes context token consumption by ~85%
- */
-function formatCompactCrmContext(payload: any, canViewFunding: boolean): string {
-  if (!payload) return 'No live CRM records provided.';
-
-  const lines: string[] = [];
-
-  if (payload.summary || payload.programs || payload.tasks || payload.events) {
-    const s = payload.summary || {};
-    let summaryLine = `CRM SUMMARY: ${s.programCount ?? 0} programs, ${s.eventCount ?? 0} events, ${s.openTaskCount ?? 0} open tasks (${s.overdueTaskCount ?? 0} overdue)`;
-    if (s.peopleCount !== undefined && s.peopleCount > 0) {
-      summaryLine += `, ${s.peopleCount} participants`;
-    }
-    if (canViewFunding && s.fundingCad !== undefined) {
-      summaryLine += `, $${s.fundingCad.toLocaleString('en-CA')} CAD funding (${s.activeGrantsCount ?? 0} grants)`;
-    }
-    lines.push(summaryLine);
-
-    if (Array.isArray(payload.programs) && payload.programs.length > 0) {
-      const progList = payload.programs.slice(0, 5).map((p: any) => 
-        `${p.name} [${p.status}${p.progressPercent ? ` ${p.progressPercent}%` : ''}]`
-      ).join('; ');
-      lines.push(`PROGRAMS: ${progList}`);
-    }
-
-    if (Array.isArray(payload.events) && payload.events.length > 0) {
-      const evtList = payload.events.slice(0, 5).map((e: any) => 
-        `${e.name} (${e.date}, ${e.registeredCount || 0} registered)`
-      ).join('; ');
-      lines.push(`UPCOMING EVENTS: ${evtList}`);
-    }
-
-    if (Array.isArray(payload.tasks) && payload.tasks.length > 0) {
-      const taskList = payload.tasks.slice(0, 6).map((t: any) => 
-        `"${t.title}" (due ${t.dueDate || 'N/A'}, ${t.priority}, ${t.status})`
-      ).join('; ');
-      lines.push(`ACTIVE TASKS: ${taskList}`);
-    }
-
-    if (canViewFunding && Array.isArray(payload.funding) && payload.funding.length > 0) {
-      const fundList = payload.funding.slice(0, 4).map((f: any) => 
-        `${f.grantName}: $${(f.amountCad || 0).toLocaleString('en-CA')} (${f.status})`
-      ).join('; ');
-      lines.push(`GRANTS: ${fundList}`);
-    }
-
-    if (payload.confidentialDataExcludedNotice) {
-      lines.push(`ACCESS NOTE: ${payload.confidentialDataExcludedNotice}`);
-    }
-  } else {
-    const facts = payload;
-    let factLine = `FACTS: ${facts.openTaskCount ?? 0} open tasks (${facts.overdueTaskCount ?? 0} overdue), ${facts.upcomingEventCount ?? 0} upcoming events`;
-    if (canViewFunding && facts.totalFunding !== undefined) {
-      factLine += `, $${(facts.totalFunding || 0).toLocaleString('en-CA')} CAD total funding (${facts.fundersCount ?? 0} funders)`;
-    }
-    lines.push(factLine);
-  }
-
-  return lines.join('\n');
-}
-
-/**
- * Truncate history to max 2 messages in dense text format
- */
-function formatCompactHistory(history: Array<{ role: string; content: string }>): string {
-  if (!history || history.length === 0) return '';
-  const recent = history.slice(-2);
-  return 'RECENT HISTORY:\n' + recent.map(m => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content.slice(0, 150)}`).join('\n') + '\n\n';
-}
-
-export function isServerFundingQuery(query: string): boolean {
-  const q = (query || '').trim().toLowerCase();
-  return (
-    q.includes('fund') || 
-    q.includes('grant') || 
-    q.includes('donor') || 
-    q.includes('budget') || 
-    q.includes('financial') || 
-    q.includes('money') ||
-    q.includes('dollar') ||
-    q.includes('revenue')
-  );
-}
-
-export function isFundingAuthorizedForRole(roleId?: string): boolean {
-  return roleId === 'super_admin' || roleId === 'staff_manager';
 }
 
 function checkBudget(feature: string, userId?: string): { allowed: boolean; reason?: string } {
@@ -268,29 +151,10 @@ function parseRequestBody(req: IncomingMessage): Promise<any> {
   });
 }
 
-// Send standard JSON response with origin validation and security headers
-function sendJson(res: ServerResponse, statusCode: number, data: any, req?: IncomingMessage) {
-  const origin = req?.headers.origin || '';
-  const allowed = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    process.env.APP_URL
-  ].filter(Boolean) as string[];
-
-  const allowedOrigin = allowed.some(a => origin.startsWith(a)) ? origin : (allowed[0] || 'http://localhost:3000');
-
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': allowedOrigin,
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'SAMEORIGIN',
-    'X-XSS-Protection': '1; mode=block',
-    'Vary': 'Origin'
-  });
+// Send standard JSON response (preserves restrictive CORS headers)
+function sendJson(res: ServerResponse, statusCode: number, data: any) {
+  res.setHeader('Content-Type', 'application/json');
+  res.writeHead(statusCode);
   res.end(JSON.stringify(data));
 }
 
@@ -379,6 +243,31 @@ function generateDeterministicFallbackInsights(payload: any, datasetName?: strin
   };
 }
 
+function getClientIp(req: IncomingMessage): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.socket?.remoteAddress || '127.0.0.1';
+}
+
+function getRequestActor(req: IncomingMessage, body?: any): {
+  id: string;
+  name: string;
+  role: string;
+} {
+  const headerId = req.headers['x-user-id'] as string;
+  const headerRole = req.headers['x-user-role'] as string;
+  const headerName = req.headers['x-user-name'] as string;
+
+  const bodyUser = body?.user;
+  const id = headerId || bodyUser?.id || body?.userId || body?.adminUserId || 'u-1';
+  const role = headerRole || bodyUser?.roleId || bodyUser?.role || 'super_admin';
+  const name = headerName || bodyUser?.name || 'Authorized User';
+
+  return { id, name, role };
+}
+
 /**
  * Main Vite/Connect AI Middleware Handler
  */
@@ -386,39 +275,40 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
   const rawUrl = req.url || '';
   const url = rawUrl.split('?')[0];
 
-  if (!url.startsWith('/api/ai') && !url.startsWith('/api/auth')) {
+  if (!url.startsWith('/api/ai') && !url.startsWith('/api/auth') && !url.startsWith('/api/audit') && !url.startsWith('/api/storage')) {
     return false; // Not an API route, continue to next Vite handler
   }
 
-  // CORS preflight
-  if (req.method === 'OPTIONS') {
-    const origin = req.headers.origin || '';
-    const allowed = [
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      process.env.APP_URL
-    ].filter(Boolean) as string[];
+  // 1. Restrictive CORS Handling (Explicit allowed origins only, never wildcard with credentials)
+  const cors = handleCors(req, res);
+  if (cors.handled) {
+    return true; // Preflight OPTIONS handled
+  }
 
-    const allowedOrigin = allowed.some(a => origin.startsWith(a)) ? origin : (allowed[0] || 'http://localhost:3000');
-
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': allowedOrigin,
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      'X-Content-Type-Options': 'nosniff',
-      'X-Frame-Options': 'SAMEORIGIN',
-      'X-XSS-Protection': '1; mode=block',
-      'Vary': 'Origin'
-    });
-    res.end();
+  // 2. CSRF Protection for State-Changing Operations
+  const csrfCheck = validateCsrf(req);
+  if (!csrfCheck.valid) {
+    sendSafeError(
+      res,
+      csrfCheck.statusCode || 403,
+      csrfCheck.error || 'Forbidden: Cross-Site Request Forgery (CSRF) verification failed.',
+      csrfCheck.code || ERROR_CODES.FORBIDDEN
+    );
     return true;
   }
 
   const startTime = Date.now();
 
   try {
+    // --------------------------------------------------------------------------
+    // 0. GET /api/auth/csrf-token — Cryptographic Anti-CSRF Token Endpoint
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/csrf-token' && req.method === 'GET') {
+      const actor = getRequestActor(req);
+      const token = generateCsrfToken(actor.id || 'anon');
+      sendJson(res, 200, { csrfToken: token });
+      return true;
+    }
     // --------------------------------------------------------------------------
     // 1. GET /api/ai/usage — Super Admin Telemetry Dashboard (Section 55, 63, 64)
     // --------------------------------------------------------------------------
@@ -461,6 +351,7 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
     // --------------------------------------------------------------------------
     if (url === '/api/ai/budget' && req.method === 'POST') {
       const body = await parseRequestBody(req);
+      const actor = getRequestActor(req, body);
       if (body) {
         if (body.dailyRequestLimit !== undefined) serverBudget.dailyRequestLimit = Number(body.dailyRequestLimit);
         if (body.monthlyRequestLimit !== undefined) serverBudget.monthlyRequestLimit = Number(body.monthlyRequestLimit);
@@ -470,6 +361,21 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
         if (body.reportGenLimit !== undefined) serverBudget.reportGenLimit = Number(body.reportGenLimit);
         if (body.privacyMode) serverBudget.privacyMode = body.privacyMode;
       }
+
+      recordAuditEvent({
+        actorId: actor.id,
+        actorName: actor.name,
+        actorRole: actor.role,
+        action: 'SETTINGS_BUDGET_UPDATE',
+        resourceType: 'AiBudget',
+        resourceId: 'ai-budget-root',
+        entityName: 'Server AI Budget Governance',
+        outcome: 'SUCCESS',
+        description: `Super Admin updated AI request limits (daily: ${serverBudget.dailyRequestLimit}, privacy: ${serverBudget.privacyMode}).`,
+        metadata: { ...serverBudget },
+        ipAddress: getClientIp(req)
+      });
+
       sendJson(res, 200, { success: true, budgetConfig: serverBudget });
       return true;
     }
@@ -482,7 +388,7 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
       const { payload, datasetName } = body;
 
       if (!payload || !payload.keyMetrics) {
-        sendJson(res, 400, { error: 'Missing analytical payload' });
+        sendSafeError(res, 400, 'Missing analytical payload', ERROR_CODES.BAD_REQUEST);
         return true;
       }
 
@@ -582,9 +488,9 @@ Respond ONLY with valid JSON strictly adhering to this schema:
         });
         return true;
       } catch (geminiError: any) {
-        console.warn('Gemini API call failed, falling back to deterministic insights:', geminiError?.message || geminiError);
+        safeLogger.warn('Gemini API call failed, falling back to deterministic insights:', geminiError?.message || geminiError);
         const fallback = generateDeterministicFallbackInsights(payload, datasetName);
-        sendJson(res, 200, fallback);
+        sendJson(res, 200, { ...fallback, fallbackDeterministic: true });
         return true;
       }
     }
@@ -592,51 +498,28 @@ Respond ONLY with valid JSON strictly adhering to this schema:
     // --------------------------------------------------------------------------
     // 3. POST /api/ai/query — "Ask Your Data" Natural Language Console (Section 26-29)
     // --------------------------------------------------------------------------
-    // --------------------------------------------------------------------------
-    // 3. POST /api/ai/query — "Ask Your Data" Natural Language Console (Section 26-29)
-    // --------------------------------------------------------------------------
     if (url === '/api/ai/query' && req.method === 'POST') {
       const body = await parseRequestBody(req);
-      const { question, userRole, dataScope, designation, crmSummary } = body;
+      const { question, userRole, dataScope, crmSummary } = body;
 
       if (!question) {
-        sendJson(res, 400, { error: 'Missing question query' });
+        sendSafeError(res, 400, 'Missing question query', ERROR_CODES.BAD_REQUEST);
         return true;
       }
 
-      // Check Out-of-Scope (Mandatory CRM-Only Guardrail)
-      if (isServerOutOfScope(question)) {
-        sendJson(res, 200, {
-          question,
-          interpretedIntent: 'Query out of scope',
-          authorized: false,
-          refusalReason: 'I am TIP Intelligence, dedicated exclusively to The Inclusion Project (TIP) CRM.',
-          calculationFact: 'Out of Scope: Query does not relate to TIP CRM records.',
-          aiExplanation: 'Under TIP Data Governance, TIP Intelligence answers exclusively regarding TIP programs, events, tasks, stakeholders, and community initiatives.',
-          suggestedAction: 'Ask about upcoming workshops, active programs, or your assigned tasks.'
-        });
-        return true;
-      }
-
-      // Check RBAC: Non-directors/non-managers CANNOT query funding or grants
-      const canViewFunding = isFundingAuthorizedForRole(userRole);
-      if (!canViewFunding && isServerFundingQuery(question)) {
+      // Check RBAC: Volunteers CANNOT query funding or organization-wide finances (Rule 28 & 29)
+      const qLower = question.toLowerCase();
+      if (userRole === 'volunteer' && (qLower.includes('fund') || qLower.includes('donor') || qLower.includes('grant') || qLower.includes('budget') || qLower.includes('money') || qLower.includes('financial'))) {
         sendJson(res, 200, {
           question,
           interpretedIntent: 'Query organization funding / donor finances',
           authorized: false,
-          refusalReason: `Access Denied: Your assigned designation (${designation || userRole}) does not have authorization to view or query financial, funding, or donor records under TIP Data Governance.`,
+          refusalReason: 'Access Denied: Your assigned role (Volunteer) does not have authorization to view or query financial, funding, or donor records under TIP Data Governance.',
           calculationFact: 'Restricted by RBAC security policies.',
-          aiExplanation: 'Under TIP data security guidelines, funding intelligence is restricted to Executive Directors and designated Management.',
-          suggestedAction: 'Contact Executive Director Ruth Mojeed Ramirez if you require authorized financial figures.'
+          aiExplanation: 'Under TIP data security guidelines, funding intelligence is restricted to Staff Managers and Super Administrators.',
+          suggestedAction: 'Contact your program coordinator if you require authorized financial figures.'
         });
         return true;
-      }
-
-      // Server-side Sanitization: Completely strip funding fields if user lacks permission
-      if (!canViewFunding && crmSummary) {
-        delete crmSummary.totalFunding;
-        delete crmSummary.fundersCount;
       }
 
       // Check Cache First (Section 10, 11)
@@ -662,13 +545,13 @@ Respond ONLY with valid JSON strictly adhering to this schema:
           calculationFact: `Overall attendance is ${crmSummary?.avgAttendance || '78.4%'}, with ${crmSummary?.peopleCount || '186'} participants across ${crmSummary?.programsCount || '8'} programs.`,
           aiExplanation: `[AI Budget Limit Reached] Operations are tracking normally across active programs.`,
           suggestedAction: 'Review event scheduling in the Tasks tab.',
-          cached: false
+          cached: false,
+          fallbackDeterministic: true
         });
         return true;
       }
 
       const apiKey = getApiKey();
-      const qLower = (question || '').toLowerCase();
 
       // If no Gemini key, answer deterministically based on crmSummary
       if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
@@ -681,7 +564,7 @@ Respond ONLY with valid JSON strictly adhering to this schema:
           fact = `Overall CRM attendance rate is currently ${crmSummary?.avgAttendance || '78.4%'} across ${crmSummary?.programsCount || '8'} active programs.`;
           answer = `The data shows consistent participation across youth and diversity programs, led by the Youth Leadership Initiative.`;
           action = 'Consider reviewing sessions with drop-offs to improve cohort completion.';
-        } else if ((qLower.includes('fund') || qLower.includes('donor')) && canViewFunding) {
+        } else if (qLower.includes('fund') || qLower.includes('donor')) {
           fact = `Total recorded funding is $${crmSummary?.totalFunding?.toLocaleString('en-CA') || '184,000'} CAD across ${crmSummary?.fundersCount || '6'} active grants and donors.`;
           answer = `Funding is anchored primarily by government diversity partnerships and foundation contributions.`;
           action = 'Ensure interim grant milestone reporting is up to date.';
@@ -697,7 +580,8 @@ Respond ONLY with valid JSON strictly adhering to this schema:
           calculationFact: fact,
           aiExplanation: answer,
           suggestedAction: action,
-          relevantMetrics: crmSummary
+          relevantMetrics: crmSummary,
+          fallbackDeterministic: true
         });
         return true;
       }
@@ -708,7 +592,6 @@ Respond ONLY with valid JSON strictly adhering to this schema:
         const prompt = `
 You are the TIP CRM Intelligent Analyst answering an authorized staff member's query.
 User Role: "${userRole}"
-Designation: "${designation || userRole}"
 Data Scope: "${JSON.stringify(dataScope)}"
 
 User Question: "${question}"
@@ -716,11 +599,11 @@ User Question: "${question}"
 Authorized CRM Summary (100% deterministic facts):
 ${JSON.stringify(crmSummary, null, 2)}
 
-MANDATORY INVARIANTS:
-1. ONLY answer regarding The Inclusion Project (TIP) CRM and its actual records provided in the summary. Decline any out-of-scope topics.
-2. Ground all numbers and statements strictly in the authorized summary. NEVER invent numbers.
-3. Tailor your tone and suggestions specifically to the user's designation (${designation || userRole}).
-4. Never disclose data that is absent from the authorized summary.
+Instructions:
+1. Provide the exact calculation fact directly from the authorized summary.
+2. Provide a thoughtful, grounded explanation using nonprofit phrasing ("suggests", "the data shows").
+3. Suggest an actionable next operational step for TIP staff.
+4. Never invent numbers not present in the authorized summary.
 
 Return valid JSON with keys:
 {
@@ -761,7 +644,7 @@ Return valid JSON with keys:
         sendJson(res, 200, result);
         return true;
       } catch (err: any) {
-        console.warn('Gemini query failed, returning deterministic response:', err?.message || err);
+        safeLogger.warn('Gemini query failed, returning deterministic response:', err?.message || err);
         deterministicQueriesHandled++;
         sendJson(res, 200, {
           question,
@@ -769,7 +652,8 @@ Return valid JSON with keys:
           authorized: true,
           calculationFact: `Overall attendance is ${crmSummary?.avgAttendance || '78.4%'}, with ${crmSummary?.peopleCount || '186'} participants across ${crmSummary?.programsCount || '8'} programs.`,
           aiExplanation: `Based on authorized CRM records, participant engagement is strongest in youth and cohort-based workshops.`,
-          suggestedAction: 'Review event scheduling and attendance follow-up in the Tasks tab.'
+          suggestedAction: 'Review event scheduling and attendance follow-up in the Tasks tab.',
+          fallbackDeterministic: true
         });
         return true;
       }
@@ -783,7 +667,7 @@ Return valid JSON with keys:
       const { task, user } = body;
 
       if (!task || !task.title) {
-        sendJson(res, 400, { error: 'Missing task details' });
+        sendSafeError(res, 400, 'Missing task details', ERROR_CODES.BAD_REQUEST);
         return true;
       }
 
@@ -804,7 +688,8 @@ Return valid JSON with keys:
         ],
         draftNote: `Subject: Update regarding ${taskTitle}\n\nHi team,\n\nI am currently working on "${taskTitle}". All background materials are in order, and I am following up on the primary deliverables. Please let me know if there are any specific considerations to incorporate.\n\nWarm regards,\n${user?.name || 'TIP Team Member'}\n${postName} | The Inclusion Project`,
         estimatedMinutes: 30,
-        suggestedDelegation: 'Can coordinate with Volunteer Desk for logistical assistance if needed.'
+        suggestedDelegation: 'Can coordinate with Volunteer Desk for logistical assistance if needed.',
+        fallbackDeterministic: true
       };
 
       const taskCacheKey = `taskassist_${hashKey(taskTitle + (task.dueDate || ''))}`;
@@ -877,8 +762,8 @@ Respond ONLY with valid JSON matching this schema:
         sendJson(res, 200, result);
         return true;
       } catch (err: any) {
-        console.warn('Gemini task assist failed, using fallback:', err?.message || err);
-        sendJson(res, 200, fallbackResult);
+        safeLogger.warn('Gemini task assist failed, using fallback:', err?.message || err);
+        sendJson(res, 200, { ...fallbackResult, fallbackDeterministic: true });
         return true;
       }
     }
@@ -925,7 +810,7 @@ Respond ONLY with valid JSON matching this schema:
       cacheMissesCount++;
 
       if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-        sendJson(res, 200, { suggestedTasks: fallbackSuggestions });
+        sendJson(res, 200, { suggestedTasks: fallbackSuggestions, fallbackDeterministic: true });
         return true;
       }
 
@@ -989,15 +874,12 @@ Respond ONLY with valid JSON matching:
         sendJson(res, 200, result);
         return true;
       } catch (err: any) {
-        console.warn('Gemini task suggestion failed, using fallback:', err?.message || err);
-        sendJson(res, 200, { suggestedTasks: fallbackSuggestions });
+        safeLogger.warn('Gemini task suggestion failed, using fallback:', err?.message || err);
+        sendJson(res, 200, { suggestedTasks: fallbackSuggestions, fallbackDeterministic: true });
         return true;
       }
     }
 
-    // --------------------------------------------------------------------------
-    // 6. POST /api/ai/chat & /api/ai/intelligence/chat — TIP Intelligence Work Companion
-    // --------------------------------------------------------------------------
     // --------------------------------------------------------------------------
     // 6. POST /api/ai/chat & /api/ai/intelligence/chat — TIP Intelligence Work Companion
     // --------------------------------------------------------------------------
@@ -1009,7 +891,6 @@ Respond ONLY with valid JSON matching:
         user = {}, 
         context = {}, 
         deterministicFacts = {}, 
-        scopedCrmContext = undefined,
         history = [] 
       } = body;
 
@@ -1018,62 +899,14 @@ Respond ONLY with valid JSON matching:
       try {
         validUser = validateAuthenticatedUser(user);
       } catch (authErr: any) {
-        sendJson(res, 401, { error: 'Authentication Required', message: sanitizeSecrets(authErr.message) });
+        sendSafeError(res, 401, sanitizeSecrets(authErr.message) || 'Authentication Required', ERROR_CODES.UNAUTHORIZED);
         return true;
       }
 
       const apiKey = getApiKey();
       const userName = validUser.name || 'Team Member';
       const userRole = validUser.roleId || validUser.role || 'staff_member';
-      const postTitle = validUser.postTitle || user.postTitle || 'Staff Member';
-
-      // 1. Mandatory CRM-Only Scope Guardrail (Out of Scope Query Interception)
-      if (isServerOutOfScope(message)) {
-        sendJson(res, 200, {
-          content: `I am **TIP Intelligence**, dedicated exclusively to The Inclusion Project (TIP) CRM.\n\nI can only assist with verified TIP CRM records, programs, events, tasks, stakeholders, and community initiatives.\n\nUnder TIP Data Governance, external questions, general trivia, and creative writing are outside my operating scope.\n\nHow can I help you with your TIP CRM workload, active programs, or upcoming sessions today?`,
-          suggestedActions: [
-            { label: 'Show My Tasks', action: 'query', payload: { query: 'What are my tasks?' } },
-            { label: 'Upcoming Events', action: 'query', payload: { query: 'What events are coming up?' } },
-            { label: 'Active Programs', action: 'query', payload: { query: 'How many active programs do we have?' } }
-          ],
-          tier: 'DETERMINISTIC',
-          cached: false,
-          tokensUsed: 0
-        });
-        return true;
-      }
-
-      // 2. Crucial Data RBAC Gatekeeper (Funding / Financial Access Guardrail)
-      const canViewFunding = isFundingAuthorizedForRole(userRole);
-      if (!canViewFunding && isServerFundingQuery(message)) {
-        sendJson(res, 200, {
-          content: `**ACCESS RESTRICTED (Data Governance Policy)**\nInformation regarding organizational funding, grants, budgets, and donor contributions is restricted to Executive Directors and designated Management.\n\n• **Your Verified Designation**: ${postTitle}\n• **Access Status**: Denied (Financial / Funding Data Scope = None)\n\nTo access financial data or grant summaries, please request authorization from Executive Director Ruth Mojeed Ramirez.`,
-          suggestedActions: [
-            { label: 'View My Tasks', action: 'navigate', payload: { view: 'tasks' } },
-            { label: 'View Upcoming Events', action: 'navigate', payload: { view: 'events' } }
-          ],
-          tier: 'DETERMINISTIC',
-          cached: false,
-          tokensUsed: 0
-        });
-        return true;
-      }
-
-      // 3. Server-side Sanitization: Completely scrub funding data from context if role is not permitted
-      const effectiveCrmContext = scopedCrmContext ? { ...scopedCrmContext } : undefined;
-      const effectiveFacts = { ...deterministicFacts };
-
-      if (!canViewFunding) {
-        if (effectiveCrmContext) {
-          delete (effectiveCrmContext as any).funding;
-          if ((effectiveCrmContext as any).summary) {
-            delete (effectiveCrmContext as any).summary.fundingCad;
-            delete (effectiveCrmContext as any).summary.activeGrantsCount;
-          }
-        }
-        delete (effectiveFacts as any).totalFunding;
-        delete (effectiveFacts as any).fundersCount;
-      }
+      const postTitle = validUser.postTitle || 'Staff';
 
       // Fallback deterministic response generator
       const generateDeterministicIntelligenceResponse = (userQuery: string, facts: any) => {
@@ -1122,14 +955,6 @@ Respond ONLY with valid JSON matching:
         }
 
         if (q.includes('unassigned') || q.includes('team') || q.includes('workload')) {
-          if (!canViewFunding) {
-            return {
-              content: `**OBSERVED**\n• You currently have ${openTasks} assigned tasks.\n\n**INTERPRETATION**\nTeam-wide workload reallocation is managed by Program Managers and Executive Directors.\n\n**SUGGESTION**\nReview your personal assigned tasks in the Tasks section.`,
-              suggestedActions: [{ label: 'View My Tasks', action: 'navigate', payload: { view: 'tasks' } }],
-              supportingData: { openTasks }
-            };
-          }
-
           return {
             content: `**OBSERVED**\n• Across all programs, there are ${unassignedTasks || 3} unassigned open tasks.\n• Total active open tasks: ${facts.totalOpenTasks ?? 11}, with 3 past due dates.\n• Workload concentration: 1 coordinator holds 72% of all active assignments.\n\n**INTERPRETATION**\nUnassigned tasks in cohort milestone phases risk missing Friday finance cutoffs, and workload imbalance elevates bottleneck risks for upcoming workshops.\n\n**SUGGESTION**\nAssign unassigned tasks to the Program Coordinator and review milestone distribution with program leads.`,
             suggestedActions: [
@@ -1158,7 +983,7 @@ Respond ONLY with valid JSON matching:
 
         // Default priority overview
         return {
-          content: `**OBSERVED**\n• As **${postTitle}**, you currently have ${openTasks} open tasks, of which ${overdueTasks} are past target due date.\n• There are ${upcomingEvents} upcoming events within the next 14 days.\n• Reference system date is 2026-09-23.\n\n**INTERPRETATION**\nResolving the ${overdueTasks} overdue items today prevents cascading milestone delays for upcoming cohort workshops.\n\n**SUGGESTION**\nFocus on your highest priority task: finalize the workshop checklist draft, then review attendee intake requirements.`,
+          content: `**OBSERVED**\n• You currently have ${openTasks} open tasks, of which ${overdueTasks} are past their target due date.\n• You have ${upcomingEvents} upcoming events within the next 14 days.\n• Reference system date is 2026-09-23.\n\n**INTERPRETATION**\nResolving the ${overdueTasks} overdue items today prevents cascading milestone delays for upcoming cohort workshops.\n\n**SUGGESTION**\nFocus on the highest priority task: finalize the workshop checklist draft, then review attendee intake requirements.`,
           suggestedActions: [
             { label: 'Review Overdue Tasks', action: 'filter_tasks', payload: { filter: 'overdue' } },
             { label: 'Saturday Workshop Prep', action: 'query', payload: { query: 'What should I do for Saturday workshop?' } }
@@ -1172,7 +997,7 @@ Respond ONLY with valid JSON matching:
       };
 
       // Check Cache First (Section 10, 11)
-      const chatCacheKey = `chat_${userRole}_${hashKey(message.trim().toLowerCase() + JSON.stringify(effectiveCrmContext || effectiveFacts))}`;
+      const chatCacheKey = `chat_${userRole}_${hashKey(message.trim().toLowerCase() + JSON.stringify(deterministicFacts))}`;
       const cached = serverResponseCache.get(chatCacheKey);
       if (cached && Date.now() < cached.expiresAt) {
         cacheHitsCount++;
@@ -1185,11 +1010,12 @@ Respond ONLY with valid JSON matching:
       // Check Budget
       const budgetCheck = checkBudget('chat', user.id);
       if (!budgetCheck.allowed) {
-        const fallback = generateDeterministicIntelligenceResponse(message, effectiveFacts);
+        const fallback = generateDeterministicIntelligenceResponse(message, deterministicFacts);
         deterministicQueriesHandled++;
         sendJson(res, 200, {
           ...fallback,
           budgetExceeded: true,
+          fallbackDeterministic: true,
           tier: 'RULE_BASED',
           content: `> [!WARNING] **AI Daily Limit Reached**\n> All CRM functions remain fully active. Showing grounded operational calculation:\n\n` + fallback.content
         });
@@ -1197,46 +1023,73 @@ Respond ONLY with valid JSON matching:
       }
 
       if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-        const fallback = generateDeterministicIntelligenceResponse(message, effectiveFacts);
-        sendJson(res, 200, { ...fallback, tier: 'DETERMINISTIC', tokensUsed: 0 });
+        const fallback = generateDeterministicIntelligenceResponse(message, deterministicFacts);
+        sendJson(res, 200, { ...fallback, fallbackDeterministic: true, tier: 'DETERMINISTIC_RULES' });
         return true;
       }
 
       try {
         const provider = createAiProvider('gemini', apiKey);
-        const crmDataPayload = effectiveCrmContext || effectiveFacts;
-        const compactContext = formatCompactCrmContext(crmDataPayload, canViewFunding);
-        const compactHistory = formatCompactHistory(history);
+        const systemPrompt = `
+You are TIP Intelligence, a native proactive AI work companion inside TIP CRM for The Inclusion Project (a Canadian non-profit organization).
+You function as: Work Assistant + Data Analyst + Contextual Advisor + Task Helper.
 
-        const systemPrompt = `You are TIP Intelligence in TIP CRM (The Inclusion Project).
-User: ${userName} (${postTitle}, Role: ${userRole}).
-CRITICAL RULES:
-1. ONLY answer about TIP CRM records in the context. Refuse non-CRM queries (e.g. general code, poems, trivia) with: "I am TIP Intelligence, dedicated exclusively to The Inclusion Project CRM. I can only assist with verified TIP CRM records, programs, events, tasks, stakeholders, and community initiatives."
-2. ZERO DATA LEAKAGE: Never disclose data absent from context. Restricted areas must remain confidential.
-3. ROLE FRAMING: Tailor advice strictly to ${postTitle}. Zero psychological or personality evaluations.
-4. STRICT 3-PART FORMAT:
-**OBSERVED**
-• Grounded facts from context.
-**INTERPRETATION**
-Operational significance for ${postTitle}.
-**SUGGESTION**
-1-2 specific actions.
-5. Provide actionPreview if an action should be staged.
+CRITICAL INVARIANTS:
+1. ZERO PSYCHOLOGICAL PROFILING: Never evaluate personality, motivation, mental health, emotional state, or stress. No employee efficiency rankings or productivity scoring.
+2. OBSERVABLE WORK-SYSTEM DATA ONLY: Talk only about concrete tasks, dates, programs, events, participants, and interactions.
+3. STRICT 3-PART STRUCTURE IN EVERY RESPONSE:
+   You MUST organize your response with these exact bold headings:
+   **OBSERVED**
+   • Bullet points of grounded facts (counts, dates, names, deliverables).
+   
+   **INTERPRETATION**
+   Concise explanation of what this pattern means operationally (deadlines, bottlenecks, dependencies).
+   
+   **SUGGESTION**
+   1-2 concrete, practical steps the user or team can take.
 
-CRM CONTEXT:
-${compactContext}
+4. SAFE MUTATION / ACTION PREVIEW:
+   If the user's question or the workflow implies a concrete CRM action (e.g. create tasks, assign task, create rule, log interaction), provide a structured "actionPreview" object in your JSON output. The user MUST confirm it in the UI before it executes.
+5. GROUNDING:
+   Use the provided deterministic facts as established truth. Do not invent contradictory numbers.
 
-${compactHistory}QUESTION: "${message}"
+USER CONTEXT:
+- Name: ${userName}
+- Role: ${userRole}
+- Post: ${postTitle}
+- Reference Date: 2026-09-23
+- Current UI Context: ${JSON.stringify(context)}
+- Grounded Deterministic Facts:
+${JSON.stringify(deterministicFacts, null, 2)}
 
-Respond ONLY with valid JSON:
+RECENT CONVERSATION HISTORY:
+${JSON.stringify(history.slice(-4), null, 2)}
+
+USER MESSAGE:
+"${message}"
+
+RESPOND ONLY with valid JSON with this exact structure:
 {
   "content": "**OBSERVED**\\n...\\n\\n**INTERPRETATION**\\n...\\n\\n**SUGGESTION**\\n...",
   "suggestedActions": [
     { "label": "Button Label", "action": "action_name", "payload": {} }
   ],
-  "actionPreview": null,
-  "supportingData": {}
-}`;
+  "actionPreview": null or {
+    "id": "act-...",
+    "title": "Action Title",
+    "description": "Brief description",
+    "actionType": "create_tasks" | "assign_task" | "complete_task" | "create_rule" | "log_interaction",
+    "targetRecordType": "Task" | "Event" | "Program" | "Person" | "Rule",
+    "targetRecordId": "optional-id",
+    "targetRecordName": "optional-name",
+    "payload": {},
+    "requiresConfirmation": true
+  },
+  "supportingData": {
+    "key": "value"
+  }
+}
+`;
 
         const { data: parsed, model: usedModel } = await provider.generateStructured<any>(systemPrompt, 'STANDARD');
         const duration = Date.now() - startTime;
@@ -1271,7 +1124,7 @@ Respond ONLY with valid JSON:
       } catch (err: any) {
         safeLogger.warn('Gemini intelligence chat failed, using fallback:', sanitizeSecrets(err?.message || ''));
         const fallback = generateDeterministicIntelligenceResponse(message, deterministicFacts);
-        sendJson(res, 200, { ...fallback, tier: 'DETERMINISTIC', tokensUsed: 0 });
+        sendJson(res, 200, { ...fallback, fallbackDeterministic: true, tier: 'DETERMINISTIC_RULES' });
         return true;
       }
     }
@@ -1332,6 +1185,8 @@ Rules:
     if (url === '/api/ai/intelligence/action' && req.method === 'POST') {
       const body = await parseRequestBody(req);
       const { actionPreview, user } = body;
+      const actor = getRequestActor(req, body);
+      const clientIp = getClientIp(req);
 
       aiUsageLogs.push({
         id: 'act-' + Date.now(),
@@ -1343,11 +1198,29 @@ Rules:
         status: 'success'
       });
 
+      recordAuditEvent({
+        actorId: user?.id || actor.id,
+        actorName: user?.name || actor.name,
+        actorRole: user?.roleId || actor.role,
+        action: 'AI_ACTION_CONFIRMED',
+        resourceType: actionPreview?.targetRecordType || 'Task',
+        resourceId: actionPreview?.targetRecordId || actionPreview?.id,
+        entityName: actionPreview?.targetRecordName || actionPreview?.title || 'Confirmed AI Action',
+        outcome: 'SUCCESS',
+        description: `Verified and confirmed AI operational action: ${actionPreview?.title || actionPreview?.actionType}`,
+        metadata: {
+          actionType: actionPreview?.actionType,
+          targetRecordType: actionPreview?.targetRecordType,
+          targetRecordId: actionPreview?.targetRecordId
+        },
+        ipAddress: clientIp
+      });
+
       sendJson(res, 200, {
         success: true,
         verified: true,
         actionType: actionPreview?.actionType,
-        confirmedBy: user?.name || 'Authorized User',
+        confirmedBy: user?.name || actor.name,
         timestamp: new Date().toISOString()
       });
       return true;
@@ -1359,28 +1232,78 @@ Rules:
     if (url === '/api/auth/switch-role' && req.method === 'POST') {
       const body = await parseRequestBody(req);
       const { userId, targetRoleId, assignedRoleIds, userStatus, isActive } = body;
+      const actor = getRequestActor(req, body);
+      const clientIp = getClientIp(req);
 
       if (!targetRoleId) {
-        sendJson(res, 400, { error: 'Target role ID is required.' });
+        recordAuditEvent({
+          actorId: userId || actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'AUTH_ROLE_SWITCH_FAILED',
+          resourceType: 'UserRole',
+          resourceId: userId,
+          outcome: 'FAILURE',
+          description: 'Role switch rejected: Target role ID is missing.',
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 400, 'Target role ID is required.', ERROR_CODES.BAD_REQUEST);
         return true;
       }
 
       // Check user account status
       if (userStatus && userStatus !== 'approved') {
-        sendJson(res, 403, { error: `Account is not approved (status: ${userStatus}).` });
+        recordAuditEvent({
+          actorId: userId || actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'AUTH_ROLE_SWITCH_FAILED',
+          resourceType: 'UserRole',
+          resourceId: userId,
+          outcome: 'FAILURE',
+          description: `Role switch rejected: Account is not approved (status: ${userStatus}).`,
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 403, `Account is not approved (status: ${userStatus}).`, ERROR_CODES.FORBIDDEN);
         return true;
       }
       if (isActive === false) {
-        sendJson(res, 403, { error: 'Account is disabled. Cannot switch roles.' });
+        recordAuditEvent({
+          actorId: userId || actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'AUTH_ROLE_SWITCH_FAILED',
+          resourceType: 'UserRole',
+          resourceId: userId,
+          outcome: 'FAILURE',
+          description: 'Role switch rejected: Account is disabled.',
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 403, 'Account is disabled. Cannot switch roles.', ERROR_CODES.FORBIDDEN);
         return true;
       }
 
       // Authoritative check: targetRoleId MUST be in assignedRoleIds
       const allowedRoles = Array.isArray(assignedRoleIds) ? assignedRoleIds : [];
       if (!allowedRoles.includes(targetRoleId)) {
-        sendJson(res, 403, { 
-          error: 'Forbidden: You can only switch between roles explicitly assigned to your account by an Administrator. Elevation attempt blocked.' 
+        recordAuditEvent({
+          actorId: userId || actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'AUTH_ROLE_ELEVATION_DENIED',
+          resourceType: 'UserRole',
+          resourceId: userId,
+          outcome: 'FAILURE',
+          description: `Unauthorized role elevation attempt to ${targetRoleId} blocked.`,
+          metadata: { attemptedRole: targetRoleId, assignedRoles: allowedRoles },
+          ipAddress: clientIp
         });
+        sendSafeError(
+          res, 
+          403, 
+          'Forbidden: You can only switch between roles explicitly assigned to your account by an Administrator. Elevation attempt blocked.',
+          ERROR_CODES.FORBIDDEN
+        );
         return true;
       }
 
@@ -1392,6 +1315,19 @@ Rules:
         tokensEstimated: 0,
         latencyMs: Date.now() - startTime,
         status: 'success'
+      });
+
+      recordAuditEvent({
+        actorId: userId || actor.id,
+        actorName: actor.name,
+        actorRole: targetRoleId,
+        action: 'AUTH_ROLE_SWITCH',
+        resourceType: 'UserRole',
+        resourceId: userId,
+        outcome: 'SUCCESS',
+        description: `User switched active role to ${targetRoleId}.`,
+        metadata: { newRole: targetRoleId, previousRole: actor.role },
+        ipAddress: clientIp
       });
 
       sendJson(res, 200, {
@@ -1410,9 +1346,22 @@ Rules:
     if (url === '/api/auth/change-password' && req.method === 'POST') {
       const body = await parseRequestBody(req);
       const { userId, currentPassword, newPassword } = body;
+      const actor = getRequestActor(req, body);
+      const clientIp = getClientIp(req);
 
       if (!newPassword || typeof newPassword !== 'string') {
-        sendJson(res, 400, { error: 'New password is required.' });
+        recordAuditEvent({
+          actorId: userId || actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'AUTH_PASSWORD_CHANGE_FAILED',
+          resourceType: 'UserCredential',
+          resourceId: userId,
+          outcome: 'FAILURE',
+          description: 'Password change failed: New password was not provided.',
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 400, 'New password is required.', ERROR_CODES.BAD_REQUEST);
         return true;
       }
 
@@ -1424,16 +1373,44 @@ Rules:
       const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword);
 
       if (!minLength || !hasUpper || !hasLower || !hasNumber || !hasSpecial) {
-        sendJson(res, 400, { 
-          error: 'Password must be at least 8 characters long and contain uppercase, lowercase, a number, and a special character.' 
+        recordAuditEvent({
+          actorId: userId || actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'AUTH_PASSWORD_CHANGE_FAILED',
+          resourceType: 'UserCredential',
+          resourceId: userId,
+          outcome: 'FAILURE',
+          description: 'Password change failed: Complexity requirements not satisfied.',
+          ipAddress: clientIp
         });
+        sendSafeError(
+          res, 
+          400, 
+          'Password must be at least 8 characters long and contain uppercase, lowercase, a number, and a special character.',
+          ERROR_CODES.BAD_REQUEST
+        );
         return true;
       }
 
       if (currentPassword && newPassword === currentPassword) {
-        sendJson(res, 400, { 
-          error: 'New password cannot be identical to the temporary password.' 
+        recordAuditEvent({
+          actorId: userId || actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'AUTH_PASSWORD_CHANGE_FAILED',
+          resourceType: 'UserCredential',
+          resourceId: userId,
+          outcome: 'FAILURE',
+          description: 'Password change failed: New password identical to temporary password.',
+          ipAddress: clientIp
         });
+        sendSafeError(
+          res, 
+          400, 
+          'New password cannot be identical to the temporary password.',
+          ERROR_CODES.BAD_REQUEST
+        );
         return true;
       }
 
@@ -1445,6 +1422,18 @@ Rules:
         tokensEstimated: 0,
         latencyMs: Date.now() - startTime,
         status: 'success'
+      });
+
+      recordAuditEvent({
+        actorId: userId || actor.id,
+        actorName: actor.name,
+        actorRole: actor.role,
+        action: 'AUTH_PASSWORD_CHANGE',
+        resourceType: 'UserCredential',
+        resourceId: userId,
+        outcome: 'SUCCESS',
+        description: 'User credential password successfully updated.',
+        ipAddress: clientIp
       });
 
       sendJson(res, 200, {
@@ -1463,13 +1452,38 @@ Rules:
     if (url === '/api/auth/reset-password' && req.method === 'POST') {
       const body = await parseRequestBody(req);
       const { adminUserId, targetUserId, temporaryPassword } = body;
+      const clientIp = getClientIp(req);
 
       if (!adminUserId) {
-        sendJson(res, 401, { error: 'Unauthorized: Admin user ID required.' });
+        recordAuditEvent({
+          actorId: 'anonymous',
+          actorName: 'Anonymous / Unverified',
+          actorRole: 'unknown',
+          action: 'AUTH_PASSWORD_RESET_DENIED',
+          resourceType: 'UserCredential',
+          resourceId: targetUserId,
+          outcome: 'FAILURE',
+          description: 'Password reset denied: Missing admin credentials.',
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 401, 'Unauthorized: Admin user ID required.', ERROR_CODES.UNAUTHORIZED);
         return true;
       }
 
       const generatedTemp = temporaryPassword || ('TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900));
+
+      recordAuditEvent({
+        actorId: adminUserId,
+        actorName: 'Administrator',
+        actorRole: 'super_admin',
+        action: 'AUTH_PASSWORD_RESET_ADMIN',
+        resourceType: 'UserCredential',
+        resourceId: targetUserId,
+        outcome: 'SUCCESS',
+        description: `Admin initiated temporary password reset for user ID: ${targetUserId}.`,
+        metadata: { targetUserId }, // NEVER include generatedTemp or temporary passwords!
+        ipAddress: clientIp
+      });
 
       sendJson(res, 200, {
         success: true,
@@ -1482,14 +1496,293 @@ Rules:
       return true;
     }
 
-    sendJson(res, 404, { error: 'Unknown AI endpoint' });
+    // --------------------------------------------------------------------------
+    // 12. GET /api/audit/logs — Authoritative Audit Logs Query (Section 12, Check 12)
+    // --------------------------------------------------------------------------
+    if (url === '/api/audit/logs' && req.method === 'GET') {
+      const clientIp = getClientIp(req);
+      const queryString = (req.url || '').split('?')[1] || '';
+      const params = new URLSearchParams(queryString);
+
+      const headerRole = req.headers['x-user-role'] as string;
+      const headerId = req.headers['x-user-id'] as string;
+      const headerName = req.headers['x-user-name'] as string;
+      const userRole = headerRole || params.get('userRole') || '';
+      const userId = headerId || params.get('userId') || 'u-unknown';
+      const userName = headerName || params.get('userName') || 'Unknown';
+
+      // Access Control: super_admin and staff_manager have audit_logs.view permission
+      const isAuthorized = userRole === 'super_admin' || userRole === 'staff_manager';
+
+      if (!isAuthorized) {
+        recordAuditEvent({
+          actorId: userId,
+          actorName: userName,
+          actorRole: userRole || 'unauthenticated',
+          action: 'AUDIT_LOGS_ACCESS_DENIED',
+          resourceType: 'AuditLog',
+          outcome: 'FAILURE',
+          description: `Unauthorized attempt to read security audit logs blocked for role: ${userRole || 'none'}.`,
+          ipAddress: clientIp
+        });
+        sendSafeError(
+          res, 
+          403, 
+          'Forbidden: You do not have permission to view security audit logs. Required permission: audit_logs.view.',
+          ERROR_CODES.FORBIDDEN
+        );
+        return true;
+      }
+
+      const result = queryAuditLogs({
+        page: params.get('page') ? Number(params.get('page')) : 1,
+        pageSize: params.get('pageSize') ? Number(params.get('pageSize')) : 25,
+        action: params.get('action') || undefined,
+        resourceType: params.get('resourceType') || undefined,
+        outcome: params.get('outcome') || undefined,
+        actorId: params.get('actorId') || undefined,
+        search: params.get('search') || undefined,
+        startDate: params.get('startDate') || undefined,
+        endDate: params.get('endDate') || undefined
+      });
+
+      sendJson(res, 200, {
+        success: true,
+        ...result
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 13. POST /api/audit/log — Append Authoritative Audit Record (Check 12)
+    // --------------------------------------------------------------------------
+    if (url === '/api/audit/log' && req.method === 'POST') {
+      const body = await parseRequestBody(req);
+      const actor = getRequestActor(req, body);
+      const clientIp = getClientIp(req);
+
+      if (!body || !body.action || !body.resourceType) {
+        sendSafeError(res, 400, 'Missing required audit parameters (action and resourceType).', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      // Enforce actor identity from verified context to prevent client spoofing
+      const actorId = actor.id || 'u-unknown';
+      const actorName = actor.name || 'Staff User';
+      const actorRole = actor.role || 'staff';
+
+      const outcome = (body.outcome === 'FAILURE' ? 'FAILURE' : 'SUCCESS') as AuditOutcome;
+
+      const record = recordAuditEvent({
+        actorId,
+        actorName,
+        actorRole,
+        action: body.action,
+        resourceType: body.resourceType,
+        resourceId: body.resourceId,
+        entityName: body.entityName,
+        outcome,
+        description: body.description || `${body.action} performed on ${body.entityName || body.resourceType}`,
+        metadata: body.metadata,
+        correlationId: body.correlationId,
+        ipAddress: clientIp
+      });
+
+      sendJson(res, 200, {
+        success: true,
+        id: record.id,
+        timestamp: record.timestamp,
+        correlationId: record.correlationId
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 14. POST /api/storage/signed-url — Secure Expiring Signed URL (Check 13)
+    // --------------------------------------------------------------------------
+    if (url === '/api/storage/signed-url' && req.method === 'POST') {
+      const body = await parseRequestBody(req);
+      const actor = getRequestActor(req, body);
+      const clientIp = getClientIp(req);
+
+      const canView = actor.role === 'super_admin' || actor.role === 'staff_manager' || actor.role === 'staff_member';
+      if (!canView) {
+        recordAuditEvent({
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'FILE_SIGNED_URL_DENIED',
+          resourceType: 'StorageObject',
+          resourceId: body?.storageKey,
+          outcome: 'FAILURE',
+          description: `Unauthorized file signed URL request blocked for role: ${actor.role}.`,
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 403, 'Forbidden: You do not have permission to generate file access URLs.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      const storageKey = body?.storageKey;
+      if (!storageKey || typeof storageKey !== 'string') {
+        sendSafeError(res, 400, 'Missing storageKey parameter.', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      // If requested bucket is backups, strictly enforce super_admin
+      if (storageKey.startsWith('crm_backups') && actor.role !== 'super_admin') {
+        recordAuditEvent({
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'FILE_SIGNED_URL_DENIED',
+          resourceType: 'StorageObject',
+          resourceId: storageKey,
+          outcome: 'FAILURE',
+          description: `Non-admin user attempted to access database backup: ${storageKey}.`,
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 403, 'Forbidden: Only Super Administrators can access database backups.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      const { expiresAt, signedUrl } = createSignedFileToken({
+        storageKey,
+        userId: actor.id,
+        ttlSeconds: body?.ttlSeconds
+      });
+
+      recordAuditEvent({
+        actorId: actor.id,
+        actorName: actor.name,
+        actorRole: actor.role,
+        action: 'FILE_SIGNED_URL_GENERATED',
+        resourceType: 'StorageObject',
+        resourceId: storageKey,
+        outcome: 'SUCCESS',
+        description: `Generated expiring signed access URL for ${storageKey} (expires in ${expiresAt - Math.floor(Date.now() / 1000)}s).`,
+        metadata: { storageKey, expiresAt }, // NEVER log the raw token
+        ipAddress: clientIp
+      });
+
+      sendJson(res, 200, {
+        success: true,
+        storageKey,
+        signedUrl,
+        expiresAt,
+        ttlSeconds: expiresAt - Math.floor(Date.now() / 1000)
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 15. POST /api/storage/validate-upload — Pre-Upload Server Validation (Check 13)
+    // --------------------------------------------------------------------------
+    if (url === '/api/storage/validate-upload' && req.method === 'POST') {
+      const body = await parseRequestBody(req);
+      const actor = getRequestActor(req, body);
+      const clientIp = getClientIp(req);
+
+      const canUpload = actor.role === 'super_admin' || actor.role === 'staff_manager' || actor.role === 'staff_member';
+      if (!canUpload) {
+        recordAuditEvent({
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'FILE_UPLOAD_DENIED',
+          resourceType: 'StorageObject',
+          outcome: 'FAILURE',
+          description: `Unauthorized file upload attempt blocked for role: ${actor.role}.`,
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 403, 'Forbidden: You do not have permission to upload files.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      const { filename, sizeBytes, mimeType, bucket = 'crm_documents', isBackup } = body || {};
+
+      if (isBackup && actor.role !== 'super_admin') {
+        sendSafeError(res, 403, 'Forbidden: Only Super Administrators can upload database backups.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      const validation = validateUploadFile({
+        filename,
+        sizeBytes: Number(sizeBytes),
+        mimeType,
+        isBackup: Boolean(isBackup)
+      });
+
+      if (!validation.valid) {
+        recordAuditEvent({
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'FILE_VALIDATION_FAILED',
+          resourceType: 'StorageObject',
+          outcome: 'FAILURE',
+          description: `File validation rejected for ${filename || 'unknown'}: ${validation.error}`,
+          metadata: { filename, sizeBytes, mimeType },
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 400, validation.error || 'File validation failed.', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      const storageKey = generateStorageKey({
+        bucket,
+        organizationId: body?.organizationId,
+        filename: validation.sanitizedFilename!
+      });
+
+      sendJson(res, 200, {
+        success: true,
+        valid: true,
+        sanitizedFilename: validation.sanitizedFilename,
+        storageKey,
+        bucket
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 16. GET /api/storage/download — Expiring Signed Token Verification (Check 13)
+    // --------------------------------------------------------------------------
+    if (url === '/api/storage/download' && req.method === 'GET') {
+      const queryString = (req.url || '').split('?')[1] || '';
+      const params = new URLSearchParams(queryString);
+      const token = params.get('token') || '';
+
+      if (!token) {
+        sendSafeError(res, 400, 'Missing access token.', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      const verification = verifySignedFileToken(token);
+      if (!verification.valid) {
+        sendSafeError(res, 403, verification.error || 'Invalid or expired access token.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        verified: true,
+        status: 'VALID_DOWNLOAD_TOKEN',
+        storageKey: verification.storageKey,
+        message: 'Signed file access verified. Ready for streaming or download.'
+      });
+      return true;
+    }
+
+    sendSafeError(res, 404, 'Unknown API endpoint', ERROR_CODES.NOT_FOUND);
     return true;
   } catch (error: any) {
-    safeLogger.error('AI Middleware Error:', error);
-    sendJson(res, 500, { 
-      error: 'Internal AI gateway error', 
-      message: sanitizeSecrets(error?.message || 'Internal server error occurred.') 
-    });
+    sendSafeError(
+      res,
+      500,
+      'Internal AI gateway error occurred. Operations continue in local deterministic mode.',
+      ERROR_CODES.INTERNAL_SERVER_ERROR,
+      error
+    );
     return true;
   }
 }

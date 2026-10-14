@@ -22,6 +22,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Person, InteractionType, RelationshipType } from '../../types';
 import { useCrm } from '../../context/CrmContext';
 import { ProtectedAction } from '../common/ProtectedAction';
+import { sanitizeExternalUrl, sanitizeMailto } from '../../lib/safeUrls';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -44,7 +45,6 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
 }) => {
   const { 
     people, 
-    scopedPeople,
     updatePerson, 
     deletePerson, 
     interactions, 
@@ -55,7 +55,6 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
     documents,
     programs,
     events,
-    addParticipant,
     currentUser,
     hasPermission,
     Permissions
@@ -75,13 +74,6 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const [intSummary, setIntSummary] = useState('');
   const [intDetails, setIntDetails] = useState('');
   const [intFollowUp, setIntFollowUp] = useState('');
-  const [createFollowUpTask, setCreateFollowUpTask] = useState(false);
-
-  // Program & Event enrollment state
-  const [showEnrollProgram, setShowEnrollProgram] = useState(false);
-  const [selectedProgramToEnroll, setSelectedProgramToEnroll] = useState('');
-  const [showRegisterEvent, setShowRegisterEvent] = useState(false);
-  const [selectedEventToRegister, setSelectedEventToRegister] = useState('');
 
   // New task form state
   const [showAddTask, setShowAddTask] = useState(false);
@@ -100,36 +92,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const [editNotes, setEditNotes] = useState('');
   const [editNextFollowUp, setEditNextFollowUp] = useState('');
 
-  if (!isOpen) return null;
-
-  // Scope Enforcement: Ensure current user has permission to access this contact
-  const isAccessible = currentUser.roleId === 'super_admin' || currentUser.dataScope.people === 'GLOBAL' || scopedPeople.some(p => p.id === personId);
-  if (!person || !isAccessible) {
-    return (
-      <div 
-        className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4"
-        onClick={onClose}
-      >
-        <div 
-          className="bg-card rounded-2xl p-6 max-w-md w-full text-center shadow-xl border border-border"
-          onClick={e => e.stopPropagation()}
-        >
-          <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto mb-3">
-            <Lock className="w-6 h-6" />
-          </div>
-          <h3 className="text-base font-bold text-foreground">Access Restricted</h3>
-          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-            This contact record is outside your assigned project scope. Contact an Administrator to request access.
-          </p>
-          <div className="mt-5">
-            <Button variant="outline" size="sm" onClick={onClose}>
-              Close
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (!isOpen || !person) return null;
 
   const handleStartEdit = () => {
     setEditName(person.name);
@@ -179,59 +142,10 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
       followUpDate: intFollowUp || undefined
     });
 
-    if (createFollowUpTask && intFollowUp) {
-      addTask({
-        title: `Follow-up with ${person.name}: ${intSummary.trim()}`,
-        owner: currentUser.name,
-        dueDate: intFollowUp,
-        priority: 'Medium',
-        relatedRecordType: 'Person',
-        relatedRecordId: person.id,
-        relatedRecordName: person.name,
-        status: 'To Do'
-      });
-    }
-
     setIntSummary('');
     setIntDetails('');
     setIntFollowUp('');
-    setCreateFollowUpTask(false);
     setShowAddInteraction(false);
-  };
-
-  const handleEnrollProgram = () => {
-    if (!selectedProgramToEnroll) return;
-    if (!person.programIds.includes(selectedProgramToEnroll)) {
-      updatePerson(person.id, {
-        programIds: [...person.programIds, selectedProgramToEnroll]
-      });
-    }
-    setSelectedProgramToEnroll('');
-    setShowEnrollProgram(false);
-  };
-
-  const handleRegisterEvent = () => {
-    if (!selectedEventToRegister) return;
-    const ev = events.find(e => e.id === selectedEventToRegister);
-    if (!ev) return;
-    if (!person.eventIds.includes(selectedEventToRegister)) {
-      updatePerson(person.id, {
-        eventIds: [...person.eventIds, selectedEventToRegister]
-      });
-    }
-    addParticipant({
-      personId: person.id,
-      personName: person.name,
-      personEmail: person.email,
-      organizationName: person.organizationName,
-      eventId: ev.id,
-      eventName: ev.name,
-      programId: ev.programId,
-      programName: ev.programName,
-      status: 'Registered'
-    });
-    setSelectedEventToRegister('');
-    setShowRegisterEvent(false);
   };
 
   const handleCreateTask = (e: React.FormEvent) => {
@@ -336,6 +250,11 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                       {rt}
                     </Badge>
                   ))}
+                  {person.mailchimpStatus === 'subscribed' && (
+                    <Badge variant="success" className="text-[10px] font-medium">
+                      Mailchimp Synced
+                    </Badge>
+                  )}
                 </div>
               </div>
             </div>
@@ -542,21 +461,6 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                     />
                   </div>
 
-                  {intFollowUp && (
-                    <div className="flex items-center gap-2 pt-1">
-                      <input
-                        type="checkbox"
-                        id="person-int-create-task"
-                        checked={createFollowUpTask}
-                        onChange={e => setCreateFollowUpTask(e.target.checked)}
-                        className="rounded border-border text-primary focus:ring-primary w-3.5 h-3.5"
-                      />
-                      <label htmlFor="person-int-create-task" className="text-xs text-muted-foreground cursor-pointer select-none">
-                        Automatically create a follow-up task due on {intFollowUp}
-                      </label>
-                    </div>
-                  )}
-
                   <div className="flex justify-end gap-2 pt-1">
                     <Button 
                       type="button" 
@@ -625,9 +529,13 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div className="flex items-center gap-2.5 text-muted-foreground">
                     <Mail className="w-4 h-4 text-muted-foreground/70" />
-                    <a href={`mailto:${person.email}`} className="hover:underline text-foreground font-medium">
-                      {person.email}
-                    </a>
+                    {sanitizeMailto(person.email) ? (
+                      <a href={sanitizeMailto(person.email)!} className="hover:underline text-foreground font-medium">
+                        {person.email}
+                      </a>
+                    ) : (
+                      <span className="text-foreground font-medium">{person.email}</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2.5 text-muted-foreground">
                     <Phone className="w-4 h-4 text-muted-foreground/70" />
@@ -670,42 +578,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
 
               {/* Associated Programs */}
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Connected Programs</h4>
-                  {canEditPerson && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowEnrollProgram(!showEnrollProgram)}
-                      className="h-6 text-[11px] text-[#ea0543] hover:text-[#ea0543]/80 px-2 font-semibold"
-                    >
-                      <Plus className="w-3 h-3 mr-1" />
-                      Enroll in Program
-                    </Button>
-                  )}
-                </div>
-
-                {showEnrollProgram && (
-                  <div className="p-3 bg-muted/40 rounded-lg border border-border flex items-center gap-2 mb-2">
-                    <select
-                      value={selectedProgramToEnroll}
-                      onChange={e => setSelectedProgramToEnroll(e.target.value)}
-                      className="flex-1 text-xs p-1.5 rounded border border-border bg-card text-foreground"
-                    >
-                      <option value="">Select a program...</option>
-                      {programs.filter(pr => !person.programIds.includes(pr.id)).map(pr => (
-                        <option key={pr.id} value={pr.id}>{pr.name}</option>
-                      ))}
-                    </select>
-                    <Button size="sm" variant="crimson" className="h-7 text-xs" onClick={handleEnrollProgram}>
-                      Enroll
-                    </Button>
-                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowEnrollProgram(false)}>
-                      Cancel
-                    </Button>
-                  </div>
-                )}
-
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Connected Programs</h4>
                 {personPrograms.length > 0 ? (
                   <div className="space-y-2">
                     {personPrograms.map(pr => (
@@ -724,61 +597,6 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">Not currently assigned to any active programs.</p>
-                )}
-              </div>
-
-              {/* Connected Events */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Registered Events</h4>
-                  {canEditPerson && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowRegisterEvent(!showRegisterEvent)}
-                      className="h-6 text-[11px] text-[#ea0543] hover:text-[#ea0543]/80 px-2 font-semibold"
-                    >
-                      <Plus className="w-3 h-3 mr-1" />
-                      Register for Event
-                    </Button>
-                  )}
-                </div>
-
-                {showRegisterEvent && (
-                  <div className="p-3 bg-muted/40 rounded-lg border border-border flex items-center gap-2 mb-2">
-                    <select
-                      value={selectedEventToRegister}
-                      onChange={e => setSelectedEventToRegister(e.target.value)}
-                      className="flex-1 text-xs p-1.5 rounded border border-border bg-card text-foreground"
-                    >
-                      <option value="">Select an event...</option>
-                      {events.filter(ev => !person.eventIds.includes(ev.id)).map(ev => (
-                        <option key={ev.id} value={ev.id}>{ev.name} ({ev.date})</option>
-                      ))}
-                    </select>
-                    <Button size="sm" variant="crimson" className="h-7 text-xs" onClick={handleRegisterEvent}>
-                      Register
-                    </Button>
-                    <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowRegisterEvent(false)}>
-                      Cancel
-                    </Button>
-                  </div>
-                )}
-
-                {personEvents.length > 0 ? (
-                  <div className="space-y-2">
-                    {personEvents.map(ev => (
-                      <Card key={ev.id} className="p-3 border-border flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-foreground">{ev.name}</span>
-                          <Badge variant="secondary" className="text-[10px]">{ev.type}</Badge>
-                        </div>
-                        <span className="text-muted-foreground">{ev.date}</span>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Not currently registered for any scheduled events.</p>
                 )}
               </div>
             </div>

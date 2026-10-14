@@ -24,6 +24,7 @@ import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
 import { OneUiSearchBar } from '../ui/OneUiSearchBar';
+import { exportToCsv } from '../../lib/csvExport';
 
 const STATUS_FILTERS: Array<FundingStatus | 'All'> = [
   'All',
@@ -151,14 +152,7 @@ export const FundingView: React.FC<FundingViewProps> = ({
       ])
     ];
 
-    const csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.map(cell => `"${cell}"`).join(",")).join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `TIP_Funding_Ledger_2026.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    exportToCsv('TIP_Funding_Ledger_2026.csv', rows);
   };
 
   const getStatusBadgeVariant = (status: FundingStatus) => {

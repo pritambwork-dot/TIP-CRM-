@@ -41,8 +41,7 @@ export function getGeminiApiKey(): string {
 export function sanitizeSecrets(text: string): string {
   if (!text || typeof text !== 'string') return text;
   return text
-    .replace(/AIza[0-9A-Za-z-_]{35}/g, '[REDACTED_API_KEY]')
-    .replace(/AQ\.[0-9A-Za-z-_]{30,}/g, '[REDACTED_API_KEY]')
+    .replace(/AIza[0-9A-Za-z-_]{30,40}/g, '[REDACTED_API_KEY]')
     .replace(/(?:key|apiKey|api_key|api-key)\s*[:=]\s*["']?([^\s&"']+)["']?/gi, 'key=[REDACTED]')
     .replace(/(?:bearer\s+)([A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*)/gi, 'bearer [REDACTED_TOKEN]')
     .replace(/(?:password|tempPassword|secret)\s*[:=]\s*["']?([^\s&"']+)["']?/gi, 'password=[REDACTED]');
@@ -112,11 +111,11 @@ export type ModelTier = 'LIGHT' | 'STANDARD' | 'ADVANCED';
 function getModelsForTier(tier: ModelTier = 'STANDARD'): string[] {
   switch (tier) {
     case 'LIGHT':
-      return ['gemini-3.6-flash', 'gemini-3.8-flash'];
+      return ['gemini-flash-latest', 'gemini-3.6-flash'];
     case 'ADVANCED':
     case 'STANDARD':
     default:
-      return ['gemini-3.6-flash', 'gemini-3.8-flash'];
+      return ['gemini-3.6-flash', 'gemini-flash-latest'];
   }
 }
 
@@ -160,44 +159,16 @@ export async function callGeminiChat(params: GeminiChatParams): Promise<GeminiCh
   const ai = new GoogleGenAI({ apiKey });
   const models = getModelsForTier('STANDARD');
 
-  // 3. Role-Based Grounding & CRM Boundary Enforcement
-  const canViewFunding = validUser.roleId === 'super_admin' || validUser.roleId === 'staff_manager';
-  const factsObj = { ...(params.deterministicFacts || {}) };
-  if (!canViewFunding) {
-    delete (factsObj as any).totalFunding;
-    delete (factsObj as any).fundersCount;
-    delete (factsObj as any).funding;
-  }
+  // 3. Grounded Prompt Formulation
+  const factsStr = params.deterministicFacts ? JSON.stringify(params.deterministicFacts, null, 2) : '{}';
+  const systemInstruction = `You are the TIP CRM Intelligence Assistant for The Inclusion Project (TIP), a Canadian non-profit advancing equity, diversity, and inclusion.
+You are assisting ${validUser.name} (${validUser.postTitle || validUser.roleId}).
+GROUNDING RULES:
+1. Ground all numbers and statements strictly in the verified deterministic CRM facts below.
+2. NEVER invent non-existent statistics, attendees, or donation amounts.
+3. Be professional, concise, actionable, and encouraging.
 
-  const factsStr = JSON.stringify(factsObj, null, 2);
-  const systemInstruction = `You are TIP Intelligence, the internal AI work companion for The Inclusion Project (TIP), a Canadian non-profit organization.
-User: ${validUser.name}
-Verified Designation: ${validUser.postTitle || validUser.roleId} (Role: ${validUser.roleId})
-
-CRITICAL MANDATORY INVARIANTS:
-1. CRM-ONLY SCOPE BOUNDARY:
-   You MUST ONLY answer questions regarding The Inclusion Project (TIP) CRM and its verified records provided in the context below.
-   NEVER answer general trivia, recipes, creative writing (poems, songs), external political questions, or coding outside the CRM.
-   If asked anything outside the CRM, reply:
-   "I am TIP Intelligence, dedicated exclusively to The Inclusion Project CRM. I can only assist with verified TIP CRM records, programs, events, tasks, stakeholders, and community initiatives."
-2. DESIGNATION FRAMING:
-   Address the user and tailor your tone and recommendations directly to their designation (${validUser.postTitle || validUser.roleId}):
-   - Executive Director: Strategic organization-wide health, governance, cross-program outcomes.
-   - Staff Manager: Operational delivery, milestone tracking, team task distribution.
-   - Program/Event Coordinator: Cohort engagement, workshop prep, session logistics.
-   - Volunteer: Supportive guidance focused strictly on assigned tasks and check-in assistance.
-3. ZERO DATA LEAKAGE:
-   Never invent numbers, attendees, or donation amounts. If a resource is restricted or not in the context, state it is not accessible to their role.
-4. STRICT 3-PART STRUCTURE:
-   Organize your response under these exact bold headings:
-   **OBSERVED**
-   • Bullet points of grounded facts from the context.
-   **INTERPRETATION**
-   Concise operational meaning for their designation.
-   **SUGGESTION**
-   1-2 concrete, practical steps they can take.
-
-VERIFIED DETERMINISTIC CRM CONTEXT:
+VERIFIED DETERMINISTIC CRM FACTS:
 ${factsStr}
 `;
 
@@ -217,7 +188,7 @@ ${factsStr}
         reply: reply.trim(),
         model,
         tokensEstimated: Math.round((fullPrompt.length + reply.length) / 4),
-        source: 'TIP Intelligence',
+        source: 'Google Gemini AI',
         status: 'success'
       };
     } catch (err: any) {
@@ -237,3 +208,119 @@ ${factsStr}
   };
 }
 
+/**
+ * Dedicated server-side Gemini Text generation method
+ */
+export async function callGeminiText(prompt: string, tier: ModelTier = 'STANDARD'): Promise<{ text: string; model: string }> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+    throw new Error('Gemini API key is not configured on the server.');
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  const models = getModelsForTier(tier);
+
+  let lastError: any = null;
+  for (const model of models) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt
+      });
+      return { text: response.text || '', model };
+    } catch (err: any) {
+      lastError = err;
+      safeLogger.warn(`[GeminiService] Text model ${model} busy, trying fallback...`);
+    }
+  }
+
+  throw new Error(`Gemini text generation failed: ${sanitizeSecrets(lastError?.message || 'Candidate models exhausted')}`);
+}
+
+/**
+ * Safely extracts and parses JSON from AI output.
+ * Strips markdown code fences (```json ... ```), handles whitespace,
+ * and recovers JSON substring if surrounding commentary is included.
+ */
+export function extractAndParseJson<T>(rawText: string): T {
+  if (!rawText || typeof rawText !== 'string') {
+    throw new Error('Empty or invalid response from AI model');
+  }
+
+  let cleanText = rawText.trim();
+
+  // Strip markdown code fences if wrapped
+  if (cleanText.startsWith('```')) {
+    cleanText = cleanText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  } else {
+    // If there is markdown fence embedded within the text
+    const fenceMatch = cleanText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (fenceMatch) {
+      cleanText = fenceMatch[1].trim();
+    }
+  }
+
+  try {
+    return JSON.parse(cleanText) as T;
+  } catch (initialErr) {
+    // Search for outermost JSON object or array
+    const firstBrace = cleanText.indexOf('{');
+    const firstBracket = cleanText.indexOf('[');
+    let startIdx = -1;
+
+    if (firstBrace !== -1 && firstBracket !== -1) {
+      startIdx = Math.min(firstBrace, firstBracket);
+    } else if (firstBrace !== -1) {
+      startIdx = firstBrace;
+    } else {
+      startIdx = firstBracket;
+    }
+
+    if (startIdx !== -1) {
+      const isObject = cleanText[startIdx] === '{';
+      const lastIdx = isObject ? cleanText.lastIndexOf('}') : cleanText.lastIndexOf(']');
+      if (lastIdx > startIdx) {
+        const sliced = cleanText.substring(startIdx, lastIdx + 1);
+        try {
+          return JSON.parse(sliced) as T;
+        } catch {
+          // Fall through to error
+        }
+      }
+    }
+
+    throw new Error(`Failed to parse AI structured response: ${sanitizeSecrets((initialErr as any)?.message || 'Invalid JSON syntax')}`);
+  }
+}
+
+/**
+ * Dedicated server-side Gemini Structured JSON generation method
+ */
+export async function callGeminiStructured<T>(prompt: string, tier: ModelTier = 'STANDARD'): Promise<{ data: T; model: string; rawText: string }> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+    throw new Error('Gemini API key is not configured on the server.');
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  const models = getModelsForTier(tier);
+
+  let lastError: any = null;
+  for (const model of models) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: 'application/json' }
+      });
+      const rawText = response.text || '{}';
+      const data = extractAndParseJson<T>(rawText);
+      return { data, model, rawText };
+    } catch (err: any) {
+      lastError = err;
+      safeLogger.warn(`[GeminiService] Structured JSON model ${model} busy, trying fallback...`);
+    }
+  }
+
+  throw new Error(`Gemini structured JSON generation failed: ${sanitizeSecrets(lastError?.message || 'Candidate models exhausted')}`);
+}

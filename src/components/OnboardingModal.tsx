@@ -10,7 +10,7 @@ import {
   Heart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { NavTab } from '../types';
+import { NavTab } from './Sidebar';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 
@@ -40,7 +40,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     {
       step: 2,
       title: 'Import your existing contacts',
-      description: 'Bring your Excel or CSV contact lists directly into the CRM with automated duplicate detection.',
+      description: 'Bring your Excel, Google Sheets, or CSV contact lists directly into the CRM with automated duplicate detection.',
       actionText: 'Open Import Tool',
       onAction: () => {
         onClose();
@@ -49,8 +49,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     },
     {
       step: 3,
-      title: 'Explore programs and projects',
-      description: 'Review active initiatives, projects, and connected community participants.',
+      title: 'Explore your active programs',
+      description: 'Review the Youth Leadership Initiative, Civic Accessibility Lab, and Research programs with connected participants.',
       actionText: 'View Programs',
       onAction: () => {
         onClose();

@@ -22,6 +22,8 @@ import {
   BadgeCheck,
   Lock
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas-pro';
 import { DeterministicAnalysisResult, AnalysisInsight, UserProfile } from '../../types';
 
 interface PrintableIntelligenceReportProps {
@@ -223,10 +225,67 @@ export const PrintableIntelligenceReport: React.FC<PrintableIntelligenceReportPr
   };
 
   // ============================================================================
-  // 2. VECTOR PDF DOWNLOAD (Native browser high-fidelity PDF generation)
+  // 2. DIRECT HIGH-RES PDF DOWNLOAD (.pdf file via html2canvas-pro + jsPDF)
   // ============================================================================
-  const handleDownloadPdf = () => {
-    handleNativePrint();
+  const handleDownloadPdf = async () => {
+    if (!reportRef.current) return;
+    setIsExporting(true);
+    setExportSuccess(false);
+
+    try {
+      const pageElements = reportRef.current.querySelectorAll<HTMLElement>('.tip-pdf-page');
+      if (!pageElements || pageElements.length === 0) {
+        throw new Error('No printable pages found in report');
+      }
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+        compress: true
+      });
+
+      // Capture each distinct A4 page independently for zero-slice mathematical alignment
+      for (let i = 0; i < pageElements.length; i++) {
+        if (i > 0) {
+          pdf.addPage();
+        }
+        const pageEl = pageElements[i];
+
+        const canvas = await html2canvas(pageEl, {
+          scale: 2, // 2x Retina sharpness
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff',
+          windowWidth: 800,
+          onclone: (clonedDoc) => {
+            const clonedPage = clonedDoc.querySelector(`[data-page="${i + 1}"]`) as HTMLElement;
+            if (clonedPage) {
+              clonedPage.style.margin = '0 auto';
+              clonedPage.style.boxShadow = 'none';
+              clonedPage.style.borderRadius = '0';
+              clonedPage.style.width = '794px';
+              clonedPage.style.minHeight = '1123px';
+            }
+          }
+        });
+
+        const imgData = canvas.toDataURL('image/png', 1.0);
+        pdf.addImage(imgData, 'PNG', 0, 0, 210, 297, undefined, 'FAST');
+      }
+
+      const cleanFileName = (datasetName || 'TIP_Operational_Report')
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[^a-zA-Z0-9_-]/g, '_');
+      pdf.save(`${cleanFileName}_Executive_Audit_Report.pdf`);
+      setExportSuccess(true);
+      setTimeout(() => setExportSuccess(false), 3000);
+    } catch (err) {
+      console.error('Direct PDF compilation error, switching to isolated print:', err);
+      handleNativePrint();
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return createPortal(
@@ -350,7 +409,7 @@ export const PrintableIntelligenceReport: React.FC<PrintableIntelligenceReportPr
                     Executive Operational & Dataset Analytics Report
                   </h1>
                   <p className="text-[11px] text-zinc-600">
-                    Deterministic verification of program distributions, attendance rates, and operational engagement metrics.
+                    Deterministic verification of cohort distributions, attendance rates, and fiduciary engagement metrics.
                   </p>
                 </div>
 
@@ -377,7 +436,7 @@ export const PrintableIntelligenceReport: React.FC<PrintableIntelligenceReportPr
               </div>
               <p className="text-xs text-zinc-800 font-serif leading-relaxed">
                 {aiSummary || analyticsResult.structuredPayloadForAi.summary || 
-                  `Analysis of ${analyticsResult.rowCount.toLocaleString()} operational records across scheduled initiatives. The dataset demonstrates structured registration integrity with verified participant tracking and zero algorithmic discrepancies.`}
+                  `Analysis of ${analyticsResult.rowCount.toLocaleString()} operational records across scheduled initiatives. The dataset demonstrates structured registration integrity with verified participant cohort tracking and zero algorithmic discrepancies.`}
               </p>
             </div>
 
@@ -409,7 +468,7 @@ export const PrintableIntelligenceReport: React.FC<PrintableIntelligenceReportPr
             <div className="space-y-2">
               <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-600 flex items-center gap-1.5">
                 <PieIcon className="w-3.5 h-3.5 text-zinc-500" />
-                <span>Visual Trend & Program Distribution Charts</span>
+                <span>Visual Trend & Cohort Distribution Charts</span>
               </h3>
 
               <div className="grid grid-cols-2 gap-3.5">
@@ -651,12 +710,12 @@ export const PrintableIntelligenceReport: React.FC<PrintableIntelligenceReportPr
               </div>
             </div>
 
-            {/* Table 1: Initiative Turnout & Program Summary */}
+            {/* Table 1: Initiative Turnout & Cohort Summary */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-700 flex items-center gap-1.5">
                   <Database className="w-3.5 h-3.5 text-zinc-500" />
-                  <span>Table 1: Initiative Turnout & Program Reconciliation Summary</span>
+                  <span>Table 1: Initiative Turnout & Cohort Reconciliation Summary</span>
                 </h3>
                 <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-700 font-semibold border border-zinc-200">
                   Exhaustive Reconciliation
@@ -784,7 +843,7 @@ export const PrintableIntelligenceReport: React.FC<PrintableIntelligenceReportPr
                     <span>RLS Security & PIPEDA Compliance Enforced</span>
                   </div>
                   <p className="text-zinc-600">Generated by TIP CRM Architecture · {currentDate} {currentTimestamp}</p>
-                  <p className="text-zinc-400 text-[9px]">Strictly Authorized for Internal Operations, Program & Grant Reviews.</p>
+                  <p className="text-zinc-400 text-[9px]">Strictly Authorized for Internal Operations, Board Governance & Grant Reviews.</p>
                 </div>
               </div>
             </div>

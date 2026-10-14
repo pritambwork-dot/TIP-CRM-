@@ -77,10 +77,6 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
         person.email.toLowerCase().includes(q) ||
         (person.organizationName && person.organizationName.toLowerCase().includes(q)) ||
         (person.role && person.role.toLowerCase().includes(q)) ||
-        (person.city && person.city.toLowerCase().includes(q)) ||
-        (person.phone && person.phone.toLowerCase().includes(q)) ||
-        (person.notes && person.notes.toLowerCase().includes(q)) ||
-        person.relationshipTypes.some(r => r.toLowerCase().includes(q)) ||
         person.interests.some(i => i.toLowerCase().includes(q));
 
     return matchesCategory && matchesQuery;

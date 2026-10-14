@@ -27,7 +27,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [customGoogleEmail, setCustomGoogleEmail] = useState('');
   const [customGoogleName, setCustomGoogleName] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
 
   const handleSubmitEmail = (e: React.FormEvent) => {
     e.preventDefault();
@@ -182,7 +181,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   type="button"
                   id="btn-google-login"
                   disabled={loading}
-                  onClick={() => setShowGoogleModal(true)}
+                  onClick={() => onGoogleSignIn('pritamb2k06@gmail.com', 'Pritam Biswas')}
                   className="w-full py-2.5 px-4 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 text-zinc-800 text-sm font-medium transition-all shadow-2xs flex items-center justify-center gap-3 cursor-pointer group"
                 >
                   <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
@@ -206,110 +205,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   <span>Continue with Google</span>
                 </button>
 
-                {/* Google Account Chooser Modal */}
-                {showGoogleModal && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150">
-                    <div className="bg-white w-full max-w-sm rounded-2xl border border-zinc-200 shadow-xl overflow-hidden p-6 text-left">
-                      <div className="flex items-center gap-3 mb-4 pb-3 border-b border-zinc-100">
-                        <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                          <path
-                            fill="#4285F4"
-                            d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.67v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.16z"
-                          />
-                          <path
-                            fill="#34A853"
-                            d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.94H1.26v3.13C3.27 21.39 7.35 24 12 24z"
-                          />
-                          <path
-                            fill="#FBBC05"
-                            d="M5.28 14.26c-.25-.72-.38-1.49-.38-2.26s.13-1.54.38-2.26V6.61H1.26C.46 8.21 0 10.05 0 12s.46 3.79 1.26 5.39l4.02-3.13z"
-                          />
-                          <path
-                            fill="#EA4335"
-                            d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.27 2.61 1.26 6.61l4.02 3.13c.95-2.84 3.6-4.99 6.72-4.99z"
-                          />
-                        </svg>
-                        <div>
-                          <h3 className="text-sm font-semibold text-zinc-900">Sign in with Google</h3>
-                          <p className="text-xs text-zinc-500">Choose an account for TIP CRM</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2 mb-4">
-                        {/* Account 1: Pritam */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowGoogleModal(false);
-                            onGoogleSignIn('pritam@theinclusionproject.ca', 'Pritam');
-                          }}
-                          className="w-full flex items-center gap-3 p-3 rounded-xl border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 transition-all text-left cursor-pointer group"
-                        >
-                          <div className="w-9 h-9 rounded-full bg-blue-600 text-white font-semibold text-sm flex items-center justify-center shrink-0">
-                            P
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-semibold text-zinc-900 group-hover:text-blue-600 transition-colors">
-                              Pritam
-                            </div>
-                            <div className="text-[11px] text-zinc-500 truncate">
-                              pritam@theinclusionproject.ca
-                            </div>
-                            <div className="text-[10px] text-zinc-400">
-                              Executive Director & Super Admin
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* Account 2: Divyanshaa */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowGoogleModal(false);
-                            onGoogleSignIn('divyanshaa@theinclusionproject.ca', 'Divyanshaa');
-                          }}
-                          className="w-full flex items-center gap-3 p-3 rounded-xl border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 transition-all text-left cursor-pointer group"
-                        >
-                          <div className="w-9 h-9 rounded-full bg-emerald-600 text-white font-semibold text-sm flex items-center justify-center shrink-0">
-                            D
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-semibold text-zinc-900 group-hover:text-emerald-600 transition-colors">
-                              Divyanshaa
-                            </div>
-                            <div className="text-[11px] text-zinc-500 truncate">
-                              divyanshaa@theinclusionproject.ca
-                            </div>
-                            <div className="text-[10px] text-zinc-400">
-                              Operations & Programs Lead
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* Account 3: Use another account */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowGoogleModal(false);
-                            setAuthMode('custom_google');
-                          }}
-                          className="w-full py-2 px-3 text-xs text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors text-center cursor-pointer font-medium"
-                        >
-                          Use another Google account
-                        </button>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setShowGoogleModal(false)}
-                        className="w-full py-2 text-xs text-zinc-500 hover:text-zinc-800 cursor-pointer text-center"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-
                 {/* Divider */}
                 <div className="relative my-6 text-center">
                   <div className="absolute inset-0 flex items-center">
@@ -330,7 +225,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       <input
                         type="text"
                         required
-                        placeholder="Your full name"
+                        placeholder="Sarah Thompson"
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
                         className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
@@ -340,12 +235,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                      User ID or Email
+                      Email address
                     </label>
                     <input
-                      type="text"
+                      type="email"
                       required
-                      placeholder="pritam or divyanshaa"
+                      placeholder="name@inclusionproject.ca"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
@@ -355,14 +250,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="block text-xs font-medium text-zinc-700">
-                        Password
+                        TIP CRM Password
                       </label>
-                      <span className="text-[10px] text-zinc-400 font-mono">Demo: rkumar07</span>
+                      <span className="text-[10px] text-zinc-400 font-mono">Not Google password</span>
                     </div>
                     <input
                       type="password"
                       required
-                      placeholder="rkumar07"
+                      placeholder="••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
@@ -379,35 +274,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     <ArrowRight className="w-4 h-4" />
                   </button>
 
-                  {/* Test Persona Fillers for V1 Staging / Role Testing */}
+                  {/* 1-Click Quick Admin Login */}
                   {authMode === 'signin' && (
-                    <div className="mt-4 pt-3 border-t border-zinc-100">
-                      <p className="text-[11px] font-semibold text-zinc-500 mb-2">Demo Accounts (One-Click Sign In):</p>
-                      <div className="grid grid-cols-2 gap-2 text-[11px]">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEmail('pritam');
-                            setPassword('rkumar07');
-                          }}
-                          className="py-2 px-2.5 rounded-xl border border-zinc-200 bg-zinc-50 hover:bg-zinc-100 hover:border-zinc-300 text-zinc-800 text-center font-medium transition-colors cursor-pointer flex flex-col items-center"
-                        >
-                          <span className="font-semibold text-zinc-900">Pritam</span>
-                          <span className="text-[10px] text-zinc-500">Super Admin</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEmail('divyanshaa');
-                            setPassword('rkumar07');
-                          }}
-                          className="py-2 px-2.5 rounded-xl border border-zinc-200 bg-zinc-50 hover:bg-zinc-100 hover:border-zinc-300 text-zinc-800 text-center font-medium transition-colors cursor-pointer flex flex-col items-center"
-                        >
-                          <span className="font-semibold text-zinc-900">Divyanshaa</span>
-                          <span className="text-[10px] text-zinc-500">Staff Lead</span>
-                        </button>
-                      </div>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail('pritam@gmail.com');
+                        setPassword('1234');
+                        onEmailSignIn('pritam@gmail.com', '1234');
+                      }}
+                      className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100/70 text-[#140a8e] text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer mt-2"
+                    >
+                      <span>⚡ Quick Sign In as Admin (Pritam Biswas)</span>
+                    </button>
                   )}
                 </form>
 

@@ -1,16 +1,3 @@
-export type NavTab = 
-  | 'dashboard' 
-  | 'people' 
-  | 'organizations' 
-  | 'programs' 
-  | 'events' 
-  | 'tasks' 
-  | 'funding' 
-  | 'reports' 
-  | 'documents' 
-  | 'intelligence'
-  | 'settings';
-
 export type RelationshipType = 
   | 'Partner'
   | 'Funder / Donor'
@@ -54,10 +41,8 @@ export type ParticipantStatus =
   | 'Waitlisted'
   | 'Withdrawn';
 
-export type TaskStatus = 'To Do' | 'In Progress' | 'Completed' | 'Cancelled';
+export type TaskStatus = 'To Do' | 'In Progress' | 'Completed';
 export type TaskPriority = 'Low' | 'Medium' | 'High';
-
-export type ProjectStatus = 'Planning' | 'Active' | 'On Hold' | 'Completed' | 'Archived';
 
 export type InteractionType = 
   | 'Email'
@@ -65,8 +50,7 @@ export type InteractionType =
   | 'Call'
   | 'Workshop'
   | 'Note'
-  | 'Follow-up'
-  | 'Other';
+  | 'Follow-up';
 
 export type FundingType = 
   | 'Grant'
@@ -93,7 +77,6 @@ export type ResourceType =
   | 'people'
   | 'organizations'
   | 'programs'
-  | 'projects'
   | 'events'
   | 'participants'
   | 'tasks'
@@ -255,20 +238,6 @@ export interface Organization {
   createdAt: string;
 }
 
-export interface Project {
-  id: string;
-  programId: string;
-  programName?: string;
-  name: string;
-  description: string;
-  status: ProjectStatus;
-  ownerName: string;
-  startDate: string;
-  endDate?: string;
-  participantIds: string[];
-  createdAt: string;
-}
-
 export interface Program {
   id: string;
   name: string;
@@ -280,13 +249,15 @@ export interface Program {
   ownerEmail?: string;
   participantIds: string[];
   partnerIds: string[];
-  projectIds?: string[];
   progressPercent: number;
   focusAreas: string[];
   budgetCad?: number;
   outcomes?: string;
   createdAt: string;
 }
+
+export type Task = TaskItem;
+export type EventRecord = EventItem;
 
 export type FundingStatus = 'Received' | 'Pledged' | 'Pending Review' | 'Approved' | 'Applied' | 'Prospective';
 
@@ -296,8 +267,6 @@ export interface EventItem {
   type: EventType;
   programId?: string;
   programName?: string;
-  projectId?: string;
-  projectName?: string;
   date: string;
   time: string;
   startTime?: string;
@@ -324,8 +293,6 @@ export interface ParticipantRecord {
   eventName?: string;
   programId?: string;
   programName?: string;
-  projectId?: string;
-  projectName?: string;
   status: ParticipantStatus;
   registeredAt: string;
   attendedAt?: string;
@@ -358,8 +325,6 @@ export interface TaskItem {
   organizationId?: string;
   programId?: string;
   programName?: string;
-  projectId?: string;
-  projectName?: string;
   eventId?: string;
   eventName?: string;
   personId?: string;
@@ -375,7 +340,7 @@ export interface TaskItem {
   suggestedReason?: string;
   suggestedAssigneeId?: string;
   suggestedAssigneeName?: string;
-  relatedRecordType?: 'Person' | 'Organization' | 'Program' | 'Project' | 'Event' | 'Funding';
+  relatedRecordType?: 'Person' | 'Organization' | 'Program' | 'Event' | 'Funding';
   relatedRecordId?: string;
   relatedRecordName?: string;
   completedAt?: string;
@@ -391,7 +356,9 @@ export interface Post {
   id: string;
   organizationId: string;
   name: string; // e.g. "Program Coordinator", "Executive Director", "Volunteer Coordinator"
+  title?: string;
   description: string;
+  responsibilities?: string[];
   isActive: boolean;
   createdAt: string;
   updatedAt?: string;
@@ -500,9 +467,6 @@ export interface FundingRecord {
   relatedProgramId?: string;
   relatedProgramName?: string;
   programId?: string;
-  relatedProjectId?: string;
-  relatedProjectName?: string;
-  projectId?: string;
   status: 'Received' | 'Pledged' | 'Pending Review' | 'Approved' | 'Applied' | 'Prospective';
   grantDeliverableNote?: string;
   reportDueDate?: string;
@@ -530,22 +494,18 @@ export interface InteractionItem {
 export interface DocumentItem {
   id: string;
   title: string;
-  type: 'Google Drive' | 'Google Docs' | 'Google Sheets' | 'Google Slides' | 'Cloud Link' | 'PDF / File' | 'Uploaded File';
+  type: 'Google Drive' | 'Google Docs' | 'Google Sheets' | 'Google Slides' | 'Cloud Link' | 'PDF / File';
   url: string;
-  storagePath?: string;
-  storageBucket?: string;
-  fileSize?: number;
-  mimeType?: string;
-  isConfidential?: boolean;
-  accessTier?: 'all' | 'staff' | 'management' | 'super_admin';
-  checksum?: string;
-  isDirectUpload?: boolean;
   relatedType: 'Person' | 'Organization' | 'Program' | 'Event' | 'Funding' | 'General';
   relatedId?: string;
   relatedName?: string;
   addedBy: string;
   addedAt: string;
   description?: string;
+  storageKey?: string;
+  isCloudFile?: boolean;
+  sizeBytes?: number;
+  mimeType?: string;
 }
 
 export interface AuditLogItem {

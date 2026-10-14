@@ -66,12 +66,7 @@ export const OrganizationsView: React.FC<OrganizationsViewProps> = ({
     const matchesQuery = q === '' ? true : 
       org.name.toLowerCase().includes(q) ||
       org.sector.toLowerCase().includes(q) ||
-      org.type.toLowerCase().includes(q) ||
-      (org.city && org.city.toLowerCase().includes(q)) ||
-      (org.province && org.province.toLowerCase().includes(q)) ||
-      (org.website && org.website.toLowerCase().includes(q)) ||
-      (org.notes && org.notes.toLowerCase().includes(q)) ||
-      (org.primaryContactName && org.primaryContactName.toLowerCase().includes(q));
+      (org.city && org.city.toLowerCase().includes(q));
     return matchesFilter && matchesQuery;
   });
 

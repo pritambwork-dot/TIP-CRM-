@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Users, 
   ShieldCheck, 
@@ -9,6 +9,7 @@ import {
   Check, 
   X, 
   ChevronRight, 
+  ChevronLeft,
   Eye, 
   Edit3, 
   Trash2, 
@@ -18,6 +19,9 @@ import {
   Sparkles, 
   Sliders, 
   AlertCircle,
+  AlertTriangle,
+  CheckCircle,
+  RefreshCw,
   FolderOpen,
   Calendar,
   Layers,
@@ -65,9 +69,9 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('');
   const [newUserTitle, setNewUserTitle] = useState('');
-  const [newUserRole, setNewUserRole] = useState<RoleId>('staff_member');
+  const [newUserRole, setNewUserRole] = useState<RoleId>('program_coordinator');
   const [newUserPostId, setNewUserPostId] = useState<string>('');
-  const [newUserAssignedRoles, setNewUserAssignedRoles] = useState<RoleId[]>(['staff_member']);
+  const [newUserAssignedRoles, setNewUserAssignedRoles] = useState<RoleId[]>(['program_coordinator']);
   const [newUserTempPassword, setNewUserTempPassword] = useState<string>(() => 
     'TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900)
   );
@@ -81,6 +85,64 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   const [provisionedNotice, setProvisionedNotice] = useState<{ name: string; email: string; tempPass: string } | null>(null);
   const [resetPassNotice, setResetPassNotice] = useState<{ name: string; tempPass: string } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Check 12: Authoritative Server-Side Audit Trail State
+  const canViewAuditLogs = isSuperAdmin || hasPermission('audit_logs', 'view') || currentUser.roleId === 'staff_manager';
+  const [serverAuditLogs, setServerAuditLogs] = useState<any[]>([]);
+  const [auditTotal, setAuditTotal] = useState<number>(0);
+  const [auditPage, setAuditPage] = useState<number>(1);
+  const [auditPageSize, setAuditPageSize] = useState<number>(25);
+  const [auditActionFilter, setAuditActionFilter] = useState<string>('all');
+  const [auditResourceFilter, setAuditResourceFilter] = useState<string>('all');
+  const [auditOutcomeFilter, setAuditOutcomeFilter] = useState<string>('all');
+  const [auditSearchQuery, setAuditSearchQuery] = useState<string>('');
+  const [auditIsLoading, setAuditIsLoading] = useState<boolean>(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+
+  const fetchServerAuditLogs = useCallback(async () => {
+    if (!canViewAuditLogs) return;
+    setAuditIsLoading(true);
+    setAuditError(null);
+    try {
+      const params = new URLSearchParams({
+        page: String(auditPage),
+        pageSize: String(auditPageSize),
+        action: auditActionFilter !== 'all' ? auditActionFilter : '',
+        resourceType: auditResourceFilter !== 'all' ? auditResourceFilter : '',
+        outcome: auditOutcomeFilter !== 'all' ? auditOutcomeFilter : '',
+        search: auditSearchQuery.trim()
+      });
+
+      const res = await fetch(`/api/audit/logs?${params.toString()}`, {
+        headers: {
+          'X-User-Id': currentUser.id,
+          'X-User-Role': currentUser.roleId,
+          'X-User-Name': currentUser.name
+        }
+      });
+
+      if (!res.ok) {
+        throw new Error(`Audit log fetch failed (HTTP ${res.status})`);
+      }
+
+      const data = await res.json();
+      if (data && Array.isArray(data.logs)) {
+        setServerAuditLogs(data.logs);
+        setAuditTotal(data.total !== undefined ? data.total : data.logs.length);
+      }
+    } catch (err: any) {
+      setAuditError(err?.message || 'Failed fetching server audit trail');
+    } finally {
+      setAuditIsLoading(false);
+    }
+  }, [canViewAuditLogs, auditPage, auditPageSize, auditActionFilter, auditResourceFilter, auditOutcomeFilter, auditSearchQuery, currentUser]);
+
+  useEffect(() => {
+    if (activeSubTab === 'audit' && canViewAuditLogs) {
+      fetchServerAuditLogs();
+    }
+  }, [activeSubTab, canViewAuditLogs, fetchServerAuditLogs]);
 
   // Selected User for editing with safe fallback
   const rawSelectedUser = users.find(u => u.id === selectedUserId) || users[0];
@@ -101,10 +163,7 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
     const matchesSearch = u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           u.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRole = roleFilter === 'all' || 
-      (roleFilter === 'super_admin' && u.roleId === 'super_admin') ||
-      (roleFilter === 'volunteer' && u.roleId === 'volunteer') ||
-      (roleFilter === 'staff_member' && u.roleId !== 'super_admin' && u.roleId !== 'volunteer');
+    const matchesRole = roleFilter === 'all' || u.roleId === roleFilter;
     return matchesSearch && matchesRole;
   });
 
@@ -326,7 +385,7 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>Role Tiers (3 Levels)</span>
+            <span>Role Hierarchy (4 Tiers)</span>
           </button>
 
           <button
@@ -435,9 +494,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   className="text-xs p-1.5 rounded-lg border border-zinc-200 bg-white font-medium text-zinc-700"
                 >
                   <option value="all">All Roles</option>
-                  <option value="super_admin">Administrator</option>
-                  <option value="staff_member">Staff / Project User</option>
-                  <option value="volunteer">Limited User / Volunteer</option>
+                  <option value="super_admin">Super Admin</option>
+                  <option value="staff_manager">Staff Manager</option>
+                  <option value="staff_member">Staff Member</option>
+                  <option value="volunteer">Volunteer</option>
                 </select>
               </div>
             </div>
@@ -568,46 +628,43 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-zinc-700 uppercase tracking-wider">
-                    Role Tier (3 Levels)
+                    Assigned Role Hierarchy
                   </label>
-                  <span className="text-[11px] text-zinc-500 font-medium">
-                    {selectedUser.roleId === 'super_admin' ? 'Administrator · Full Access' : selectedUser.roleId === 'volunteer' ? 'Limited User / Volunteer · Scoped' : 'Staff / Project User · Operations'}
+                  <span className="text-[11px] text-zinc-500">
+                    {ROLE_DEFINITIONS[selectedUser.roleId]?.levelLabel}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  {[
-                    { id: 'super_admin' as RoleId, label: 'Administrator', tier: 'Level 1', desc: 'Full administration across all CRM records, users, funding grants, and settings.' },
-                    { id: 'staff_member' as RoleId, label: 'Staff / Project User', tier: 'Level 2', desc: 'Operations: manages programs, projects, events, people, tasks, and reports.' },
-                    { id: 'volunteer' as RoleId, label: 'Limited User / Volunteer', tier: 'Level 3', desc: 'Scoped to assigned events, tasks, and attendance check-in. Funding is hidden.' }
-                  ].map(r => {
-                    const isCurrentRole = selectedUser.roleId === r.id || 
-                      (r.id === 'staff_member' && (selectedUser.roleId === 'staff_manager' || selectedUser.roleId === 'program_coordinator' || selectedUser.roleId === 'event_coordinator'));
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {(['super_admin', 'staff_manager', 'staff_member', 'volunteer'] as RoleId[]).map(roleKey => {
+                    const rDef = ROLE_DEFINITIONS[roleKey];
+                    const isCurrentRole = selectedUser.roleId === roleKey;
                     return (
                       <button
-                        key={r.id}
+                        key={roleKey}
                         type="button"
-                        onClick={() => handleRoleChange(selectedUser.id, r.id)}
-                        className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all ${
+                        onClick={() => handleRoleChange(selectedUser.id, roleKey)}
+                        className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
                           isCurrentRole
                             ? 'border-zinc-900 bg-zinc-900 text-white shadow-xs'
                             : 'border-zinc-200 hover:border-zinc-300 bg-white text-zinc-900'
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold">{r.label}</span>
+                          <span className="text-xs font-bold">{rDef.name}</span>
                           {isCurrentRole && <Check className="w-3.5 h-3.5 text-white" />}
                         </div>
-                        <p className={`text-[10px] mt-0.5 font-medium ${isCurrentRole ? 'text-zinc-300' : 'text-zinc-500'}`}>
-                          {r.tier}
-                        </p>
-                        <p className={`text-[11px] mt-1.5 leading-snug ${isCurrentRole ? 'text-zinc-200' : 'text-zinc-600'}`}>
-                          {r.desc}
+                        <p className={`text-[10px] mt-1 leading-snug ${isCurrentRole ? 'text-zinc-300' : 'text-zinc-500'}`}>
+                          Level {rDef.level}
                         </p>
                       </button>
                     );
                   })}
                 </div>
+                <p className="text-xs text-zinc-500 bg-zinc-50 p-2.5 rounded-lg border border-zinc-100">
+                  <span className="font-semibold text-zinc-800">{ROLE_DEFINITIONS[selectedUser.roleId]?.name}: </span>
+                  {ROLE_DEFINITIONS[selectedUser.roleId]?.description}
+                </p>
               </div>
 
               {/* MULTI-ROLE ASSIGNMENT MANAGER (Section 3 & 4) */}
@@ -768,71 +825,18 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                 </div>
               </div>
 
-              {/* 2. ROLE ENTITLEMENTS & ACCESS PROFILE */}
+              {/* 2. ACCESS PERMISSIONS MATRIX (Exact layout from Section 10) */}
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold text-zinc-700 uppercase tracking-wider">
-                    Role Entitlements & Permissions Summary
+                    ACCESS PERMISSION MATRIX
                   </h4>
-                  <span className="text-[11px] text-zinc-500 font-medium">
-                    Simplified RBAC
+                  <span className="text-[11px] text-zinc-400">
+                    Click toggles to customize or override
                   </span>
                 </div>
 
-                <div className="p-4 rounded-xl border border-zinc-200 bg-zinc-50/50 space-y-3">
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-medium flex items-center gap-1.5">
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      People & Relationships
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-medium flex items-center gap-1.5">
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      Programs & Projects
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-medium flex items-center gap-1.5">
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      Events & Attendance
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-medium flex items-center gap-1.5">
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      Tasks & Follow-ups
-                    </span>
-                    <span className={`px-2.5 py-1 rounded-lg border font-medium flex items-center gap-1.5 ${
-                      selectedUser.roleId === 'volunteer' 
-                        ? 'bg-zinc-100 border-zinc-200 text-zinc-400 line-through' 
-                        : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                    }`}>
-                      {selectedUser.roleId === 'volunteer' ? <Lock className="w-3.5 h-3.5 text-zinc-400" /> : <Check className="w-3.5 h-3.5 text-emerald-600" />}
-                      Reports & Exports
-                    </span>
-                    <span className={`px-2.5 py-1 rounded-lg border font-medium flex items-center gap-1.5 ${
-                      selectedUser.roleId === 'super_admin' 
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-                        : 'bg-zinc-100 border-zinc-200 text-zinc-400'
-                    }`}>
-                      {selectedUser.roleId === 'super_admin' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Lock className="w-3.5 h-3.5 text-zinc-400" />}
-                      Funding & Grants
-                    </span>
-                    <span className={`px-2.5 py-1 rounded-lg border font-medium flex items-center gap-1.5 ${
-                      selectedUser.roleId === 'super_admin' 
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-                        : 'bg-zinc-100 border-zinc-200 text-zinc-400'
-                    }`}>
-                      {selectedUser.roleId === 'super_admin' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Lock className="w-3.5 h-3.5 text-zinc-400" />}
-                      User & Organization Settings
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-zinc-500">
-                    Permissions inherit automatically from role tier. No manual matrix configuration required for standard operations.
-                  </p>
-                </div>
-
-                <details className="border border-zinc-200 rounded-xl overflow-hidden text-xs">
-                  <summary className="bg-zinc-50 px-4 py-2.5 font-semibold text-zinc-700 cursor-pointer flex items-center justify-between hover:bg-zinc-100/60 select-none">
-                    <span>Advanced: Granular Permission Overrides</span>
-                    <span className="text-[11px] text-zinc-400 font-normal">Optional · Click to toggle</span>
-                  </summary>
-                  <div className="divide-y divide-zinc-100">
+                <div className="border border-zinc-200 rounded-xl overflow-hidden divide-y divide-zinc-100 text-xs">
                   {/* Table Header */}
                   <div className="bg-zinc-50 px-4 py-2 flex items-center justify-between font-semibold text-zinc-600 text-[11px]">
                     <span className="w-1/3">RESOURCE</span>
@@ -924,32 +928,6 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                         }`}
                       >
                         {isPermActive(selectedUser, 'programs.edit') ? '✓ Edit' : '✕'}
-                      </button>
-                      <span className="w-16 text-center text-zinc-300">—</span>
-                    </span>
-                  </div>
-
-                  {/* Projects */}
-                  <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50">
-                    <span className="w-1/3 font-semibold text-zinc-900">Projects</span>
-                    <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('projects.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'projects.view') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'projects.view') ? '✓ View' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('projects.edit')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'projects.edit') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'projects.edit') ? '✓ Edit' : '✕'}
                       </button>
                       <span className="w-16 text-center text-zinc-300">—</span>
                     </span>
@@ -1174,8 +1152,7 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                     </span>
                   </div>
                 </div>
-              </details>
-            </div>
+              </div>
 
               {/* 3. DATA SCOPE (Exact layout from Section 10) */}
               <div className="space-y-4 pt-3 border-t border-zinc-100">
@@ -1372,15 +1349,15 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-zinc-200 p-5 shadow-2xs">
             <h4 className="text-sm font-bold text-zinc-900">
-              The 3 Primary TIP Role Tiers
+              The 4 Default TIP Roles + Configurable Data Scope
             </h4>
             <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
-              Clean operational hierarchy tailored for The Inclusion Project: Administrator, Staff / Project User, and Limited User / Volunteer.
+              Super Admin acts as the ultimate authority layer. Roles establish permissions and boundaries, while data scope dictates exactly which records each user can see.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {(['super_admin', 'staff_member', 'volunteer'] as RoleId[]).map(roleKey => {
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {(['super_admin', 'staff_manager', 'staff_member', 'volunteer'] as RoleId[]).map(roleKey => {
               const rDef = ROLE_DEFINITIONS[roleKey];
               const countInRole = users.filter(u => u.roleId === roleKey).length;
               return (
@@ -1431,46 +1408,274 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
         </div>
       )}
 
-      {/* SUBTAB 3: LIVE SECURITY AUDIT LOG */}
+      {/* SUBTAB 3: AUTHORITATIVE IMMUTABLE SECURITY AUDIT LOG (Check 12) */}
       {activeSubTab === 'audit' && (
-        <div className="bg-white rounded-xl border border-zinc-200 shadow-2xs overflow-hidden">
-          <div className="p-4 border-b border-zinc-200 bg-zinc-50 flex items-center justify-between">
+        <div className="bg-white rounded-xl border border-zinc-200 shadow-2xs overflow-hidden space-y-0">
+          {/* Header Panel */}
+          <div className="p-5 border-b border-zinc-200 bg-zinc-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h4 className="text-xs font-bold text-zinc-900 uppercase tracking-wider">
-                System Security & Access Audit Trail
-              </h4>
-              <p className="text-xs text-zinc-500 mt-0.5">
-                Every permission modification, role escalation, and user creation is immutably recorded.
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <h4 className="text-xs font-bold text-zinc-900 uppercase tracking-wider">
+                  Authoritative Immutable Security Audit Trail
+                </h4>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  Append-Only Engine
+                </span>
+              </div>
+              <p className="text-xs text-zinc-500 mt-1 max-w-2xl">
+                Server-verified, tamper-evident audit records of authentication changes, privilege elevation, security modifications, and high-consequence CRM actions. Records cannot be edited or deleted.
               </p>
             </div>
-            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-zinc-200 text-zinc-700">
-              {auditLogs.length} Records
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fetchServerAuditLogs()}
+                disabled={auditIsLoading}
+                className="px-3 py-1.5 rounded-lg border border-zinc-200 hover:bg-white text-xs font-semibold text-zinc-700 flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50"
+                title="Refresh audit trail from server"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${auditIsLoading ? 'animate-spin' : ''}`} />
+                <span>Refresh Logs</span>
+              </button>
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-zinc-900 text-white shadow-2xs">
+                {auditTotal || serverAuditLogs.length || auditLogs.length} Records
+              </span>
+            </div>
           </div>
 
-          <div className="divide-y divide-zinc-100 max-h-[500px] overflow-y-auto">
-            {auditLogs.map(log => (
-              <div key={log.id} className="p-3.5 flex items-start justify-between text-xs hover:bg-zinc-50/60">
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-zinc-900">{log.action}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-100 text-zinc-600 font-medium">
-                      {log.entityType}
-                    </span>
-                    <span className="font-medium text-zinc-700">{log.entityName}</span>
-                  </div>
-                  {log.details && (
-                    <p className="text-[11px] text-zinc-500">{log.details}</p>
-                  )}
+          {!canViewAuditLogs ? (
+            <div className="p-8 text-center bg-rose-50/50">
+              <Lock className="w-8 h-8 text-rose-500 mx-auto mb-2" />
+              <h5 className="text-sm font-bold text-rose-900">Access Restricted</h5>
+              <p className="text-xs text-rose-700 mt-1 max-w-md mx-auto">
+                Viewing the security audit trail requires the <code>audit_logs.view</code> permission. Only Super Administrators and Staff Managers may inspect audit records.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Filter and Search Bar */}
+              <div className="p-4 border-b border-zinc-100 bg-white grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                {/* Search query */}
+                <div className="relative lg:col-span-2">
+                  <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={auditSearchQuery}
+                    onChange={(e) => setAuditSearchQuery(e.target.value)}
+                    placeholder="Search action, actor, description, or correlation ID..."
+                    className="w-full text-xs pl-8 pr-3 py-2 rounded-lg border border-zinc-200 focus:outline-hidden focus:border-zinc-400 bg-zinc-50/50"
+                  />
                 </div>
 
-                <div className="text-right shrink-0">
-                  <p className="font-medium text-zinc-800">{log.userName}</p>
-                  <p className="text-[10px] text-zinc-400">{log.timestamp}</p>
+                {/* Outcome Filter */}
+                <div>
+                  <select
+                    value={auditOutcomeFilter}
+                    onChange={(e) => setAuditOutcomeFilter(e.target.value)}
+                    className="w-full text-xs px-2.5 py-2 rounded-lg border border-zinc-200 bg-white text-zinc-700"
+                  >
+                    <option value="all">All Outcomes</option>
+                    <option value="SUCCESS">Outcome: SUCCESS</option>
+                    <option value="FAILURE">Outcome: FAILURE</option>
+                  </select>
+                </div>
+
+                {/* Action Filter */}
+                <div>
+                  <select
+                    value={auditActionFilter}
+                    onChange={(e) => setAuditActionFilter(e.target.value)}
+                    className="w-full text-xs px-2.5 py-2 rounded-lg border border-zinc-200 bg-white text-zinc-700"
+                  >
+                    <option value="all">All Actions</option>
+                    <option value="AUTH_ROLE_SWITCH">Role Switch</option>
+                    <option value="AUTH_ROLE_ELEVATION_DENIED">Elevation Denied</option>
+                    <option value="AUTH_PASSWORD_CHANGE">Password Change</option>
+                    <option value="AUTH_PASSWORD_RESET_ADMIN">Password Reset (Admin)</option>
+                    <option value="SETTINGS_BUDGET_UPDATE">AI Budget Update</option>
+                    <option value="AI_ACTION_CONFIRMED">AI Action Confirmed</option>
+                    <option value="DATA_EXPORT_CSV">Data Export (CSV)</option>
+                    <option value="DATA_IMPORT_CSV">Data Import (CSV)</option>
+                    <option value="AUDIT_LOGS_ACCESS_DENIED">Audit Access Denied</option>
+                  </select>
+                </div>
+
+                {/* Resource Type Filter */}
+                <div>
+                  <select
+                    value={auditResourceFilter}
+                    onChange={(e) => setAuditResourceFilter(e.target.value)}
+                    className="w-full text-xs px-2.5 py-2 rounded-lg border border-zinc-200 bg-white text-zinc-700"
+                  >
+                    <option value="all">All Resources</option>
+                    <option value="UserRole">UserRole</option>
+                    <option value="UserCredential">UserCredential</option>
+                    <option value="AiBudget">AiBudget</option>
+                    <option value="People">People</option>
+                    <option value="AuditLog">AuditLog</option>
+                    <option value="System">System</option>
+                  </select>
                 </div>
               </div>
-            ))}
-          </div>
+
+              {/* Records Stream */}
+              <div className="divide-y divide-zinc-100 max-h-[580px] overflow-y-auto">
+                {auditIsLoading ? (
+                  <div className="p-8 text-center text-zinc-400 text-xs flex items-center justify-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-zinc-500" />
+                    <span>Loading authoritative security logs...</span>
+                  </div>
+                ) : (serverAuditLogs.length > 0 ? serverAuditLogs : auditLogs).length === 0 ? (
+                  <div className="p-10 text-center text-zinc-400 text-xs">
+                    <AlertCircle className="w-6 h-6 mx-auto mb-2 text-zinc-300" />
+                    <p>No audit records match the current filters.</p>
+                  </div>
+                ) : (
+                  (serverAuditLogs.length > 0 ? serverAuditLogs : auditLogs).map((log: any) => {
+                    const isSuccess = log.outcome !== 'FAILURE';
+                    const hasMetadata = log.metadata && Object.keys(log.metadata).length > 0;
+                    const isExpanded = expandedLogId === log.id;
+
+                    return (
+                      <div key={log.id} className="p-4 hover:bg-zinc-50/60 transition-colors text-xs space-y-2">
+                        {/* Line 1: Header with Badges */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {/* Outcome Badge */}
+                            <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              isSuccess 
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                                : 'bg-rose-50 text-rose-700 border-rose-200'
+                            }`}>
+                              {isSuccess ? <CheckCircle className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                              {log.outcome || 'SUCCESS'}
+                            </span>
+
+                            {/* Action Name */}
+                            <span className="font-mono font-bold text-zinc-900 text-xs">
+                              {log.action}
+                            </span>
+
+                            {/* Resource Type */}
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-100 text-zinc-700 font-semibold border border-zinc-200">
+                              {log.resourceType || log.entityType || 'Resource'}
+                            </span>
+
+                            {/* Entity Name */}
+                            {log.entityName && (
+                              <span className="font-medium text-zinc-600">
+                                • {log.entityName}
+                              </span>
+                            )}
+
+                            {/* Correlation ID */}
+                            {log.correlationId && (
+                              <span className="font-mono text-[10px] text-zinc-400 bg-zinc-50 border border-zinc-200 px-1.5 py-0.5 rounded">
+                                cid: {log.correlationId}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span className="text-[11px] text-zinc-400 font-medium">
+                              {log.timestamp}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Line 2: Description Narrative */}
+                        <div className="text-zinc-700 text-xs leading-relaxed">
+                          {log.description || log.details || 'Operational audit event recorded.'}
+                        </div>
+
+                        {/* Line 3: Actor & Context Metadata */}
+                        <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-1 border-t border-zinc-100/70">
+                          <div className="flex items-center gap-3">
+                            <span>
+                              <strong className="text-zinc-700">Actor:</strong> {log.actorName || log.userName || 'Authorized User'} ({log.actorRole || 'role: unknown'})
+                            </span>
+                            {log.actorId && (
+                              <span className="text-zinc-400 font-mono text-[10px]">
+                                [id: {log.actorId}]
+                              </span>
+                            )}
+                            {log.ipAddress && (
+                              <span className="text-zinc-400 font-mono text-[10px]">
+                                IP: {log.ipAddress}
+                              </span>
+                            )}
+                          </div>
+
+                          {hasMetadata && (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
+                              className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>{isExpanded ? 'Hide Metadata' : 'View Sanitized Metadata'}</span>
+                              <ChevronRight className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Expandable Sanitized Metadata JSON */}
+                        {isExpanded && hasMetadata && (
+                          <div className="mt-2 p-3 bg-zinc-900 text-zinc-200 rounded-lg font-mono text-[11px] overflow-x-auto shadow-inner border border-zinc-800 animate-fadeIn">
+                            <pre>{JSON.stringify(log.metadata, null, 2)}</pre>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Pagination Bar */}
+              <div className="p-3.5 border-t border-zinc-200 bg-zinc-50 flex items-center justify-between text-xs text-zinc-600">
+                <div className="flex items-center gap-2">
+                  <span>Showing page {auditPage}</span>
+                  <span className="text-zinc-400">•</span>
+                  <span>
+                    {auditTotal > 0 ? `${auditTotal} total records` : `${serverAuditLogs.length} records`}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={auditPageSize}
+                    onChange={(e) => setAuditPageSize(Number(e.target.value))}
+                    className="text-xs p-1 rounded border border-zinc-200 bg-white"
+                  >
+                    <option value={10}>10 / page</option>
+                    <option value={25}>25 / page</option>
+                    <option value={50}>50 / page</option>
+                    <option value={100}>100 / page</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => setAuditPage(prev => Math.max(1, prev - 1))}
+                    disabled={auditPage <= 1}
+                    className="p-1 rounded border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="Previous page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAuditPage(prev => prev + 1)}
+                    disabled={auditPage * auditPageSize >= (auditTotal || serverAuditLogs.length)}
+                    className="p-1 rounded border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="Next page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1522,8 +1727,34 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
             </div>
           </div>
 
-          <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3 text-xs text-zinc-600 flex items-center justify-between">
-            <span>Database schema &amp; Row Level Security policies defined in <code>src/db/schema.sql</code> and <code>DATABASE_STRUCTURE.md</code>.</span>
+          <div className="bg-zinc-900 text-zinc-100 rounded-lg p-4 font-mono text-xs overflow-x-auto max-h-96 leading-relaxed">
+            <pre>{`-- PostgreSQL / Supabase Row Level Security (RLS) Policy Example:
+ALTER TABLE people ENABLE ROW LEVEL SECURITY;
+ALTER TABLE funding_records ENABLE ROW LEVEL SECURITY;
+
+-- Super Admin has full bypass access
+CREATE POLICY super_admin_all ON people 
+  FOR ALL USING (current_user_role() = 'super_admin');
+
+-- Funding records strictly hidden from Volunteers
+CREATE POLICY funding_access_policy ON funding_records 
+  FOR SELECT USING (
+    current_user_role() IN ('super_admin', 'staff_manager') OR
+    (SELECT funding_scope FROM users WHERE id = auth.uid()) IN ('ALL', 'VIEW')
+  );
+
+-- Scoped People view for front-line Staff & Volunteers
+CREATE POLICY people_scoped_view ON people 
+  FOR SELECT USING (
+    current_user_role() IN ('super_admin', 'staff_manager') OR
+    id IN (
+      SELECT person_id FROM program_participants 
+      WHERE program_id IN (SELECT program_id FROM program_members WHERE user_id = auth.uid())
+      UNION
+      SELECT person_id FROM event_participants 
+      WHERE event_id IN (SELECT event_id FROM event_staff WHERE user_id = auth.uid())
+    )
+  );`}</pre>
           </div>
         </div>
       )}
@@ -1617,60 +1848,51 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                 </select>
               </div>
 
-              {/* Assigned Role Level (3 Clean Tiers) */}
+              {/* Assigned Roles (Select one or more) */}
               <div>
-                <label className="block text-xs font-semibold text-zinc-700 mb-1.5">
-                  Assigned Access Level (3 Core Tiers) *
-                </label>
-                <div className="grid grid-cols-1 gap-2 text-xs">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-zinc-700">
+                    Assigned Roles (Select one or more) *
+                  </label>
+                  <span className="text-[11px] text-zinc-400 font-mono">
+                    {newUserAssignedRoles.length} selected
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 border border-zinc-200 rounded-xl p-3 bg-zinc-50/60 text-xs">
                   {([
-                    {
-                      id: 'super_admin' as RoleId,
-                      title: 'Administrator',
-                      badge: 'Full Access',
-                      desc: 'Full administrative control, user provisioning, funding oversight, and system settings.'
-                    },
-                    {
-                      id: 'staff_member' as RoleId,
-                      title: 'Staff / Project User',
-                      badge: 'Operational',
-                      desc: 'Full operational access to programs, projects, events, stakeholders, and follow-up tasks.'
-                    },
-                    {
-                      id: 'volunteer' as RoleId,
-                      title: 'Limited User / Volunteer',
-                      badge: 'Restricted',
-                      desc: 'Front-line scoped access: view assigned events and log participant attendance. No funding.'
-                    }
-                  ]).map(tier => {
-                    const isSelected = newUserAssignedRoles.includes(tier.id);
+                    { id: 'program_coordinator' as RoleId, label: 'Program Coordinator' },
+                    { id: 'event_coordinator' as RoleId, label: 'Event Coordinator' },
+                    { id: 'staff_member' as RoleId, label: 'Staff Member' },
+                    { id: 'staff_manager' as RoleId, label: 'Staff Manager' },
+                    { id: 'volunteer' as RoleId, label: 'Volunteer' },
+                    { id: 'super_admin' as RoleId, label: 'Super Admin' },
+                  ]).map(r => {
+                    const isChecked = newUserAssignedRoles.includes(r.id);
                     return (
-                      <div
-                        key={tier.id}
-                        onClick={() => setNewUserAssignedRoles([tier.id])}
-                        className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                          isSelected
-                            ? 'bg-zinc-900 text-white border-zinc-900 shadow-sm'
-                            : 'bg-white border-zinc-200 text-zinc-700 hover:border-zinc-300'
+                      <label 
+                        key={r.id}
+                        className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
+                          isChecked ? 'bg-white border-zinc-900 font-semibold shadow-2xs' : 'border-zinc-200 bg-white/70 hover:bg-white text-zinc-600'
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-xs">{tier.title}</span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
-                              isSelected ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'
-                            }`}>
-                              {tier.badge}
-                            </span>
-                          </div>
-                          <span className={`text-xs ${isSelected ? 'text-emerald-400 font-bold' : 'text-zinc-400'}`}>
-                            {isSelected ? '✓ Selected' : 'Select'}
-                          </span>
-                        </div>
-                        <p className={`text-[11px] mt-1 leading-relaxed ${isSelected ? 'text-zinc-300' : 'text-zinc-500'}`}>
-                          {tier.desc}
-                        </p>
-                      </div>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setNewUserAssignedRoles(prev => [...prev, r.id]);
+                            } else {
+                              if (newUserAssignedRoles.length === 1) {
+                                alert('At least one role must be assigned.');
+                                return;
+                              }
+                              setNewUserAssignedRoles(prev => prev.filter(x => x !== r.id));
+                            }
+                          }}
+                          className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+                        />
+                        <span>{r.label}</span>
+                      </label>
                     );
                   })}
                 </div>

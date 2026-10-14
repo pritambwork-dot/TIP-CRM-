@@ -1,9 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { 
   Person, 
   Organization, 
   Program, 
-  Project,
   EventItem, 
   ParticipantRecord, 
   TaskItem, 
@@ -56,7 +55,6 @@ import {
   INITIAL_PEOPLE, 
   INITIAL_ORGANIZATIONS, 
   INITIAL_PROGRAMS, 
-  INITIAL_PROJECTS,
   INITIAL_EVENTS, 
   INITIAL_PARTICIPANTS, 
   INITIAL_TASKS, 
@@ -77,15 +75,8 @@ import {
   INITIAL_AI_MESSAGES,
   INITIAL_AI_USER_SETTINGS
 } from '../data/mockData';
-import { SupabaseAuthEngine, SupabaseStorageEngine } from '../lib/supabase';
-import { 
-  DatabaseHealthStatus, 
-  checkDatabaseHealth, 
-  isSupabaseConfigured, 
-  SupabaseDb, 
-  DbMappers, 
-  subscribeToTableRealtime 
-} from '../lib/supabaseDb';
+import { SupabaseAuthEngine } from '../lib/supabase';
+import { clientSafeLogger, mapToSafeErrorMessage } from '../lib/safeErrors';
 import { 
   calculateUserBehaviorSnapshot, 
   calculateOrgBehaviorSnapshot, 
@@ -96,6 +87,7 @@ import {
   confirmAiActionOnServer 
 } from '../lib/tipIntelligenceService';
 import { updateAiBudget } from '../lib/aiOrchestrator';
+import { validateBackupStructure } from '../lib/fileValidation';
 
 export interface PermissionsUtility {
   can: (action: ActionType, resource: ResourceType) => boolean;
@@ -195,7 +187,6 @@ interface CrmContextType {
   scopedPrograms: Program[];
   scopedEvents: EventItem[];
   scopedTasks: TaskItem[];
-  scopedDocuments: DocumentItem[];
   
   // Raw records (available for super admins / calculations)
   people: Person[];
@@ -225,12 +216,6 @@ interface CrmContextType {
   updateProgram: (id: string, updates: Partial<Program>) => void;
   deleteProgram: (id: string) => void;
   
-  // Project CRUD
-  projects: Project[];
-  addProject: (proj: Omit<Project, 'id' | 'createdAt'>) => Project;
-  updateProject: (id: string, updates: Partial<Project>) => void;
-  deleteProject: (id: string) => void;
-  
   // Event CRUD
   addEvent: (evt: Omit<EventItem, 'id' | 'createdAt'>) => EventItem;
   updateEvent: (id: string, updates: Partial<EventItem>) => void;
@@ -239,7 +224,6 @@ interface CrmContextType {
   // Attendance & Participant
   updateParticipantStatus: (id: string, status: ParticipantStatus) => void;
   addParticipant: (participant: Omit<ParticipantRecord, 'id' | 'registeredAt'>) => void;
-  deleteParticipant: (id: string) => void;
   
   // Tasks
   addTask: (task: Omit<TaskItem, 'id' | 'createdAt'>) => TaskItem;
@@ -274,7 +258,7 @@ interface CrmContextType {
   executeRulesForTrigger: (triggerType: TaskTriggerType, context: Record<string, any>) => TaskItem[];
   
   // Funding
-  addFunding: (funding: Omit<FundingRecord, 'id' | 'createdAt'>) => FundingRecord | null;
+  addFunding: (funding: Omit<FundingRecord, 'id' | 'createdAt'>) => FundingRecord;
   updateFunding: (id: string, updates: Partial<FundingRecord>) => void;
   deleteFunding: (id: string) => void;
   
@@ -283,7 +267,14 @@ interface CrmContextType {
   
   // Documents
   addDocument: (doc: Omit<DocumentItem, 'id' | 'addedAt'>) => DocumentItem;
-  deleteDocument: (id: string) => Promise<boolean>;
+  deleteDocument: (id: string) => void;
+
+  // Sovereign Data & Backup Restoration
+  restoreDatabaseFromBackup: (backupData: any) => {
+    success: boolean;
+    error?: string;
+    restoredCounts?: Record<string, number>;
+  };
   
   // Import
   batchImportPeople: (imported: Array<{
@@ -321,12 +312,6 @@ interface CrmContextType {
   
   // Reset demo data
   resetAllData: () => void;
-
-  // Supabase Database & Realtime Cloud Sync (Master Prompt 7)
-  dbHealth: DatabaseHealthStatus | null;
-  isDbSyncing: boolean;
-  dbSyncError: string | null;
-  refreshDatabase: () => Promise<void>;
 }
 
 const CrmContext = createContext<CrmContextType | undefined>(undefined);
@@ -338,7 +323,7 @@ function loadFromStorage<T>(key: string, fallback: T): T {
     const item = localStorage.getItem(STORAGE_KEY_PREFIX + key);
     return item ? JSON.parse(item) : fallback;
   } catch (e) {
-    console.error('Error reading localStorage for key', key, e);
+    clientSafeLogger.error(`Error reading localStorage for key: ${key}`, mapToSafeErrorMessage(e));
     return fallback;
   }
 }
@@ -348,48 +333,66 @@ function normalizeUser(rawUser: any): UserProfile {
     return { ...INITIAL_USERS[0] };
   }
 
-  const baseRoleId: RoleId = rawUser.roleId || (rawUser.role === 'volunteer' ? 'volunteer' : 'staff_member');
-  const assignedRoleIds: RoleId[] = Array.isArray(rawUser.assignedRoleIds) && rawUser.assignedRoleIds.length > 0 
-    ? rawUser.assignedRoleIds 
-    : [baseRoleId];
-  const activeRoleId: RoleId = (rawUser.activeRoleId && assignedRoleIds.includes(rawUser.activeRoleId))
-    ? rawUser.activeRoleId
-    : (assignedRoleIds[0] || baseRoleId);
-  const roleDef = ROLE_DEFINITIONS[activeRoleId] || ROLE_DEFINITIONS.staff_member;
+  // Check if this profile belongs to Pritam Biswas
+  const isPritam = rawUser.id === 'u-1' || 
+                   rawUser.name === 'Pritam Biswas' || 
+                   (typeof rawUser.name === 'string' && rawUser.name.toLowerCase().includes('pritam')) ||
+                   rawUser.email === 'pritam@gmail.com' || 
+                   rawUser.email === 'pritamb2k06@gmail.com';
+
+  // Determine roleId with backward compatibility - Pritam is ALWAYS Super Admin!
+  const baseRoleId: RoleId = isPritam ? 'super_admin' : (rawUser.roleId || (rawUser.role === 'volunteer' ? 'volunteer' : 'staff_member'));
+  const assignedRoleIds: RoleId[] = isPritam 
+    ? ['super_admin'] 
+    : (Array.isArray(rawUser.assignedRoleIds) && rawUser.assignedRoleIds.length > 0 ? rawUser.assignedRoleIds : [baseRoleId]);
+  const activeRoleId: RoleId = isPritam 
+    ? 'super_admin' 
+    : ((rawUser.activeRoleId && assignedRoleIds.includes(rawUser.activeRoleId)) ? rawUser.activeRoleId : (assignedRoleIds[0] || baseRoleId));
+  const roleDef = ROLE_DEFINITIONS[activeRoleId] || ROLE_DEFINITIONS.super_admin;
 
   return {
-    id: rawUser.id || 'u-' + Date.now(),
+    id: isPritam ? 'u-1' : (rawUser.id || 'u-' + Date.now()),
     authUserId: rawUser.authUserId,
     organizationId: rawUser.organizationId || 'org-tip',
-    name: rawUser.name || 'Staff User',
-    email: rawUser.email || 'user@theinclusionproject.ca',
+    name: isPritam ? 'Pritam Biswas' : (rawUser.name || 'Staff User'),
+    email: isPritam ? (rawUser.email || 'pritam@gmail.com') : (rawUser.email || 'user@theinclusionproject.ca'),
     phone: rawUser.phone,
-    role: activeRoleId === 'volunteer' ? 'volunteer' : 'staff',
+    role: isPritam ? 'staff' : (activeRoleId === 'volunteer' ? 'volunteer' : 'staff'),
     roleId: activeRoleId,
     assignedRoleIds,
     activeRoleId,
-    title: rawUser.title || roleDef.name,
-    avatarInitials: rawUser.avatarInitials || (rawUser.name ? rawUser.name.slice(0, 2).toUpperCase() : 'SU'),
-    status: rawUser.status || 'approved',
-    isActive: rawUser.isActive !== undefined ? rawUser.isActive : true,
-    emailVerified: rawUser.emailVerified !== undefined ? rawUser.emailVerified : true,
-    adminApproved: rawUser.adminApproved !== undefined ? rawUser.adminApproved : (rawUser.status === 'approved'),
-    mustChangePassword: Boolean(rawUser.mustChangePassword),
+    title: isPritam ? 'Executive Director & Super Admin' : (rawUser.title || roleDef.name),
+    avatarInitials: isPritam ? 'PB' : (rawUser.avatarInitials || (rawUser.name ? rawUser.name.slice(0, 2).toUpperCase() : 'SU')),
+    status: isPritam ? 'approved' : (rawUser.status || 'approved'),
+    isActive: isPritam ? true : (rawUser.isActive !== undefined ? rawUser.isActive : true),
+    emailVerified: isPritam ? true : (rawUser.emailVerified !== undefined ? rawUser.emailVerified : true),
+    adminApproved: isPritam ? true : (rawUser.adminApproved !== undefined ? rawUser.adminApproved : (rawUser.status === 'approved')),
+    mustChangePassword: isPritam ? false : Boolean(rawUser.mustChangePassword),
     passwordChangedAt: rawUser.passwordChangedAt,
-    onboardingCompleted: rawUser.onboardingCompleted !== undefined ? Boolean(rawUser.onboardingCompleted) : true,
+    onboardingCompleted: isPritam ? true : (rawUser.onboardingCompleted !== undefined ? Boolean(rawUser.onboardingCompleted) : true),
     tempPassword: rawUser.tempPassword,
     passwordHash: rawUser.passwordHash,
-    dataScope: {
+    dataScope: isPritam ? {
+      people: 'GLOBAL',
+      programs: 'ALL',
+      events: 'ALL',
+      funding: 'ALL'
+    } : {
       people: rawUser.dataScope?.people || roleDef.defaultDataScope.people,
       programs: rawUser.dataScope?.programs || roleDef.defaultDataScope.programs,
       events: rawUser.dataScope?.events || roleDef.defaultDataScope.events,
       funding: rawUser.dataScope?.funding || roleDef.defaultDataScope.funding,
     },
-    assignedProgramIds: Array.isArray(rawUser.assignedProgramIds) ? rawUser.assignedProgramIds : [],
-    assignedEventIds: Array.isArray(rawUser.assignedEventIds) ? rawUser.assignedEventIds : [],
-    postId: rawUser.postId,
-    postTitle: rawUser.postTitle,
-    responsibilities: Array.isArray(rawUser.responsibilities) ? rawUser.responsibilities : [],
+    assignedProgramIds: isPritam ? ['prog-1', 'prog-2', 'prog-3'] : (Array.isArray(rawUser.assignedProgramIds) ? rawUser.assignedProgramIds : []),
+    assignedEventIds: isPritam ? ['evt-1', 'evt-2', 'evt-3', 'evt-4'] : (Array.isArray(rawUser.assignedEventIds) ? rawUser.assignedEventIds : []),
+    postId: isPritam ? 'post-ed' : rawUser.postId,
+    postTitle: isPritam ? 'Executive Director' : rawUser.postTitle,
+    responsibilities: isPritam ? [
+      'Strategic leadership & organizational vision',
+      'Board governance and fiduciary oversight',
+      'High-impact philanthropic partnerships',
+      'Team post, rule & AI orchestration configuration'
+    ] : (Array.isArray(rawUser.responsibilities) ? rawUser.responsibilities : []),
     permissionsOverride: rawUser.permissionsOverride || {},
     createdAt: rawUser.createdAt || new Date().toISOString()
   };
@@ -399,42 +402,66 @@ function saveToStorage<T>(key: string, value: T) {
   try {
     localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(value));
   } catch (e) {
-    console.error('Error writing localStorage for key', key, e);
+    clientSafeLogger.error(`Error writing localStorage for key: ${key}`, mapToSafeErrorMessage(e));
   }
 }
 
 export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [users, setUsers] = useState<UserProfile[]>(() => {
     const loaded = loadFromStorage<any[]>('crm_users', INITIAL_USERS);
-    // Purge legacy mock accounts (u-1..u-8) if present in user's browser localStorage
-    const filtered = Array.isArray(loaded)
-      ? loaded
-          .filter(u => u && !/^u-[0-9]+$/.test(u.id) && !u.email?.includes('ruth@') && !u.email?.includes('marcus.chen@'))
-          .map(normalizeUser)
-      : [];
-
-    const list = filtered.length > 0 ? filtered : [...INITIAL_USERS];
-
-    // Ensure Pritam and Divyanshaa always exist with rkumar07 credentials
+    const list = Array.isArray(loaded) && loaded.length > 0 ? loaded.map(normalizeUser) : [...INITIAL_USERS];
+    
+    // Ensure demo seed users (such as u-8 Chloe Vance) exist in list if not already present
     INITIAL_USERS.forEach(seedUser => {
-      const idx = list.findIndex(u => u.id === seedUser.id);
-      if (idx === -1) {
+      if (!list.some(u => u.id === seedUser.id)) {
         list.push(seedUser);
-      } else {
-        list[idx] = { ...list[idx], ...seedUser };
       }
     });
 
-    saveToStorage('crm_users', list);
+    // Guarantee that u-1 / Pritam Biswas is always present as Super Admin
+    const pritamIndex = list.findIndex(u => u.id === 'u-1' || u.name === 'Pritam Biswas' || u.email === 'pritam@gmail.com');
+    if (pritamIndex >= 0) {
+      list[pritamIndex] = {
+        ...list[pritamIndex],
+        id: 'u-1',
+        name: 'Pritam Biswas',
+        email: 'pritam@gmail.com',
+        roleId: 'super_admin',
+        role: 'staff',
+        assignedRoleIds: ['super_admin'],
+        activeRoleId: 'super_admin',
+        title: 'Executive Director & Super Admin',
+        postId: 'post-ed',
+        postTitle: 'Executive Director',
+        dataScope: { people: 'GLOBAL', programs: 'ALL', events: 'ALL', funding: 'ALL' },
+        status: 'approved',
+        isActive: true,
+        emailVerified: true,
+        adminApproved: true,
+        mustChangePassword: false,
+        onboardingCompleted: true
+      };
+    } else {
+      list.unshift(INITIAL_USERS[0]);
+    }
     return list;
   });
 
   const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
     const loaded = loadFromStorage<any>('current_user', null);
-    if (!loaded || loaded.id === 'u-1' || !['pritam', 'divyanshaa'].includes(loaded.id)) {
-      return INITIAL_USERS[0];
+    if (!loaded) return INITIAL_USERS[0];
+    const user = normalizeUser(loaded);
+    // If the saved user is Pritam, ensure roleId is super_admin
+    if (user.id === 'u-1' || user.name === 'Pritam Biswas') {
+      return {
+        ...user,
+        roleId: 'super_admin',
+        role: 'staff',
+        title: 'Executive Director & Super Admin',
+        dataScope: { people: 'GLOBAL', programs: 'ALL', events: 'ALL', funding: 'ALL' }
+      };
     }
-    return normalizeUser(loaded);
+    return user;
   });
   
   const [people, setPeople] = useState<Person[]>(() => 
@@ -447,10 +474,6 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   
   const [programs, setPrograms] = useState<Program[]>(() => 
     loadFromStorage('programs', INITIAL_PROGRAMS)
-  );
-
-  const [projects, setProjects] = useState<Project[]>(() => 
-    loadFromStorage('projects', INITIAL_PROJECTS)
   );
   
   const [events, setEvents] = useState<EventItem[]>(() => 
@@ -578,7 +601,6 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { saveToStorage('people', people); }, [people]);
   useEffect(() => { saveToStorage('organizations', organizations); }, [organizations]);
   useEffect(() => { saveToStorage('programs', programs); }, [programs]);
-  useEffect(() => { saveToStorage('projects', projects); }, [projects]);
   useEffect(() => { saveToStorage('events', events); }, [events]);
   useEffect(() => { saveToStorage('participants', participants); }, [participants]);
   useEffect(() => { saveToStorage('tasks', tasks); }, [tasks]);
@@ -600,183 +622,6 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { saveToStorage('ai_budget', aiBudgetConfig); }, [aiBudgetConfig]);
   useEffect(() => { saveToStorage('ai_dismissed_hashes', dismissedSuggestionHashes); }, [dismissedSuggestionHashes]);
 
-  // Supabase Database & Realtime Cloud Sync State (Master Prompt 7)
-  const [dbHealth, setDbHealth] = useState<DatabaseHealthStatus | null>(null);
-  const [isDbSyncing, setIsDbSyncing] = useState<boolean>(false);
-  const [dbSyncError, setDbSyncError] = useState<string | null>(null);
-
-  const refreshDatabase = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
-      setDbHealth({
-        connected: false,
-        isLiveCloud: false,
-        error: 'Supabase credentials not configured in environment (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY required).'
-      });
-      return;
-    }
-
-    setIsDbSyncing(true);
-    setDbSyncError(null);
-    try {
-      const health = await checkDatabaseHealth();
-      setDbHealth(health);
-
-      if (health.connected) {
-        const [
-          peopleRes,
-          orgsRes,
-          programsRes,
-          projectsRes,
-          eventsRes,
-          participantsRes,
-          tasksRes,
-          fundingRes,
-          documentsRes,
-          auditLogsRes
-        ] = await Promise.all([
-          SupabaseDb.people.getAll(),
-          SupabaseDb.organizations.getAll(),
-          SupabaseDb.programs.getAll(),
-          SupabaseDb.projects.getAll(),
-          SupabaseDb.events.getAll(),
-          SupabaseDb.participants.getAll(),
-          SupabaseDb.tasks.getAll(),
-          SupabaseDb.funding.getAll(),
-          SupabaseDb.documents.getAll(),
-          SupabaseDb.auditLogs.getAll()
-        ]);
-
-        if (!peopleRes.error && peopleRes.data && peopleRes.data.length > 0) setPeople(peopleRes.data);
-        if (!orgsRes.error && orgsRes.data && orgsRes.data.length > 0) setOrganizations(orgsRes.data);
-        if (!programsRes.error && programsRes.data && programsRes.data.length > 0) setPrograms(programsRes.data);
-        if (!projectsRes.error && projectsRes.data && projectsRes.data.length > 0) setProjects(projectsRes.data);
-        if (!eventsRes.error && eventsRes.data && eventsRes.data.length > 0) setEvents(eventsRes.data);
-        if (!participantsRes.error && participantsRes.data && participantsRes.data.length > 0) setParticipants(participantsRes.data);
-        if (!tasksRes.error && tasksRes.data && tasksRes.data.length > 0) setTasks(tasksRes.data);
-        if (!fundingRes.error && fundingRes.data && fundingRes.data.length > 0) setFunding(fundingRes.data);
-        if (!documentsRes.error && documentsRes.data && documentsRes.data.length > 0) setDocuments(documentsRes.data);
-        if (!auditLogsRes.error && auditLogsRes.data && auditLogsRes.data.length > 0) setAuditLogs(auditLogsRes.data);
-      }
-    } catch (err: any) {
-      console.error('Error synchronizing database with Supabase:', err);
-      setDbSyncError(err?.message || 'Database synchronization failed.');
-    } finally {
-      setIsDbSyncing(false);
-    }
-  }, []);
-
-  // Hydrate from live Supabase if connected
-  useEffect(() => {
-    refreshDatabase();
-  }, [refreshDatabase]);
-
-  // Realtime subscriptions across core tables
-  useEffect(() => {
-    if (!isSupabaseConfigured() || !dbHealth?.connected) return;
-
-    const cleanups: Array<() => void> = [];
-
-    cleanups.push(subscribeToTableRealtime('people', ({ eventType, new: n, old: o }) => {
-      if (eventType === 'INSERT' && n) {
-        const p = DbMappers.personFromRow(n);
-        setPeople(prev => prev.some(item => item.id === p.id) ? prev : [p, ...prev]);
-      } else if (eventType === 'UPDATE' && n) {
-        const p = DbMappers.personFromRow(n);
-        setPeople(prev => prev.map(item => item.id === p.id ? p : item));
-      } else if (eventType === 'DELETE' && o) {
-        setPeople(prev => prev.filter(item => item.id !== o.id));
-      }
-    }));
-
-    cleanups.push(subscribeToTableRealtime('organizations', ({ eventType, new: n, old: o }) => {
-      if (eventType === 'INSERT' && n) {
-        const org = DbMappers.orgFromRow(n);
-        setOrganizations(prev => prev.some(item => item.id === org.id) ? prev : [org, ...prev]);
-      } else if (eventType === 'UPDATE' && n) {
-        const org = DbMappers.orgFromRow(n);
-        setOrganizations(prev => prev.map(item => item.id === org.id ? org : item));
-      } else if (eventType === 'DELETE' && o) {
-        setOrganizations(prev => prev.filter(item => item.id !== o.id));
-      }
-    }));
-
-    cleanups.push(subscribeToTableRealtime('programs', ({ eventType, new: n, old: o }) => {
-      if (eventType === 'INSERT' && n) {
-        const prog = DbMappers.programFromRow(n);
-        setPrograms(prev => prev.some(item => item.id === prog.id) ? prev : [prog, ...prev]);
-      } else if (eventType === 'UPDATE' && n) {
-        const prog = DbMappers.programFromRow(n);
-        setPrograms(prev => prev.map(item => item.id === prog.id ? prog : item));
-      } else if (eventType === 'DELETE' && o) {
-        setPrograms(prev => prev.filter(item => item.id !== o.id));
-      }
-    }));
-
-    cleanups.push(subscribeToTableRealtime('projects', ({ eventType, new: n, old: o }) => {
-      if (eventType === 'INSERT' && n) {
-        const proj = DbMappers.projectFromRow(n);
-        setProjects(prev => prev.some(item => item.id === proj.id) ? prev : [proj, ...prev]);
-      } else if (eventType === 'UPDATE' && n) {
-        const proj = DbMappers.projectFromRow(n);
-        setProjects(prev => prev.map(item => item.id === proj.id ? proj : item));
-      } else if (eventType === 'DELETE' && o) {
-        setProjects(prev => prev.filter(item => item.id !== o.id));
-      }
-    }));
-
-    cleanups.push(subscribeToTableRealtime('events', ({ eventType, new: n, old: o }) => {
-      if (eventType === 'INSERT' && n) {
-        const ev = DbMappers.eventFromRow(n);
-        setEvents(prev => prev.some(item => item.id === ev.id) ? prev : [ev, ...prev]);
-      } else if (eventType === 'UPDATE' && n) {
-        const ev = DbMappers.eventFromRow(n);
-        setEvents(prev => prev.map(item => item.id === ev.id ? ev : item));
-      } else if (eventType === 'DELETE' && o) {
-        setEvents(prev => prev.filter(item => item.id !== o.id));
-      }
-    }));
-
-    cleanups.push(subscribeToTableRealtime('tasks', ({ eventType, new: n, old: o }) => {
-      if (eventType === 'INSERT' && n) {
-        const t = DbMappers.taskFromRow(n);
-        setTasks(prev => prev.some(item => item.id === t.id) ? prev : [t, ...prev]);
-      } else if (eventType === 'UPDATE' && n) {
-        const t = DbMappers.taskFromRow(n);
-        setTasks(prev => prev.map(item => item.id === t.id ? t : item));
-      } else if (eventType === 'DELETE' && o) {
-        setTasks(prev => prev.filter(item => item.id !== o.id));
-      }
-    }));
-
-    cleanups.push(subscribeToTableRealtime('funding_records', ({ eventType, new: n, old: o }) => {
-      if (eventType === 'INSERT' && n) {
-        const f = DbMappers.fundingFromRow(n);
-        setFunding(prev => prev.some(item => item.id === f.id) ? prev : [f, ...prev]);
-      } else if (eventType === 'UPDATE' && n) {
-        const f = DbMappers.fundingFromRow(n);
-        setFunding(prev => prev.map(item => item.id === f.id ? f : item));
-      } else if (eventType === 'DELETE' && o) {
-        setFunding(prev => prev.filter(item => item.id !== o.id));
-      }
-    }));
-
-    cleanups.push(subscribeToTableRealtime('documents', ({ eventType, new: n, old: o }) => {
-      if (eventType === 'INSERT' && n) {
-        const d = DbMappers.documentFromRow(n);
-        setDocuments(prev => prev.some(item => item.id === d.id) ? prev : [d, ...prev]);
-      } else if (eventType === 'UPDATE' && n) {
-        const d = DbMappers.documentFromRow(n);
-        setDocuments(prev => prev.map(item => item.id === d.id ? d : item));
-      } else if (eventType === 'DELETE' && o) {
-        setDocuments(prev => prev.filter(item => item.id !== o.id));
-      }
-    }));
-
-    return () => {
-      cleanups.forEach(c => c());
-    };
-  }, [dbHealth?.connected]);
-
   const logAction = (action: string, entityType: string, entityName: string, details?: string) => {
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0] + ' ' + now.toTimeString().substring(0, 5);
@@ -791,14 +636,30 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setAuditLogs(prev => [newLog, ...prev.slice(0, 49)]);
 
-    if (isSupabaseConfigured()) {
-      SupabaseDb.auditLogs.create({
-        action,
-        entityType,
-        entityName,
-        userName: currentUser.name,
-        details
-      }).catch(err => console.warn('SupabaseDb.auditLogs.create failed:', err));
+    // Check 12: Asynchronously append to authoritative server audit log
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/audit/log', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Id': currentUser.id,
+          'X-User-Role': currentUser.roleId,
+          'X-User-Name': currentUser.name
+        },
+        body: JSON.stringify({
+          action,
+          resourceType: entityType,
+          entityName,
+          description: details || `${action} on ${entityName}`,
+          outcome: 'SUCCESS',
+          metadata: {
+            postId: currentUser.postId,
+            postTitle: currentUser.postTitle
+          }
+        })
+      }).catch(err => {
+        clientSafeLogger.warn('Async audit sync to server skipped or failed', mapToSafeErrorMessage(err));
+      });
     }
   };
 
@@ -841,7 +702,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // 1. Authoritative check on client: must be in assignedRoleIds
     const allowedRoles = currentUser.assignedRoleIds || [currentUser.roleId];
     if (!allowedRoles.includes(roleId)) {
-      console.error(`Unauthorized role switch attempt: ${roleId} not in ${allowedRoles.join(', ')}`);
+      clientSafeLogger.error('Unauthorized role switch attempt:', roleId);
       return false;
     }
 
@@ -861,11 +722,11 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        console.error('Role switch rejected by backend:', err.error);
+        clientSafeLogger.error('Role switch rejected by backend:', err.error);
         return false;
       }
     } catch (e) {
-      console.warn('Backend verification offline, continuing with local validation:', e);
+      clientSafeLogger.warn('Backend verification offline, continuing with local validation:', mapToSafeErrorMessage(e));
     }
 
     // 3. Apply state transition with updated dataScope & roleDefinition
@@ -944,8 +805,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const tempPass = params.tempPassword || ('TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900));
 
     const newUser: UserProfile = {
-      id: 'u-' + crypto.randomUUID(),
-      authUserId: 'auth-' + crypto.randomUUID(),
+      id: 'u-' + Date.now(),
+      authUserId: 'auth-' + Date.now(),
       organizationId: 'org-tip',
       name: params.name,
       email: params.email,
@@ -953,10 +814,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       role: primaryRoleId === 'volunteer' ? 'volunteer' : 'staff',
       assignedRoleIds: params.assignedRoleIds.length > 0 ? params.assignedRoleIds : [primaryRoleId],
       activeRoleId: primaryRoleId,
-      title: post?.name || roleDef.name,
+      title: post?.title || post?.name || roleDef.name,
       postId: params.postId,
-      postTitle: post?.name,
-      responsibilities: post ? postResponsibilities.filter(r => r.postId === post.id).map(r => r.name) : [],
+      postTitle: post?.title || post?.name,
+      responsibilities: post?.responsibilities || [],
       avatarInitials: params.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U',
       status: 'approved',
       isActive: true,
@@ -999,7 +860,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         generatedTemp = data.temporaryPassword;
       }
     } catch (e) {
-      console.warn('Reset password backend call offline, generating locally:', e);
+      clientSafeLogger.warn('Reset password backend call offline, generating locally:', mapToSafeErrorMessage(e));
     }
 
     const finalTemp = generatedTemp || ('TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900));
@@ -1108,26 +969,6 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const scopedPrograms = useMemo(() => filterProgramsByScope(programs, currentUser), [programs, currentUser]);
   const scopedEvents = useMemo(() => filterEventsByScope(events, currentUser), [events, currentUser]);
   const scopedTasks = useMemo(() => filterTasksByScope(tasks, currentUser), [tasks, currentUser]);
-  const scopedDocuments = useMemo(() => {
-    const roleId = currentUser.roleId || 'volunteer';
-    const isSuperAdmin = roleId === 'super_admin';
-    const isManager = roleId === 'staff_manager';
-    const isStaff = roleId === 'staff_member' || roleId === 'program_coordinator' || roleId === 'event_coordinator';
-
-    return documents.filter(doc => {
-      // 1. Super Admin and Management can access all documents
-      if (isSuperAdmin || isManager) return true;
-
-      // 2. Staff members can access non-confidential or general staff-tier documents
-      if (isStaff) {
-        if (!doc.isConfidential) return true;
-        return doc.accessTier === 'staff' || doc.accessTier === 'all';
-      }
-
-      // 3. Volunteers can only access non-confidential public documents
-      return !doc.isConfidential && doc.accessTier === 'all';
-    });
-  }, [documents, currentUser]);
 
   // Person CRUD
   const addPerson = (data: Omit<Person, 'id' | 'createdAt'>): Person => {
@@ -1139,13 +980,6 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPeople(prev => [newPerson, ...prev]);
     logAction('Added Person', 'Person', newPerson.name, `${newPerson.role || 'Contact'} (${newPerson.email})`);
     incrementAiDataVersion();
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.people.create(data).then(res => {
-        if (res.data) setPeople(prev => prev.map(p => p.id === newPerson.id ? res.data! : p));
-      }).catch(err => console.warn('SupabaseDb.people.create error:', err));
-    }
-
     return newPerson;
   };
 
@@ -1159,26 +993,14 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return p;
     }));
     incrementAiDataVersion();
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.people.update(id, updates).catch(err => console.warn('SupabaseDb.people.update error:', err));
-    }
   };
 
   const deletePerson = (id: string) => {
-    if (!hasPermission('people', 'delete')) {
-      console.warn('Unauthorized: Missing people.delete permission');
-      return;
-    }
     const person = people.find(p => p.id === id);
     if (person) {
       setPeople(prev => prev.filter(p => p.id !== id));
       logAction('Removed Person', 'Person', person.name);
       incrementAiDataVersion();
-
-      if (isSupabaseConfigured()) {
-        SupabaseDb.people.delete(id).catch(err => console.warn('SupabaseDb.people.delete error:', err));
-      }
     }
   };
 
@@ -1191,13 +1013,6 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setOrganizations(prev => [newOrg, ...prev]);
     logAction('Added Organization', 'Organization', newOrg.name, `${newOrg.sector} (${newOrg.type})`);
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.organizations.create(data).then(res => {
-        if (res.data) setOrganizations(prev => prev.map(o => o.id === newOrg.id ? res.data! : o));
-      }).catch(err => console.warn('SupabaseDb.organizations.create error:', err));
-    }
-
     return newOrg;
   };
 
@@ -1210,25 +1025,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return org;
     }));
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.organizations.update(id, updates).catch(err => console.warn('SupabaseDb.organizations.update error:', err));
-    }
   };
 
   const deleteOrganization = (id: string) => {
-    if (!hasPermission('organizations', 'delete')) {
-      console.warn('Unauthorized: Missing organizations.delete permission');
-      return;
-    }
     const org = organizations.find(o => o.id === id);
     if (org) {
       setOrganizations(prev => prev.filter(o => o.id !== id));
       logAction('Deleted Organization', 'Organization', org.name, `Removed organization record`);
-
-      if (isSupabaseConfigured()) {
-        SupabaseDb.organizations.delete(id).catch(err => console.warn('SupabaseDb.organizations.delete error:', err));
-      }
     }
   };
 
@@ -1241,13 +1044,6 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setPrograms(prev => [newProg, ...prev]);
     logAction('Created Program', 'Program', newProg.name, `Status: ${newProg.status}`);
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.programs.create(data).then(res => {
-        if (res.data) setPrograms(prev => prev.map(p => p.id === newProg.id ? res.data! : p));
-      }).catch(err => console.warn('SupabaseDb.programs.create error:', err));
-    }
-
     return newProg;
   };
 
@@ -1260,92 +1056,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return prog;
     }));
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.programs.update(id, updates).catch(err => console.warn('SupabaseDb.programs.update error:', err));
-    }
   };
 
   const deleteProgram = (id: string) => {
-    if (!hasPermission('programs', 'delete')) {
-      console.warn('Unauthorized: Missing programs.delete permission');
-      return;
-    }
     const prog = programs.find(p => p.id === id);
     if (prog) {
       setPrograms(prev => prev.filter(p => p.id !== id));
-      logAction('Deleted Program', 'Program', prog.name, 'Removed program record');
-
-      if (isSupabaseConfigured()) {
-        SupabaseDb.programs.delete(id).catch(err => console.warn('SupabaseDb.programs.delete error:', err));
-      }
-    }
-  };
-
-  // Project CRUD
-  const addProject = (data: Omit<Project, 'id' | 'createdAt'>): Project => {
-    const newProj: Project = {
-      ...data,
-      id: 'proj-' + Date.now(),
-      createdAt: new Date().toISOString().split('T')[0]
-    };
-    setProjects(prev => [newProj, ...prev]);
-    if (newProj.programId) {
-      setPrograms(prev => prev.map(p => {
-        if (p.id === newProj.programId) {
-          const current = p.projectIds || [];
-          return { ...p, projectIds: current.includes(newProj.id) ? current : [...current, newProj.id] };
-        }
-        return p;
-      }));
-    }
-    logAction('Created Project', 'Project', newProj.name, `Program: ${newProj.programName || newProj.programId}`);
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.projects.create(data).then(res => {
-        if (res.data) setProjects(prev => prev.map(p => p.id === newProj.id ? res.data! : p));
-      }).catch(err => console.warn('SupabaseDb.projects.create error:', err));
-    }
-
-    return newProj;
-  };
-
-  const updateProject = (id: string, updates: Partial<Project>) => {
-    setProjects(prev => prev.map(proj => {
-      if (proj.id === id) {
-        const updated = { ...proj, ...updates };
-        logAction('Updated Project', 'Project', updated.name, updates.status ? `Status changed to ${updates.status}` : undefined);
-        return updated;
-      }
-      return proj;
-    }));
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.projects.update(id, updates).catch(err => console.warn('SupabaseDb.projects.update error:', err));
-    }
-  };
-
-  const deleteProject = (id: string) => {
-    if (!hasPermission('projects', 'delete')) {
-      console.warn('Unauthorized: Missing projects.delete permission');
-      return;
-    }
-    const proj = projects.find(p => p.id === id);
-    if (proj) {
-      setProjects(prev => prev.filter(p => p.id !== id));
-      if (proj.programId) {
-        setPrograms(prev => prev.map(p => {
-          if (p.id === proj.programId) {
-            return { ...p, projectIds: (p.projectIds || []).filter(pid => pid !== id) };
-          }
-          return p;
-        }));
-      }
-      logAction('Deleted Project', 'Project', proj.name, 'Removed project record');
-
-      if (isSupabaseConfigured()) {
-        SupabaseDb.projects.delete(id).catch(err => console.warn('SupabaseDb.projects.delete error:', err));
-      }
+      logAction('Deleted Program', 'Program', prog.name, 'Removed program record and cohort references');
     }
   };
 
@@ -1359,13 +1076,6 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setEvents(prev => [newEvt, ...prev]);
     logAction('Created Event', 'Event', newEvt.name, `${newEvt.date} | Facilitator: ${newEvt.facilitator}`);
     incrementAiDataVersion();
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.events.create(data).then(res => {
-        if (res.data) setEvents(prev => prev.map(e => e.id === newEvt.id ? res.data! : e));
-      }).catch(err => console.warn('SupabaseDb.events.create error:', err));
-    }
-
     return newEvt;
   };
 
@@ -1379,48 +1089,31 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return evt;
     }));
     incrementAiDataVersion();
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.events.update(id, updates).catch(err => console.warn('SupabaseDb.events.update error:', err));
-    }
   };
 
   const deleteEvent = (id: string) => {
-    if (!hasPermission('events', 'delete')) {
-      console.warn('Unauthorized: Missing events.delete permission');
-      return;
-    }
     const evt = events.find(e => e.id === id);
     if (evt) {
       setEvents(prev => prev.filter(e => e.id !== id));
       logAction('Deleted Event', 'Event', evt.name, `Cancelled and deleted event record for ${evt.date}`);
       incrementAiDataVersion();
-
-      if (isSupabaseConfigured()) {
-        SupabaseDb.events.delete(id).catch(err => console.warn('SupabaseDb.events.delete error:', err));
-      }
     }
   };
 
   // Participant & Attendance
   const updateParticipantStatus = (id: string, status: ParticipantStatus) => {
-    const attendedAt = status === 'Attended' ? new Date().toISOString().split('T')[0] : undefined;
     setParticipants(prev => prev.map(pt => {
       if (pt.id === id) {
         const updated: ParticipantRecord = {
           ...pt,
           status,
-          attendedAt: attendedAt || pt.attendedAt
+          attendedAt: status === 'Attended' ? new Date().toISOString().split('T')[0] : pt.attendedAt
         };
         logAction('Recorded Attendance', 'Participant', pt.personName, `${status} for ${pt.eventName || 'event'}`);
         return updated;
       }
       return pt;
     }));
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.participants.update(id, { status, attendedAt }).catch((err: any) => console.warn('SupabaseDb.participants.update error:', err));
-    }
   };
 
   const addParticipant = (data: Omit<ParticipantRecord, 'id' | 'registeredAt'>) => {
@@ -1430,91 +1123,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       registeredAt: new Date().toISOString().split('T')[0]
     };
     setParticipants(prev => [newRecord, ...prev]);
-
-    // Connect to person's programIds and eventIds
-    if (newRecord.personId) {
-      setPeople(prev => prev.map(p => {
-        if (p.id === newRecord.personId) {
-          const updatedProgramIds = newRecord.programId && !p.programIds.includes(newRecord.programId)
-            ? [...p.programIds, newRecord.programId]
-            : p.programIds;
-          const updatedEventIds = newRecord.eventId && !p.eventIds.includes(newRecord.eventId)
-            ? [...p.eventIds, newRecord.eventId]
-            : p.eventIds;
-          return {
-            ...p,
-            programIds: updatedProgramIds,
-            eventIds: updatedEventIds
-          };
-        }
-        return p;
-      }));
-    }
-
-    // Connect to program's participantIds
-    if (newRecord.programId && newRecord.personId) {
-      setPrograms(prev => prev.map(pr => {
-        if (pr.id === newRecord.programId && !pr.participantIds.includes(newRecord.personId)) {
-          return {
-            ...pr,
-            participantIds: [...pr.participantIds, newRecord.personId]
-          };
-        }
-        return pr;
-      }));
-    }
-
-    // Connect to project's participantIds
-    if (newRecord.projectId && newRecord.personId) {
-      setProjects(prev => prev.map(prj => {
-        if (prj.id === newRecord.projectId) {
-          const currentParts = prj.participantIds || [];
-          if (!currentParts.includes(newRecord.personId)) {
-            return {
-              ...prj,
-              participantIds: [...currentParts, newRecord.personId]
-            };
-          }
-        }
-        return prj;
-      }));
-    }
-
     logAction('Added Participant', 'Participant', newRecord.personName, `Registered for ${newRecord.eventName || newRecord.programName || 'program'}`);
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.participants.create(data).then((res: any) => {
-        if (res.data) setParticipants(prev => prev.map(pt => pt.id === newRecord.id ? res.data! : pt));
-      }).catch((err: any) => console.warn('SupabaseDb.participants.create error:', err));
-    }
-  };
-
-  const deleteParticipant = (id: string) => {
-    if (!hasPermission('participants', 'delete')) {
-      console.warn('Unauthorized: Missing participants.delete permission');
-      return;
-    }
-    const pt = participants.find(p => p.id === id);
-    if (pt) {
-      setParticipants(prev => prev.filter(p => p.id !== id));
-      // Remove eventId from person if no other participant record for that event exists
-      if (pt.personId && pt.eventId) {
-        setPeople(prev => prev.map(p => {
-          if (p.id === pt.personId) {
-            const hasOther = participants.some(other => other.id !== id && other.personId === pt.personId && other.eventId === pt.eventId);
-            if (!hasOther) {
-              return { ...p, eventIds: p.eventIds.filter(eid => eid !== pt.eventId) };
-            }
-          }
-          return p;
-        }));
-      }
-      logAction('Removed Participant', 'Participant', pt.personName, `Removed from ${pt.eventName || 'event'}`);
-
-      if (isSupabaseConfigured()) {
-        SupabaseDb.participants.delete(id).catch((err: any) => console.warn('SupabaseDb.participants.delete error:', err));
-      }
-    }
   };
 
   // Tasks
@@ -1529,58 +1138,33 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTasks(prev => [newTask, ...prev]);
     logAction('Created Task', 'Task', newTask.title, `Due: ${newTask.dueDate}, Owner: ${newTask.owner}`);
     incrementAiDataVersion();
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.tasks.create(data).then(res => {
-        if (res.data) setTasks(prev => prev.map(t => t.id === newTask.id ? res.data! : t));
-      }).catch(err => console.warn('SupabaseDb.tasks.create error:', err));
-    }
-
     return newTask;
   };
 
   const toggleTaskStatus = (id: string) => {
-    let updatedStatus: TaskStatus = 'To Do';
-    let completedAt: string | undefined = undefined;
     setTasks(prev => prev.map(t => {
       if (t.id === id) {
-        updatedStatus = t.status === 'Completed' ? 'To Do' : 'Completed';
-        completedAt = updatedStatus === 'Completed' ? new Date().toISOString().split('T')[0] : undefined;
-        logAction(updatedStatus === 'Completed' ? 'Task Completed' : 'Task Reopened', 'Task', t.title);
-        return { ...t, status: updatedStatus, completedAt };
+        const newStatus: TaskStatus = t.status === 'Completed' ? 'To Do' : 'Completed';
+        const completedAt = newStatus === 'Completed' ? new Date().toISOString().split('T')[0] : undefined;
+        logAction(newStatus === 'Completed' ? 'Task Completed' : 'Task Reopened', 'Task', t.title);
+        return { ...t, status: newStatus, completedAt };
       }
       return t;
     }));
     incrementAiDataVersion();
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.tasks.update(id, { status: updatedStatus, completedAt }).catch(err => console.warn('SupabaseDb.tasks.update error:', err));
-    }
   };
 
   const updateTask = (id: string, updates: Partial<TaskItem>) => {
     setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...updates } : t)));
     incrementAiDataVersion();
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.tasks.update(id, updates).catch(err => console.warn('SupabaseDb.tasks.update error:', err));
-    }
   };
 
   const deleteTask = (id: string) => {
-    if (!hasPermission('tasks', 'delete')) {
-      console.warn('Unauthorized: Missing tasks.delete permission');
-      return;
-    }
     const task = tasks.find(t => t.id === id);
     if (task) {
       setTasks(prev => prev.filter(t => t.id !== id));
       logAction('Deleted Task', 'Task', task.title);
       incrementAiDataVersion();
-
-      if (isSupabaseConfigured()) {
-        SupabaseDb.tasks.delete(id).catch(err => console.warn('SupabaseDb.tasks.delete error:', err));
-      }
     }
   };
 
@@ -1775,11 +1359,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Funding
-  const addFunding = (data: Omit<FundingRecord, 'id' | 'createdAt'>): FundingRecord | null => {
-    if (!canViewFunding || !hasPermission('funding', 'create')) {
-      console.warn('Unauthorized: Missing funding.create permission');
-      return null;
-    }
+  const addFunding = (data: Omit<FundingRecord, 'id' | 'createdAt'>): FundingRecord => {
     const newFunding: FundingRecord = {
       ...data,
       id: 'fnd-' + Date.now(),
@@ -1787,41 +1367,18 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setFunding(prev => [newFunding, ...prev]);
     logAction('Added Funding Record', 'Funding', newFunding.donorOrFunder, `$${newFunding.amountCad.toLocaleString('en-CA')} CAD (${newFunding.fundingType})`);
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.funding.create(data).then(res => {
-        if (res.data) setFunding(prev => prev.map(f => f.id === newFunding.id ? res.data! : f));
-      }).catch(err => console.warn('SupabaseDb.funding.create error:', err));
-    }
-
     return newFunding;
   };
 
   const updateFunding = (id: string, updates: Partial<FundingRecord>) => {
-    if (!canViewFunding || !hasPermission('funding', 'edit')) {
-      console.warn('Unauthorized: Missing funding.edit permission');
-      return;
-    }
     setFunding(prev => prev.map(f => (f.id === id ? { ...f, ...updates } : f)));
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.funding.update(id, updates).catch(err => console.warn('SupabaseDb.funding.update error:', err));
-    }
   };
 
   const deleteFunding = (id: string) => {
-    if (!canViewFunding || !hasPermission('funding', 'delete')) {
-      console.warn('Unauthorized: Missing funding.delete permission');
-      return;
-    }
     const item = funding.find(f => f.id === id);
     if (item) {
       setFunding(prev => prev.filter(f => f.id !== id));
       logAction('Deleted Funding Record', 'Funding', item.donorOrFunder, `Removed grant/allocation of $${item.amountCad.toLocaleString('en-CA')} CAD`);
-
-      if (isSupabaseConfigured()) {
-        SupabaseDb.funding.delete(id).catch(err => console.warn('SupabaseDb.funding.delete error:', err));
-      }
     }
   };
 
@@ -1854,52 +1411,99 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Documents
   const addDocument = (data: Omit<DocumentItem, 'id' | 'addedAt'>): DocumentItem => {
-    const isConfidential = data.isConfidential !== undefined
-      ? data.isConfidential
-      : (data.accessTier === 'management' || data.accessTier === 'super_admin' || data.relatedType === 'Funding');
-    const accessTier = data.accessTier || (data.relatedType === 'Funding' ? 'management' : 'all');
-
     const newDoc: DocumentItem = {
       ...data,
       id: 'doc-' + Date.now(),
-      addedAt: new Date().toISOString().split('T')[0],
-      isConfidential,
-      accessTier
+      addedAt: new Date().toISOString().split('T')[0]
     };
     setDocuments(prev => [newDoc, ...prev]);
-    logAction('document.upload', 'Document', newDoc.title, `${newDoc.type} (Confidential: ${isConfidential ? 'Yes' : 'No'}, Tier: ${accessTier})`);
-
-    if (isSupabaseConfigured()) {
-      SupabaseDb.documents.create(newDoc).then(res => {
-        if (res.data) setDocuments(prev => prev.map(d => d.id === newDoc.id ? res.data! : d));
-      }).catch(err => console.warn('SupabaseDb.documents.create error:', err));
-    }
-
+    logAction('Added Document Reference', 'Document', newDoc.title, `${newDoc.type} linked to ${newDoc.relatedName || newDoc.relatedType}`);
     return newDoc;
   };
 
-  const deleteDocument = async (id: string): Promise<boolean> => {
+  const deleteDocument = (id: string) => {
     const doc = documents.find(d => d.id === id);
-    if (!doc) return false;
+    if (doc) {
+      setDocuments(prev => prev.filter(d => d.id !== id));
+      logAction('Deleted Document Reference', 'Document', doc.title, `Removed document reference (${doc.type})`);
+    }
+  };
 
-    // Permissions check: super_admin, staff_manager, or creator
-    const canDelete = isSuperAdmin || isStaffManager || doc.addedBy === currentUser.name;
-    if (!canDelete) {
-      console.warn('Unauthorized: Missing permission to delete document', id);
-      return false;
+  // Database Restore
+  const restoreDatabaseFromBackup = (backupData: any): {
+    success: boolean;
+    error?: string;
+    restoredCounts?: Record<string, number>;
+  } => {
+    if (!isSuperAdmin && !hasPermission('settings', 'manage')) {
+      logAction('Unauthorized Restore Attempt', 'System Security', 'Database Restore', 'Attempted database restore without super_admin or settings.manage permission');
+      return { success: false, error: 'Access Denied: Only Super Administrators can restore system databases.' };
     }
 
-    if (doc.storagePath) {
-      await SupabaseStorageEngine.deletePrivateDocument(doc.storagePath);
+    const validation = validateBackupStructure(backupData);
+    if (!validation.valid || !validation.sanitizedData) {
+      logAction('Database Restore Failed', 'System Security', 'Database Restore', `Validation error: ${validation.error}`);
+      return { success: false, error: validation.error || 'Invalid backup structure.' };
     }
 
-    if (isSupabaseConfigured()) {
-      await SupabaseDb.documents.delete(id).catch(err => console.warn('SupabaseDb.documents.delete error:', err));
+    const data = validation.sanitizedData;
+    const restoredCounts: Record<string, number> = {};
+
+    if (Array.isArray(data.people)) {
+      setPeople(data.people);
+      saveToStorage('people', data.people);
+      restoredCounts.people = data.people.length;
+    }
+    if (Array.isArray(data.organizations)) {
+      setOrganizations(data.organizations);
+      saveToStorage('organizations', data.organizations);
+      restoredCounts.organizations = data.organizations.length;
+    }
+    if (Array.isArray(data.programs)) {
+      setPrograms(data.programs);
+      saveToStorage('programs', data.programs);
+      restoredCounts.programs = data.programs.length;
+    }
+    if (Array.isArray(data.events)) {
+      setEvents(data.events);
+      saveToStorage('events', data.events);
+      restoredCounts.events = data.events.length;
+    }
+    if (Array.isArray(data.participants)) {
+      setParticipants(data.participants);
+      saveToStorage('participants', data.participants);
+      restoredCounts.participants = data.participants.length;
+    }
+    if (Array.isArray(data.tasks)) {
+      setTasks(data.tasks);
+      saveToStorage('tasks', data.tasks);
+      restoredCounts.tasks = data.tasks.length;
+    }
+    if (Array.isArray(data.funding)) {
+      setFunding(data.funding);
+      saveToStorage('funding', data.funding);
+      restoredCounts.funding = data.funding.length;
+    }
+    if (Array.isArray(data.interactions)) {
+      setInteractions(data.interactions);
+      saveToStorage('interactions', data.interactions);
+      restoredCounts.interactions = data.interactions.length;
+    }
+    if (Array.isArray(data.documents)) {
+      setDocuments(data.documents);
+      saveToStorage('documents', data.documents);
+      restoredCounts.documents = data.documents.length;
     }
 
-    setDocuments(prev => prev.filter(d => d.id !== id));
-    logAction('document.delete', 'Document', doc.title, `Removed document reference`);
-    return true;
+    incrementAiDataVersion();
+
+    const summaryStr = Object.entries(restoredCounts).map(([k, v]) => `${k}: ${v}`).join(', ');
+    logAction('Executed Database Restore', 'System Security', 'Database Restore', `Successfully restored entities: ${summaryStr}`);
+
+    return {
+      success: true,
+      restoredCounts
+    };
   };
 
   // Batch import people
@@ -1912,10 +1516,6 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     phone?: string;
     interests?: string[];
   }>) => {
-    if (!hasPermission('people', 'import')) {
-      console.warn('Unauthorized: Missing people.import permission');
-      return { addedCount: 0, duplicateCount: 0 };
-    }
     let addedCount = 0;
     let duplicateCount = 0;
     const existingEmails = new Set(people.map(p => p.email.toLowerCase().trim()));
@@ -1955,10 +1555,6 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Reset demo data
   const resetAllData = () => {
-    if (!isSuperAdmin) {
-      console.warn('Unauthorized: Only Administrators can reset database');
-      return;
-    }
     setCurrentUser(INITIAL_USERS[0]);
     setPeople(INITIAL_PEOPLE);
     setOrganizations(INITIAL_ORGANIZATIONS);
@@ -2105,24 +1701,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       upcomingEventCount: events.filter(e => e.date >= '2026-09-23').length,
       totalOpenTasks: allOpenTasks.length,
       unassignedTaskCount: unassignedTasks.length,
-      userDesignation: currentUser.postTitle || currentUser.title || 'Staff Member',
       referenceDate: '2026-09-23'
     };
-
-    if (aiUserSettings && !aiUserSettings.aiEnabled) {
-      const assistantMsg: AiMessage = {
-        id: 'msg-ai-' + Date.now(),
-        conversationId,
-        role: 'assistant',
-        content: `**AI Assistance is currently disabled in Settings.**\n\n• Deterministic Facts:\n  - Open tasks: ${openUserTasks.length}\n  - Overdue tasks: ${overdueTasks.length}\n  - Upcoming events: ${events.filter(e => e.date >= '2026-09-23').length}\n  - Total open tasks: ${allOpenTasks.length}\n\nAll CRM operations and data records remain 100% functional. You can re-enable AI assistance in Settings → AI Intelligence.`,
-        tier: 'DETERMINISTIC',
-        tokensUsed: 0,
-        source: 'Deterministic Offline Engine',
-        timestamp: new Date().toISOString()
-      };
-      setAiMessages(prev => [...prev, assistantMsg]);
-      return assistantMsg;
-    }
 
     const response = await sendIntelligenceQuery({
       message: content,
@@ -2136,7 +1716,6 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         events,
         programs,
         people,
-        organizations,
         funding,
         referenceDate: '2026-09-23'
       },
@@ -2299,11 +1878,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       scopedPrograms,
       scopedEvents,
       scopedTasks,
-      scopedDocuments,
       people,
       organizations,
       programs,
-      projects,
       events,
       participants,
       tasks,
@@ -2321,15 +1898,11 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addProgram,
       updateProgram,
       deleteProgram,
-      addProject,
-      updateProject,
-      deleteProject,
       addEvent,
       updateEvent,
       deleteEvent,
       updateParticipantStatus,
       addParticipant,
-      deleteParticipant,
       addTask,
       toggleTaskStatus,
       updateTask,
@@ -2362,12 +1935,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addInteraction,
       addDocument,
       deleteDocument,
+      restoreDatabaseFromBackup,
       batchImportPeople,
       resetAllData,
-      dbHealth,
-      isDbSyncing,
-      dbSyncError,
-      refreshDatabase,
       aiSuggestions,
       aiConversations,
       aiMessages,

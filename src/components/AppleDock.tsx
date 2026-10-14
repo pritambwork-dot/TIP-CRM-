@@ -19,8 +19,8 @@ import {
   Sparkles
 } from 'lucide-react';
 import { useCrm } from '../context/CrmContext';
-import { NavTab } from '../types';
-import { Button, Badge } from './ui';
+import { NavTab } from './Sidebar';
+import { Button, Badge, Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from './ui';
 
 interface AppleDockProps {
   activeTab: NavTab;
@@ -117,7 +117,7 @@ export const AppleDock: React.FC<AppleDockProps> = ({
       items: [
         {
           id: 'programs',
-          label: 'Programs & Projects',
+          label: 'Programs & Cohorts',
           icon: Compass,
           isVisible: hasPermission('programs', 'view')
         },
@@ -239,30 +239,53 @@ export const AppleDock: React.FC<AppleDockProps> = ({
 
                 if (isCollapsed) {
                   return (
-                    <div key={item.id} className="relative flex justify-center py-0.5">
-                      <motion.button
-                        type="button"
-                        onClick={() => onTabChange(item.id)}
-                        whileTap={{ scale: 0.88 }}
-                        title={item.badge !== undefined ? `${item.label} (${item.badge})` : item.label}
-                        className={`
-                          w-10 h-10 rounded-xl flex items-center justify-center transition-all cursor-pointer apple-tap relative
-                          ${
-                            isActive
-                              ? 'bg-[#140a8e] text-white shadow-xs'
-                              : 'text-zinc-600 hover:text-zinc-950 hover:bg-zinc-200/60'
-                          }
-                        `}
-                        aria-label={item.label}
-                      >
-                        <IconComponent className="w-4.5 h-4.5" />
-                        {item.badge !== undefined && (
-                          <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ea0543] px-1 text-[9px] font-bold text-white shadow-xs ring-1 ring-white">
-                            {item.badge}
-                          </span>
-                        )}
-                      </motion.button>
-                    </div>
+                    <TooltipProvider key={item.id} delayDuration={80}>
+                      <Tooltip>
+                        <div className="relative flex justify-center py-0.5">
+                          {/* Active indicator dot */}
+                          {isActive && (
+                            <motion.div
+                              layoutId="sidebarActiveDot"
+                              className="absolute -left-1 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-[#140a8e] shadow-2xs"
+                              transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                            />
+                          )}
+
+                          <TooltipTrigger asChild>
+                            <motion.button
+                              type="button"
+                              onClick={() => onTabChange(item.id)}
+                              whileTap={{ scale: 0.88 }}
+                              className={`
+                                w-10 h-10 rounded-xl flex items-center justify-center transition-all cursor-pointer apple-tap relative
+                                ${
+                                  isActive
+                                    ? 'bg-[#140a8e] text-white shadow-xs'
+                                    : 'text-zinc-600 hover:text-zinc-950 hover:bg-zinc-200/60'
+                                }
+                              `}
+                              aria-label={item.label}
+                            >
+                              <IconComponent className="w-4.5 h-4.5" />
+                              {item.badge !== undefined && (
+                                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ea0543] px-1 text-[9px] font-bold text-white shadow-xs ring-1 ring-white">
+                                  {item.badge}
+                                </span>
+                              )}
+                            </motion.button>
+                          </TooltipTrigger>
+
+                          <TooltipContent side="right" sideOffset={10} className="flex items-center gap-2">
+                            <span>{item.label}</span>
+                            {item.badge !== undefined && (
+                              <Badge variant="crimson" className="text-[9px] px-1.5 py-0">
+                                {item.badge}
+                              </Badge>
+                            )}
+                          </TooltipContent>
+                        </div>
+                      </Tooltip>
+                    </TooltipProvider>
                   );
                 }
 

@@ -325,8 +325,8 @@ export function detectWorkPatterns(params: {
           targetRecordType: 'Task',
           payload: {
             taskIds: unassignedTasks.map(t => t.id),
-            assigneeId: 'divyanshaa',
-            assigneeName: 'Divyanshaa'
+            assigneeId: 'u-3',
+            assigneeName: 'Sarah Thompson'
           },
           requiresConfirmation: true
         },
@@ -423,8 +423,8 @@ export function detectWorkPatterns(params: {
           tasks: [
             {
               title: `Quarterly relationship check-in with ${stalePartners[0].name}`,
-              assignedToId: 'divyanshaa',
-              owner: 'Divyanshaa',
+              assignedToId: 'u-2',
+              owner: 'Marcus Chen',
               dueDate: '2026-09-28',
               priority: 'Medium',
               status: 'To Do'
@@ -452,7 +452,7 @@ export function detectWorkPatterns(params: {
       description: 'Standardize accessibility logistics by triggering an assignment rule when participants request accommodations.',
       observed: 'Staff members have manually created individual accessibility tasks for 6 recent event registrations, with an average lag of 3 days after sign-up.',
       interpretation: 'An automated workflow rule eliminates manual coordination overhead and ensures accessibility requests are never overlooked.',
-      suggestion: 'Deploy an automated assignment rule that generates a high-priority verification task for the Program Manager immediately upon registration.',
+      suggestion: 'Deploy an automated assignment rule that generates a high-priority verification task for the Program Coordinator immediately upon registration.',
       severity: 'Suggested',
       supportingData: {
         manualEventsRecorded: 6,
@@ -469,8 +469,8 @@ export function detectWorkPatterns(params: {
           description: 'Generates coordinator task whenever a participant registers with specific accommodations.',
           triggerType: 'PARTICIPANT_REGISTERED',
           assignmentMode: 'Suggested',
-          assignedPostId: 'post-pm',
-          assignedUserId: 'divyanshaa',
+          assignedPostId: 'post-pc',
+          assignedUserId: 'u-3',
           priority: 'High',
           daysUntilDue: 2,
           taskTitleTemplate: 'Review accommodations for {{participant_name}} ({{event_name}})',
