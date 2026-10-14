@@ -875,3 +875,17 @@ export interface AiUserSettings {
   taskSuggestionsEnabled: boolean;
 }
 
+export type NavTab = 
+  | 'dashboard' 
+  | 'people' 
+  | 'organizations' 
+  | 'programs' 
+  | 'events' 
+  | 'tasks' 
+  | 'funding' 
+  | 'reports' 
+  | 'documents' 
+  | 'intelligence'
+  | 'settings';
+
+

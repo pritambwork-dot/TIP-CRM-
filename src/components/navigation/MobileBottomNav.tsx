@@ -8,7 +8,7 @@ import {
   Menu,
   Plus
 } from 'lucide-react';
-import { NavTab } from '../Sidebar';
+import { NavTab } from '../../types';
 import { useCrm } from '../../context/CrmContext';
 
 interface MobileBottomNavProps {

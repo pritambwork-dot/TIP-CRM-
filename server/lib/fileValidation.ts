@@ -12,41 +12,26 @@
 import crypto from 'crypto';
 import { sanitizeSecrets } from './ai/gemini.ts';
 
-export const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
-export const MAX_BACKUP_SIZE_BYTES = 25 * 1024 * 1024;   // 25 MB
+import {
+  MAX_DOCUMENT_SIZE_BYTES,
+  MAX_BACKUP_SIZE_BYTES,
+  ALLOWED_EXTENSIONS,
+  ALLOWED_MIME_TYPES,
+  DANGEROUS_EXTENSIONS
+} from '../../src/lib/fileValidation.ts';
+
+export {
+  MAX_DOCUMENT_SIZE_BYTES,
+  MAX_BACKUP_SIZE_BYTES,
+  ALLOWED_EXTENSIONS,
+  ALLOWED_MIME_TYPES,
+  DANGEROUS_EXTENSIONS
+};
+
+
 export const DEFAULT_SIGNED_URL_TTL_SECONDS = 900;       // 15 minutes
 export const MAX_SIGNED_URL_TTL_SECONDS = 3600;           // 1 hour
 
-export const ALLOWED_EXTENSIONS = new Set([
-  'pdf',
-  'docx',
-  'xlsx',
-  'csv',
-  'txt',
-  'png',
-  'jpg',
-  'jpeg',
-  'webp',
-  'json'
-]);
-
-export const ALLOWED_MIME_TYPES = new Set([
-  'application/pdf',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'text/csv',
-  'text/plain',
-  'application/vnd.ms-excel',
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'application/json'
-]);
-
-export const DANGEROUS_EXTENSIONS = new Set([
-  'exe', 'bat', 'cmd', 'sh', 'php', 'js', 'vbs', 'html', 'htm', 'svg',
-  'jar', 'py', 'dll', 'scr', 'msi', 'apk', 'com', 'pif', 'hta', 'cpl', 'iso'
-]);
 
 // Secret for HMAC-signing file access tokens (generated once per server runtime or loaded from env)
 const STORAGE_SIGNING_SECRET = process.env.STORAGE_SIGNING_SECRET || crypto.randomBytes(32).toString('hex');

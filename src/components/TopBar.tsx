@@ -18,10 +18,9 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useCrm } from '../context/CrmContext';
-import { NavTab } from './Sidebar';
+import { NavTab, RoleId } from '../types';
 import { TipLogo } from './TipLogo';
 import { Button, Badge } from './ui';
-import { RoleId } from '../types';
 import { ROLE_DEFINITIONS } from '../lib/permissions';
 
 interface TopBarProps {

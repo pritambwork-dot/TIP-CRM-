@@ -18,7 +18,7 @@ import {
   ChevronRight,
   Shield
 } from 'lucide-react';
-import { NavTab } from '../Sidebar';
+import { NavTab } from '../../types';
 import { useCrm } from '../../context/CrmContext';
 import { TipLogo } from '../TipLogo';
 import { ROLE_DEFINITIONS } from '../../lib/permissions';

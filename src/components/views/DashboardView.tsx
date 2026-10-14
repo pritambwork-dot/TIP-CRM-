@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useCrm } from '../../context/CrmContext';
-import { NavTab } from '../Sidebar';
+import { NavTab } from '../../types';
 import { WeeklyActivityCard } from '../dashboard/WeeklyActivityCard';
 import { Button, Badge, Card, CardHeader, CardTitle, CardContent } from '../ui';
 import { ROLE_DEFINITIONS } from '../../lib/permissions';

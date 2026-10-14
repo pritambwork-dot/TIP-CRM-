@@ -11,6 +11,7 @@
 
 import type { ServerResponse } from 'http';
 import { sanitizeSecrets, safeLogger } from './ai/gemini.ts';
+import { sanitizeErrorDetails } from './environment.ts';
 
 export interface ApiErrorEnvelope {
   error: string;
@@ -57,11 +58,13 @@ export function sendSafeError(
     safeLogger.warn(`[API Warning][${correlationId}] Code: ${errorCode} | Status: ${statusCode} | Message: ${safeClientMessage}`);
   }
 
+  const safeDetails = details ? sanitizeErrorDetails(details) : undefined;
+
   const payload: ApiErrorEnvelope = {
     error: safeClientMessage,
     code: errorCode,
     correlationId,
-    ...(details ? { details } : {})
+    ...(safeDetails ? { details: safeDetails } : {})
   };
 
   if (!res.headersSent) {

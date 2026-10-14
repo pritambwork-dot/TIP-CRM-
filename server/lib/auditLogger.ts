@@ -139,7 +139,9 @@ function sanitizeMetadata(meta?: Record<string, any>): Record<string, any> | und
       keyLower.includes('token') ||
       keyLower.includes('secret') ||
       keyLower.includes('apikey') ||
-      keyLower.includes('key')
+      keyLower.includes('key') ||
+      keyLower.includes('cookie') ||
+      keyLower.includes('session')
     ) {
       clean[key] = '[REDACTED]';
       continue;

@@ -19,7 +19,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { useCrm } from '../context/CrmContext';
-import { NavTab } from './Sidebar';
+import { NavTab } from '../types';
 import { Button, Badge, Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from './ui';
 
 interface AppleDockProps {

@@ -44,6 +44,9 @@ export function sanitizeSecrets(text: string): string {
     .replace(/AIza[0-9A-Za-z-_]{30,40}/g, '[REDACTED_API_KEY]')
     .replace(/(?:key|apiKey|api_key|api-key)\s*[:=]\s*["']?([^\s&"']+)["']?/gi, 'key=[REDACTED]')
     .replace(/(?:bearer\s+)([A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*)/gi, 'bearer [REDACTED_TOKEN]')
+    .replace(/tip_sess_[A-Za-z0-9_.-]+/gi, '[REDACTED_SESSION_TOKEN]')
+    .replace(/tip_token_[A-Za-z0-9_.-]+/gi, '[REDACTED_SESSION_TOKEN]')
+    .replace(/(?:tip_session|session_id|sessionId|sessionToken)\s*[:=]\s*["']?([^\s&;"']+)["']?/gi, 'tip_session=[REDACTED]')
     .replace(/(?:password|tempPassword|secret)\s*[:=]\s*["']?([^\s&"']+)["']?/gi, 'password=[REDACTED]');
 }
 

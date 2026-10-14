@@ -4,7 +4,8 @@ import path from 'path';
 import {defineConfig} from 'vite';
 import { aiMiddlewareHandler } from './server/aiMiddleware.ts';
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  const isProd = mode === 'production' || process.env.NODE_ENV === 'production';
   return {
     plugins: [
       react(),
@@ -21,6 +22,12 @@ export default defineConfig(() => {
         }
       }
     ],
+    build: {
+      sourcemap: false,
+    },
+    esbuild: {
+      drop: isProd ? ['console', 'debugger'] : [],
+    },
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, './src'),

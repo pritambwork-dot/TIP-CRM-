@@ -31,8 +31,11 @@ export const BASE_ALLOWED_ORIGINS = [
   'http://127.0.0.1:5173',
   // Official Production Domains
   'https://tip-crm.vercel.app',
+  'https://www.theinclusionproject.ca',
+  'https://theinclusionproject.com',
   'https://www.theinclusionproject.com',
-  'https://theinclusionproject.com'
+  'https://crm.theinclusionproject.ca',
+  'https://theinclusionproject.ca'
 ];
 
 /**

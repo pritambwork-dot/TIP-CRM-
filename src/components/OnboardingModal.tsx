@@ -10,7 +10,7 @@ import {
   Heart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { NavTab } from './Sidebar';
+import { NavTab } from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 

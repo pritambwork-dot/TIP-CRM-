@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CrmProvider, useCrm } from './context/CrmContext';
 import { AppleDock } from './components/AppleDock';
-import { NavTab } from './components/Sidebar';
+import { NavTab } from './types';
 import { TopBar } from './components/TopBar';
 import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { QuickActionModal, QuickActionType } from './components/QuickActionModal';
@@ -11,6 +11,8 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { LoginPage } from './components/auth/LoginPage';
 import { FirstLoginPasswordModal } from './components/auth/FirstLoginPasswordModal';
 import { WelcomeOnboardingModal } from './components/auth/WelcomeOnboardingModal';
+import { SupabaseAuthEngine } from './lib/supabase';
+
 
 // Views
 import { DashboardView } from './components/views/DashboardView';
@@ -127,7 +129,8 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
 
       // Exact password check for pritam@gmail.com
       if ((normalizedEmail === 'pritam@gmail.com' || normalizedEmail === 'pritamb2k06@gmail.com') && password !== '1234') {
-        setAuthError('Incorrect password. For Pritam Biswas, please enter password: 1234');
+        const isProd = (import.meta as any).env?.PROD;
+        setAuthError(isProd ? 'Invalid email or password.' : 'Incorrect password. For Pritam Biswas, please enter password: 1234');
         setAuthLoading(false);
         return;
       }
@@ -198,12 +201,23 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     }, 600);
   }, [users, switchUser]);
 
-  const handleLogout = useCallback(() => {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-    localStorage.removeItem(AUTH_USER_KEY);
-    setIsAuthenticated(false);
-    setShowLogin(false);
-    setAuthError(null);
+  const handleLogout = useCallback(async () => {
+    try {
+      await SupabaseAuthEngine.signOut();
+      if (typeof fetch !== 'undefined') {
+        await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+      }
+    } finally {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      localStorage.removeItem(AUTH_USER_KEY);
+      localStorage.removeItem('tip_crm_supabase_auth_session');
+      try {
+        sessionStorage.clear();
+      } catch {}
+      setIsAuthenticated(false);
+      setShowLogin(false);
+      setAuthError(null);
+    }
   }, []);
 
   // Show nothing during initial session check to avoid flash

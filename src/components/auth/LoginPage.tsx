@@ -274,8 +274,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     <ArrowRight className="w-4 h-4" />
                   </button>
 
-                  {/* 1-Click Quick Admin Login */}
-                  {authMode === 'signin' && (
+                  {/* 1-Click Quick Admin Login (Development/Demo Only) */}
+                  {authMode === 'signin' && !(import.meta as any).env?.PROD && (
                     <button
                       type="button"
                       onClick={() => {

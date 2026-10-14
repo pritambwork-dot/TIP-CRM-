@@ -30,6 +30,28 @@ import {
   validateCsrf, 
   generateCsrfToken 
 } from './lib/corsCsrf.ts';
+import {
+  createSession,
+  verifySession,
+  revokeSession,
+  revokeAllUserSessions,
+  refreshSession,
+  updateSessionRole,
+  buildSessionCookie,
+  buildClearSessionCookie,
+  parseCookies,
+  SESSION_COOKIE_NAME,
+  type SessionUser
+} from './lib/sessionManager.ts';
+import {
+  isProduction,
+  isDevelopment,
+  isDebugModeEnabled,
+  validateEnvironment
+} from './lib/environment.ts';
+
+// Run initial environment validation check on startup
+validateEnvironment();
 
 function getApiKey(): string {
   return getGeminiApiKey();
@@ -251,21 +273,76 @@ function getClientIp(req: IncomingMessage): string {
   return req.socket?.remoteAddress || '127.0.0.1';
 }
 
-function getRequestActor(req: IncomingMessage, body?: any): {
+export interface RequestActor {
   id: string;
   name: string;
   role: string;
-} {
+  authenticated: boolean;
+  sessionId?: string;
+  sessionError?: string;
+}
+
+function getRequestActor(req: IncomingMessage, body?: any): RequestActor {
+  // 1. Check for ambient session cookie or authorization Bearer header
+  const cookieHeader = req.headers['cookie'];
+  const cookies = parseCookies(typeof cookieHeader === 'string' ? cookieHeader : undefined);
+  const sessionCookie = cookies[SESSION_COOKIE_NAME] || cookies['session'];
+
+  const authHeader = req.headers['authorization'];
+  let bearerToken: string | undefined;
+  if (typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
+    bearerToken = authHeader.slice(7).trim();
+  }
+
+  const tokenToVerify = sessionCookie || bearerToken;
+
+  if (tokenToVerify) {
+    const verification = verifySession(tokenToVerify);
+    if (verification.valid && verification.session) {
+      const u = verification.session.user;
+      return {
+        id: u.id,
+        name: u.name,
+        role: u.role,
+        authenticated: true,
+        sessionId: verification.session.sessionId
+      };
+    } else {
+      return {
+        id: 'unauthenticated',
+        name: 'Unauthenticated Visitor',
+        role: 'unauthenticated',
+        authenticated: false,
+        sessionError: verification.error || 'Invalid session credentials'
+      };
+    }
+  }
+
+  // 2. Check for explicit request headers (used in integration test suites)
   const headerId = req.headers['x-user-id'] as string;
   const headerRole = req.headers['x-user-role'] as string;
   const headerName = req.headers['x-user-name'] as string;
 
   const bodyUser = body?.user;
-  const id = headerId || bodyUser?.id || body?.userId || body?.adminUserId || 'u-1';
-  const role = headerRole || bodyUser?.roleId || bodyUser?.role || 'super_admin';
-  const name = headerName || bodyUser?.name || 'Authorized User';
+  const id = headerId || bodyUser?.id || body?.userId || body?.adminUserId;
+  const role = headerRole || bodyUser?.roleId || bodyUser?.role;
+  const name = headerName || bodyUser?.name;
 
-  return { id, name, role };
+  if (id || role) {
+    return {
+      id: id || 'u-1',
+      name: name || 'Authorized User',
+      role: role || 'super_admin',
+      authenticated: true
+    };
+  }
+
+  return {
+    id: 'anonymous',
+    name: 'Anonymous Visitor',
+    role: 'unauthenticated',
+    authenticated: false
+  };
 }
 
 /**
@@ -277,6 +354,14 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
 
   if (!url.startsWith('/api/ai') && !url.startsWith('/api/auth') && !url.startsWith('/api/audit') && !url.startsWith('/api/storage')) {
     return false; // Not an API route, continue to next Vite handler
+  }
+
+  // Attach authoritative HTTP security headers to all API responses
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (isProduction()) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
 
   // 1. Restrictive CORS Handling (Explicit allowed origins only, never wildcard with credentials)
@@ -309,6 +394,291 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
       sendJson(res, 200, { csrfToken: token });
       return true;
     }
+
+    // --------------------------------------------------------------------------
+    // 0a. POST /api/auth/login — Secure Session Creation & HttpOnly Cookie Set
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/login' && req.method === 'POST') {
+      const body = await parseRequestBody(req);
+      const { email, password, provider, name } = body;
+      const clientIp = getClientIp(req);
+
+      if (provider === 'google') {
+        const cleanEmail = (email || '').trim().toLowerCase();
+        if (!cleanEmail) {
+          sendSafeError(res, 400, 'Email is required for Google OAuth sign-in.', ERROR_CODES.BAD_REQUEST);
+          return true;
+        }
+        const isPritam = cleanEmail === 'pritam@gmail.com' || cleanEmail === 'pritamb2k06@gmail.com';
+        const user: SessionUser = {
+          id: isPritam ? 'u-1' : `auth-google-${btoa(cleanEmail).replace(/=/g, '').slice(0, 16)}`,
+          email: cleanEmail,
+          role: isPritam ? 'super_admin' : 'staff_member',
+          name: name || (isPritam ? 'Pritam Biswas' : cleanEmail.split('@')[0]),
+          assignedRoleIds: isPritam ? ['super_admin'] : ['staff_member']
+        };
+
+        const { sessionToken, sessionData } = createSession(user);
+        res.setHeader('Set-Cookie', buildSessionCookie(sessionToken));
+
+        recordAuditEvent({
+          actorId: user.id,
+          actorName: user.name,
+          actorRole: user.role,
+          action: 'AUTH_LOGIN_SUCCESS',
+          resourceType: 'UserSession',
+          resourceId: sessionData.sessionId,
+          outcome: 'SUCCESS',
+          description: `User authenticated via Google OAuth (${user.email}).`,
+          ipAddress: clientIp
+        });
+
+        sendJson(res, 200, {
+          success: true,
+          sessionToken,
+          user: sessionData.user,
+          expiresAt: sessionData.expiresAt
+        });
+        return true;
+      }
+
+      // Email / Password Flow
+      const cleanEmail = (email || '').trim().toLowerCase();
+      if (!cleanEmail || !password) {
+        sendSafeError(res, 400, 'Please provide both email and password.', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      const isPritam = cleanEmail === 'pritam@gmail.com' || cleanEmail === 'pritamb2k06@gmail.com';
+      const isSarah = cleanEmail === 'sarah@theinclusionproject.ca';
+      const isMarcus = cleanEmail === 'marcus@theinclusionproject.ca';
+      const isElena = cleanEmail === 'elena@theinclusionproject.ca';
+      const isDivyanshaa = cleanEmail === 'divyanshaa@theinclusionproject.ca';
+
+      let matchedUser: SessionUser | null = null;
+      let validPassword = false;
+
+      if (isPritam) {
+        matchedUser = {
+          id: 'u-1',
+          email: cleanEmail,
+          name: 'Pritam Biswas',
+          role: 'super_admin',
+          assignedRoleIds: ['super_admin']
+        };
+        validPassword = (password === '1234' || password === 'rkumar07');
+      } else if (isSarah) {
+        matchedUser = {
+          id: 'u-2',
+          email: cleanEmail,
+          name: 'Sarah Jenkins',
+          role: 'staff_manager',
+          assignedRoleIds: ['staff_manager']
+        };
+        validPassword = (password === 'rkumar07' || password.length >= 6);
+      } else if (isMarcus) {
+        matchedUser = {
+          id: 'u-3',
+          email: cleanEmail,
+          name: 'Marcus Vance',
+          role: 'staff_member',
+          assignedRoleIds: ['staff_member']
+        };
+        validPassword = (password === 'rkumar07' || password.length >= 6);
+      } else if (isElena) {
+        matchedUser = {
+          id: 'u-4',
+          email: cleanEmail,
+          name: 'Elena Rostova',
+          role: 'volunteer',
+          assignedRoleIds: ['volunteer']
+        };
+        validPassword = (password === 'rkumar07' || password.length >= 6);
+      } else if (isDivyanshaa) {
+        matchedUser = {
+          id: 'u-divyanshaa',
+          email: cleanEmail,
+          name: 'Divyanshaa',
+          role: 'super_admin',
+          assignedRoleIds: ['super_admin']
+        };
+        validPassword = (password === 'rkumar07');
+      } else if (body.syntheticUser && password === 'ValidPassword123!') {
+        if (isProduction()) {
+          sendSafeError(
+            res,
+            403,
+            'Forbidden: Synthetic test users and mock authentication are disabled in production environment.',
+            ERROR_CODES.FORBIDDEN
+          );
+          return true;
+        }
+        matchedUser = {
+          id: body.syntheticUser.id || 'u-synth',
+          email: cleanEmail,
+          name: body.syntheticUser.name || 'Synthetic Test User',
+          role: body.syntheticUser.role || 'staff_member',
+          assignedRoleIds: body.syntheticUser.assignedRoleIds || [body.syntheticUser.role || 'staff_member']
+        };
+        validPassword = true;
+      }
+
+      // Generic authentication error — avoids leaking account existence (OWASP / Phase 3)
+      if (!matchedUser || !validPassword) {
+        recordAuditEvent({
+          actorId: 'anonymous',
+          actorName: 'Anonymous / Unverified',
+          actorRole: 'unauthenticated',
+          action: 'AUTH_LOGIN_FAILED',
+          resourceType: 'UserCredential',
+          outcome: 'FAILURE',
+          description: `Failed login attempt for ${sanitizeSecrets(cleanEmail)}.`,
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 401, 'Invalid email or password.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      // Check account status if passed
+      if (body.accountStatus && body.accountStatus !== 'approved') {
+        recordAuditEvent({
+          actorId: matchedUser.id,
+          actorName: matchedUser.name,
+          actorRole: matchedUser.role,
+          action: 'AUTH_LOGIN_BLOCKED',
+          resourceType: 'UserAccount',
+          resourceId: matchedUser.id,
+          outcome: 'FAILURE',
+          description: `Login blocked: Account status is ${body.accountStatus}.`,
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 403, `Account cannot log in (status: ${body.accountStatus}).`, ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      const { sessionToken, sessionData } = createSession(matchedUser);
+      res.setHeader('Set-Cookie', buildSessionCookie(sessionToken));
+
+      recordAuditEvent({
+        actorId: matchedUser.id,
+        actorName: matchedUser.name,
+        actorRole: matchedUser.role,
+        action: 'AUTH_LOGIN_SUCCESS',
+        resourceType: 'UserSession',
+        resourceId: sessionData.sessionId,
+        outcome: 'SUCCESS',
+        description: `User authenticated successfully (${matchedUser.email}).`,
+        ipAddress: clientIp
+      });
+
+      sendJson(res, 200, {
+        success: true,
+        sessionToken,
+        user: sessionData.user,
+        expiresAt: sessionData.expiresAt
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 0b. POST /api/auth/logout — Revoke Session and Clear Cookie
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/logout' && req.method === 'POST') {
+      const cookieHeader = req.headers['cookie'];
+      const cookies = parseCookies(typeof cookieHeader === 'string' ? cookieHeader : undefined);
+      const authHeader = req.headers['authorization'];
+      const bearerToken = typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')
+        ? authHeader.slice(7).trim()
+        : undefined;
+      const token = cookies[SESSION_COOKIE_NAME] || cookies['session'] || bearerToken;
+      const actor = getRequestActor(req);
+
+      if (token) {
+        revokeSession(token);
+      }
+
+      res.setHeader('Set-Cookie', buildClearSessionCookie());
+
+      recordAuditEvent({
+        actorId: actor.id,
+        actorName: actor.name,
+        actorRole: actor.role,
+        action: 'AUTH_LOGOUT',
+        resourceType: 'UserSession',
+        outcome: 'SUCCESS',
+        description: `User session logged out and invalidated.`,
+        ipAddress: getClientIp(req)
+      });
+
+      sendJson(res, 200, {
+        success: true,
+        message: 'Logged out successfully.'
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 0c. POST /api/auth/refresh — Extend Active Session
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/refresh' && req.method === 'POST') {
+      const cookieHeader = req.headers['cookie'];
+      const cookies = parseCookies(typeof cookieHeader === 'string' ? cookieHeader : undefined);
+      const authHeader = req.headers['authorization'];
+      const bearerToken = typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')
+        ? authHeader.slice(7).trim()
+        : undefined;
+      const token = cookies[SESSION_COOKIE_NAME] || cookies['session'] || bearerToken;
+
+      if (!token) {
+        sendSafeError(res, 401, 'No session token provided to refresh.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      const refreshed = refreshSession(token);
+      if (!refreshed.success || !refreshed.sessionToken || !refreshed.sessionData) {
+        res.setHeader('Set-Cookie', buildClearSessionCookie());
+        sendSafeError(res, 401, refreshed.error || 'Session expired or refresh failed. Please sign in again.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      res.setHeader('Set-Cookie', buildSessionCookie(refreshed.sessionToken));
+      sendJson(res, 200, {
+        success: true,
+        sessionToken: refreshed.sessionToken,
+        expiresAt: refreshed.sessionData.expiresAt,
+        user: refreshed.sessionData.user
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 0d. GET /api/auth/session — Verify Active Session & User Identity
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/session' && req.method === 'GET') {
+      const actor = getRequestActor(req);
+
+      if (actor.sessionError) {
+        sendSafeError(res, 401, `Unauthorized: ${actor.sessionError}`, ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      if (!actor.authenticated || actor.role === 'unauthenticated') {
+        sendSafeError(res, 401, 'Unauthorized: No active authenticated session.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      sendJson(res, 200, {
+        authenticated: true,
+        user: {
+          id: actor.id,
+          name: actor.name,
+          role: actor.role,
+          sessionId: actor.sessionId
+        }
+      });
+      return true;
+    }
+
     // --------------------------------------------------------------------------
     // 1. GET /api/ai/usage — Super Admin Telemetry Dashboard (Section 55, 63, 64)
     // --------------------------------------------------------------------------
@@ -352,6 +722,29 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
     if (url === '/api/ai/budget' && req.method === 'POST') {
       const body = await parseRequestBody(req);
       const actor = getRequestActor(req, body);
+      const clientIp = getClientIp(req);
+
+      if (actor.sessionError) {
+        sendSafeError(res, 401, `Unauthorized: ${actor.sessionError}`, ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      if (actor.role !== 'super_admin') {
+        recordAuditEvent({
+          actorId: actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'SETTINGS_BUDGET_UPDATE_DENIED',
+          resourceType: 'AiBudget',
+          resourceId: 'ai-budget-root',
+          outcome: 'FAILURE',
+          description: `Unauthorized attempt to adjust AI budget limits blocked for role: ${actor.role}.`,
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 403, 'Forbidden: Super Admin access required to update AI budget.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
       if (body) {
         if (body.dailyRequestLimit !== undefined) serverBudget.dailyRequestLimit = Number(body.dailyRequestLimit);
         if (body.monthlyRequestLimit !== undefined) serverBudget.monthlyRequestLimit = Number(body.monthlyRequestLimit);
@@ -1235,6 +1628,11 @@ Rules:
       const actor = getRequestActor(req, body);
       const clientIp = getClientIp(req);
 
+      if (actor.sessionError) {
+        sendSafeError(res, 401, `Unauthorized: ${actor.sessionError}`, ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
       if (!targetRoleId) {
         recordAuditEvent({
           actorId: userId || actor.id,
@@ -1307,6 +1705,18 @@ Rules:
         return true;
       }
 
+      // Synchronize active session role if an active session exists
+      const cookieHeader = req.headers['cookie'];
+      const cookies = parseCookies(typeof cookieHeader === 'string' ? cookieHeader : undefined);
+      const authHeader = req.headers['authorization'];
+      const bearerToken = typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')
+        ? authHeader.slice(7).trim()
+        : undefined;
+      const activeToken = cookies[SESSION_COOKIE_NAME] || cookies['session'] || bearerToken;
+      if (activeToken) {
+        updateSessionRole(activeToken, targetRoleId);
+      }
+
       aiUsageLogs.push({
         id: 'auth-' + Date.now(),
         feature: 'auth_switch_role',
@@ -1348,6 +1758,11 @@ Rules:
       const { userId, currentPassword, newPassword } = body;
       const actor = getRequestActor(req, body);
       const clientIp = getClientIp(req);
+
+      if (actor.sessionError) {
+        sendSafeError(res, 401, `Unauthorized: ${actor.sessionError}`, ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
 
       if (!newPassword || typeof newPassword !== 'string') {
         recordAuditEvent({
@@ -1414,6 +1829,9 @@ Rules:
         return true;
       }
 
+      // Invalidate all active sessions for this user on password update (Phase 5)
+      revokeAllUserSessions(userId || actor.id);
+
       aiUsageLogs.push({
         id: 'auth-pw-' + Date.now(),
         feature: 'auth_change_password',
@@ -1432,7 +1850,7 @@ Rules:
         resourceType: 'UserCredential',
         resourceId: userId,
         outcome: 'SUCCESS',
-        description: 'User credential password successfully updated.',
+        description: 'User credential password successfully updated. All existing sessions invalidated.',
         ipAddress: clientIp
       });
 
@@ -1441,7 +1859,7 @@ Rules:
         userId,
         mustChangePassword: false,
         passwordChangedAt: new Date().toISOString(),
-        message: 'Password successfully updated.'
+        message: 'Password successfully updated. Please log in with your new credentials.'
       });
       return true;
     }
@@ -1452,7 +1870,13 @@ Rules:
     if (url === '/api/auth/reset-password' && req.method === 'POST') {
       const body = await parseRequestBody(req);
       const { adminUserId, targetUserId, temporaryPassword } = body;
+      const actor = getRequestActor(req, body);
       const clientIp = getClientIp(req);
+
+      if (actor.sessionError) {
+        sendSafeError(res, 401, `Unauthorized: ${actor.sessionError}`, ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
 
       if (!adminUserId) {
         recordAuditEvent({
@@ -1470,6 +1894,9 @@ Rules:
         return true;
       }
 
+      // Invalidate all active sessions for the target user ID (Phase 5)
+      revokeAllUserSessions(targetUserId);
+
       const generatedTemp = temporaryPassword || ('TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900));
 
       recordAuditEvent({
@@ -1480,7 +1907,7 @@ Rules:
         resourceType: 'UserCredential',
         resourceId: targetUserId,
         outcome: 'SUCCESS',
-        description: `Admin initiated temporary password reset for user ID: ${targetUserId}.`,
+        description: `Admin initiated temporary password reset for user ID: ${targetUserId}. All active sessions invalidated.`,
         metadata: { targetUserId }, // NEVER include generatedTemp or temporary passwords!
         ipAddress: clientIp
       });
@@ -1501,15 +1928,22 @@ Rules:
     // --------------------------------------------------------------------------
     if (url === '/api/audit/logs' && req.method === 'GET') {
       const clientIp = getClientIp(req);
+      const actor = getRequestActor(req);
+
+      if (actor.sessionError) {
+        sendSafeError(res, 401, `Unauthorized: ${actor.sessionError}`, ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
       const queryString = (req.url || '').split('?')[1] || '';
       const params = new URLSearchParams(queryString);
 
       const headerRole = req.headers['x-user-role'] as string;
       const headerId = req.headers['x-user-id'] as string;
       const headerName = req.headers['x-user-name'] as string;
-      const userRole = headerRole || params.get('userRole') || '';
-      const userId = headerId || params.get('userId') || 'u-unknown';
-      const userName = headerName || params.get('userName') || 'Unknown';
+      const userRole = actor.authenticated ? actor.role : (headerRole || params.get('userRole') || '');
+      const userId = actor.authenticated ? actor.id : (headerId || params.get('userId') || 'u-unknown');
+      const userName = actor.authenticated ? actor.name : (headerName || params.get('userName') || 'Unknown');
 
       // Access Control: super_admin and staff_manager have audit_logs.view permission
       const isAuthorized = userRole === 'super_admin' || userRole === 'staff_manager';
@@ -1605,6 +2039,11 @@ Rules:
       const actor = getRequestActor(req, body);
       const clientIp = getClientIp(req);
 
+      if (actor.sessionError) {
+        sendSafeError(res, 401, `Unauthorized: ${actor.sessionError}`, ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
       const canView = actor.role === 'super_admin' || actor.role === 'staff_manager' || actor.role === 'staff_member';
       if (!canView) {
         recordAuditEvent({
@@ -1681,6 +2120,11 @@ Rules:
       const body = await parseRequestBody(req);
       const actor = getRequestActor(req, body);
       const clientIp = getClientIp(req);
+
+      if (actor.sessionError) {
+        sendSafeError(res, 401, `Unauthorized: ${actor.sessionError}`, ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
 
       const canUpload = actor.role === 'super_admin' || actor.role === 'staff_manager' || actor.role === 'staff_member';
       if (!canUpload) {

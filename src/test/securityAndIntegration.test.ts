@@ -45,6 +45,25 @@ import {
   handleCors, 
   validateCsrf 
 } from '../../server/lib/corsCsrf.ts';
+import {
+  createSession,
+  verifySession,
+  revokeSession,
+  revokeAllUserSessions,
+  refreshSession,
+  buildSessionCookie,
+  buildClearSessionCookie,
+  parseCookies,
+  SESSION_COOKIE_NAME
+} from '../../server/lib/sessionManager.ts';
+import {
+  isProduction,
+  isDevelopment,
+  isDebugModeEnabled,
+  validateEnvironment,
+  sanitizeErrorDetails
+} from '../../server/lib/environment.ts';
+
 
 // Lightweight Test Runner
 let passedCount = 0;
@@ -1557,6 +1576,531 @@ async function runTests() {
   await aiMiddlewareHandler(formSubmitReq, formSubmitRes.res);
   assert(formSubmitRes.getStatusCode() === 400, 'Simple form urlencoded submission without JSON headers rejected with 400 Bad Request');
 
+  // ==========================================================================
+  // Test Suite 20: Secure Cookies, Authentication & Session Lifecycle (Check 17)
+  // ==========================================================================
+  console.log('\nTest Suite 20: Secure Cookies, Authentication & Session Lifecycle');
+
+  // 1. Unauthenticated Request Cannot Access Protected Session Endpoint
+  const unauthSessionRes = createMockRes();
+  const unauthSessionReq = createMockReq({
+    method: 'GET',
+    url: '/api/auth/session'
+  });
+  await aiMiddlewareHandler(unauthSessionReq, unauthSessionRes.res);
+  assert(unauthSessionRes.getStatusCode() === 401, 'Unauthenticated GET /api/auth/session rejected with 401 Unauthorized');
+  assert(unauthSessionRes.getData().error.includes('No active authenticated session'), 'Error message cites missing session');
+
+  // 2. Generic Error Message Prevents User Enumeration (OWASP Authentication Defense)
+  const enumFailRes1 = createMockRes();
+  const enumFailReq1 = createMockReq({
+    method: 'POST',
+    url: '/api/auth/login',
+    headers: { 'content-type': 'application/json' },
+    body: { email: 'nonexistent-user-12345@example.com', password: 'AnyPassword123!' }
+  });
+  await aiMiddlewareHandler(enumFailReq1, enumFailRes1.res);
+  assert(enumFailRes1.getStatusCode() === 401, 'Login with non-existent email returns 401 Unauthorized');
+
+  const enumFailRes2 = createMockRes();
+  const enumFailReq2 = createMockReq({
+    method: 'POST',
+    url: '/api/auth/login',
+    headers: { 'content-type': 'application/json' },
+    body: { email: 'pritam@gmail.com', password: 'WrongPassword999!' }
+  });
+  await aiMiddlewareHandler(enumFailReq2, enumFailRes2.res);
+  assert(enumFailRes2.getStatusCode() === 401, 'Login with existing email and wrong password returns 401 Unauthorized');
+  assert(enumFailRes1.getData().error === enumFailRes2.getData().error, 'Authentication failure messages are identical across existing and non-existing accounts (prevents user enumeration)');
+
+  // 3. Email/Password Login Establishes Valid Session & Returns HttpOnly Cookie
+  const validLoginRes = createMockRes();
+  const validLoginReq = createMockReq({
+    method: 'POST',
+    url: '/api/auth/login',
+    headers: { 'content-type': 'application/json' },
+    body: { email: 'pritam@gmail.com', password: '1234' }
+  });
+  await aiMiddlewareHandler(validLoginReq, validLoginRes.res);
+  assert(validLoginRes.getStatusCode() === 200, 'POST /api/auth/login with valid credentials returns 200 OK');
+  const loginData = validLoginRes.getData();
+  assert(Boolean(loginData.sessionToken), 'Login response contains sessionToken');
+  assert(loginData.user.id === 'u-1', 'Session user corresponds to authenticated user ID');
+  const setCookieHeader = validLoginRes.res.getHeader('Set-Cookie') as string;
+  assert(Boolean(setCookieHeader), 'Login response sets Set-Cookie header');
+  assert(setCookieHeader.includes('tip_session='), 'Set-Cookie contains tip_session cookie');
+  assert(setCookieHeader.includes('HttpOnly'), 'Set-Cookie enforces HttpOnly flag (mitigates XSS)');
+  assert(setCookieHeader.includes('SameSite=Lax'), 'Set-Cookie enforces SameSite=Lax (mitigates CSRF)');
+  assert(setCookieHeader.includes('Path=/'), 'Set-Cookie restricts scope to Path=/');
+
+  // 4. Valid Session Cookie Authenticates GET /api/auth/session
+  const authSessionRes = createMockRes();
+  const authSessionReq = createMockReq({
+    method: 'GET',
+    url: '/api/auth/session',
+    headers: {
+      cookie: `tip_session=${loginData.sessionToken}`
+    }
+  });
+  await aiMiddlewareHandler(authSessionReq, authSessionRes.res);
+  assert(authSessionRes.getStatusCode() === 200, 'GET /api/auth/session with valid session cookie returns 200 OK');
+  assert(authSessionRes.getData().authenticated === true, 'Response confirms authenticated: true');
+  assert(authSessionRes.getData().user.role === 'super_admin', 'Verified user role derived authoritatively from session');
+
+  // 5. Tampered Session Signature Rejected
+  const tamperedToken = loginData.sessionToken.slice(0, -6) + 'abcdef';
+  const tamperedRes = createMockRes();
+  const tamperedReq = createMockReq({
+    method: 'GET',
+    url: '/api/auth/session',
+    headers: {
+      cookie: `tip_session=${tamperedToken}`
+    }
+  });
+  await aiMiddlewareHandler(tamperedReq, tamperedRes.res);
+  assert(tamperedRes.getStatusCode() === 401, 'Request with forged/tampered session signature rejected with 401 Unauthorized');
+  assert(tamperedRes.getData().error.includes('signature'), 'Error message cites signature verification failure');
+
+  // 6. Expired Session Token Rejected
+  const { sessionToken: expiredToken } = createSession(
+    { id: 'u-expired', email: 'expired@example.com', role: 'volunteer', name: 'Expired User' },
+    -10 // Expired 10 seconds ago
+  );
+  const expiredRes = createMockRes();
+  const expiredReq = createMockReq({
+    method: 'GET',
+    url: '/api/auth/session',
+    headers: {
+      cookie: `tip_session=${expiredToken}`
+    }
+  });
+  await aiMiddlewareHandler(expiredReq, expiredRes.res);
+  assert(expiredRes.getStatusCode() === 401, 'Request with expired session token rejected with 401 Unauthorized');
+  assert(expiredRes.getData().error.includes('expired'), 'Error message cites session expiration');
+
+  // 7. Logout Invalidates Active Session & Clears Browser Cookie
+  // 7a. CSRF Defense: Logout with ambient cookie missing CSRF token rejected with 403
+  const logoutCsrfBlockRes = createMockRes();
+  const logoutCsrfBlockReq = createMockReq({
+    method: 'POST',
+    url: '/api/auth/logout',
+    headers: {
+      cookie: `tip_session=${loginData.sessionToken}`,
+      'content-type': 'application/json'
+    }
+  });
+  await aiMiddlewareHandler(logoutCsrfBlockReq, logoutCsrfBlockRes.res);
+  assert(logoutCsrfBlockRes.getStatusCode() === 403, 'POST /api/auth/logout carrying cookie without X-CSRF-Token blocked with 403 Forbidden (CSRF Defense)');
+
+  // 7b. Logout with valid CSRF token succeeds and clears cookie
+  const logoutRes = createMockRes();
+  const logoutReq = createMockReq({
+    method: 'POST',
+    url: '/api/auth/logout',
+    headers: {
+      cookie: `tip_session=${loginData.sessionToken}`,
+      'x-csrf-token': generateCsrfToken('u-1'),
+      'content-type': 'application/json'
+    }
+  });
+  await aiMiddlewareHandler(logoutReq, logoutRes.res);
+  assert(logoutRes.getStatusCode() === 200, 'POST /api/auth/logout with valid CSRF token returns 200 OK');
+  const clearCookieHeader = logoutRes.res.getHeader('Set-Cookie') as string;
+  assert(clearCookieHeader.includes('Max-Age=0'), 'Logout Set-Cookie includes Max-Age=0 to clear cookie');
+  assert(clearCookieHeader.includes('Expires=Thu, 01 Jan 1970'), 'Logout Set-Cookie sets historic expiry date');
+
+  // 8. Re-using Revoked Session Token is Blocked
+  const postLogoutRes = createMockRes();
+  const postLogoutReq = createMockReq({
+    method: 'GET',
+    url: '/api/auth/session',
+    headers: {
+      cookie: `tip_session=${loginData.sessionToken}`
+    }
+  });
+  await aiMiddlewareHandler(postLogoutReq, postLogoutRes.res);
+  assert(postLogoutRes.getStatusCode() === 401, 'Subsequent request using revoked session token rejected with 401 Unauthorized');
+  assert(postLogoutRes.getData().error.includes('revoked'), 'Error message cites session revocation');
+
+  // 9. Token Refresh Within Window Issues New Token & Extends Lifetime
+  const { sessionToken: refreshableToken } = createSession(
+    { id: 'u-synth-refresh', email: 'refresh@example.com', role: 'staff_member', name: 'Refreshable User' }
+  );
+  const refreshRes = createMockRes();
+  const refreshReq = createMockReq({
+    method: 'POST',
+    url: '/api/auth/refresh',
+    headers: {
+      cookie: `tip_session=${refreshableToken}`,
+      'x-csrf-token': generateCsrfToken('u-synth-refresh'),
+      'content-type': 'application/json'
+    }
+  });
+  await aiMiddlewareHandler(refreshReq, refreshRes.res);
+  assert(refreshRes.getStatusCode() === 200, 'POST /api/auth/refresh with valid session returns 200 OK');
+  const refreshedData = refreshRes.getData();
+  assert(Boolean(refreshedData.sessionToken), 'Refresh returns newly issued sessionToken');
+  assert(refreshedData.sessionToken !== refreshableToken, 'Refresh rotates token (old token invalidated)');
+  assert(!verifySession(refreshableToken).valid, 'Previous token is revoked upon refresh rotation');
+
+  // 10. Refresh with Invalid/Revoked Token Rejected Safely
+  const badRefreshRes = createMockRes();
+  const badRefreshReq = createMockReq({
+    method: 'POST',
+    url: '/api/auth/refresh',
+    headers: {
+      cookie: 'tip_session=tip_sess_invalid.fakePayload.badSig',
+      'x-csrf-token': generateCsrfToken('anon'),
+      'content-type': 'application/json'
+    }
+  });
+  await aiMiddlewareHandler(badRefreshReq, badRefreshRes.res);
+  assert(badRefreshRes.getStatusCode() === 401, 'POST /api/auth/refresh with invalid token rejected with 401 Unauthorized');
+
+
+  // 11. Client-Controlled Header Cannot Override Role Defined in Valid Session Token
+  const { sessionToken: volunteerToken } = createSession(
+    { id: 'u-vol-1', email: 'volunteer@theinclusionproject.ca', role: 'volunteer', name: 'Volunteer User' }
+  );
+  const spoofRoleRes = createMockRes();
+  const spoofRoleReq = createMockReq({
+    method: 'POST',
+    url: '/api/ai/budget',
+    headers: {
+      cookie: `tip_session=${volunteerToken}`,
+      'x-csrf-token': generateCsrfToken('u-vol-1'),
+      'x-user-role': 'super_admin', // Attacker attempt to spoof header
+      'content-type': 'application/json'
+    },
+    body: { dailyLimit: 100 }
+  });
+  await aiMiddlewareHandler(spoofRoleReq, spoofRoleRes.res);
+  assert(spoofRoleRes.getStatusCode() === 403, 'Request with volunteer session spoofing x-user-role=super_admin rejected with 403 Forbidden');
+  assert(spoofRoleRes.getData().error.includes('Super Admin access required'), 'Server enforces authoritative session role (volunteer), ignoring client spoof header');
+
+  // 12. Unauthorized Role Elevation in /api/auth/switch-role Blocked
+  const elevateRes = createMockRes();
+  const elevateReq = createMockReq({
+    method: 'POST',
+    url: '/api/auth/switch-role',
+    headers: {
+      cookie: `tip_session=${volunteerToken}`,
+      'x-csrf-token': generateCsrfToken('u-vol-1'),
+      'content-type': 'application/json'
+    },
+    body: {
+      userId: 'u-vol-1',
+      targetRoleId: 'super_admin',
+      assignedRoleIds: ['volunteer']
+    }
+  });
+  await aiMiddlewareHandler(elevateReq, elevateRes.res);
+  assert(elevateRes.getStatusCode() === 403, 'Attempt to switch to unassigned role rejected with 403 Forbidden');
+  assert(elevateRes.getData().error.includes('Forbidden'), 'Error cites unauthorized role elevation attempt blocked');
+
+  // 13. High-Risk Account Change: Password Change Invalidates All Existing User Sessions
+  const { sessionToken: userSessionBeforePw } = createSession(
+    { id: 'u-pw-test', email: 'pwtest@example.com', role: 'staff_member', name: 'PW Test User' }
+  );
+  assert(verifySession(userSessionBeforePw).valid, 'Session valid before password change');
+
+  const pwChangeRes = createMockRes();
+  const pwChangeReq = createMockReq({
+    method: 'POST',
+    url: '/api/auth/change-password',
+    headers: {
+      cookie: `tip_session=${userSessionBeforePw}`,
+      'x-csrf-token': generateCsrfToken('u-pw-test'),
+      'content-type': 'application/json'
+    },
+    body: {
+      userId: 'u-pw-test',
+      currentPassword: 'OldPassword123!',
+      newPassword: 'BrandNewSecurePass2026!'
+    }
+  });
+  await aiMiddlewareHandler(pwChangeReq, pwChangeRes.res);
+  assert(pwChangeRes.getStatusCode() === 200, 'POST /api/auth/change-password succeeds with 200 OK');
+  assert(!verifySession(userSessionBeforePw).valid, 'All previous active sessions for user invalidated upon password change');
+
+  // 14. High-Risk Account Change: Admin Password Reset Invalidates Target User Sessions
+  const { sessionToken: targetSessionBeforeReset } = createSession(
+    { id: 'u-target-reset', email: 'target@example.com', role: 'staff_member', name: 'Target Reset User' }
+  );
+  assert(verifySession(targetSessionBeforeReset).valid, 'Target session valid before admin reset');
+
+  const adminResetRes = createMockRes();
+  const adminResetReq = createMockReq({
+    method: 'POST',
+    url: '/api/auth/reset-password',
+    headers: {
+      'content-type': 'application/json',
+      'x-user-role': 'super_admin'
+    },
+    body: {
+      adminUserId: 'u-1',
+      targetUserId: 'u-target-reset'
+    }
+  });
+  await aiMiddlewareHandler(adminResetReq, adminResetRes.res);
+  assert(adminResetRes.getStatusCode() === 200, 'Admin password reset succeeds with 200 OK');
+  assert(!verifySession(targetSessionBeforeReset).valid, 'Target user session revoked immediately upon admin password reset');
+
+  // 15. Production Cookie Security Attributes (Secure, HttpOnly, SameSite, Path)
+  const prodCookie = buildSessionCookie('test_token_123', { isProduction: true });
+  assert(prodCookie.includes('Secure'), 'Production session cookie enforces Secure flag (HTTPS only)');
+  assert(prodCookie.includes('HttpOnly'), 'Production session cookie enforces HttpOnly flag');
+  assert(prodCookie.includes('SameSite=Lax'), 'Production session cookie enforces SameSite=Lax');
+  assert(prodCookie.includes('Path=/'), 'Production session cookie restricts path to /');
+
+  // 16. Sensitive Tokens and Session IDs Redacted in Sanitizer & Audit Logger
+  const rawSecretLog = `User logged in with token tip_sess_abc123.def456.sig789 and tip_session=xyz987; sessionToken=topsecret`;
+  const sanitizedLog = sanitizeSecrets(rawSecretLog);
+  assert(!sanitizedLog.includes('tip_sess_abc123'), 'Raw session token redacted from log output');
+  assert(!sanitizedLog.includes('xyz987'), 'Cookie value redacted from log output');
+  assert(!sanitizedLog.includes('topsecret'), 'Session token variable redacted from log output');
+
+  // 17. Google OAuth Session Creation Endpoint
+  const googleLoginRes = createMockRes();
+  const googleLoginReq = createMockReq({
+    method: 'POST',
+    url: '/api/auth/login',
+    headers: { 'content-type': 'application/json' },
+    body: { provider: 'google', email: 'pritamb2k06@gmail.com', name: 'Pritam Biswas' }
+  });
+  await aiMiddlewareHandler(googleLoginReq, googleLoginRes.res);
+  assert(googleLoginRes.getStatusCode() === 200, 'Google OAuth login returns 200 OK');
+  assert(googleLoginRes.getData().user.role === 'super_admin', 'Google login for Pritam assigns super_admin role');
+  assert(Boolean(googleLoginRes.getData().sessionToken), 'Google login returns valid session token');
+
+  // ==========================================================================
+  // Test Suite 21: Production Mode & Debug Hardening (Security Check 19)
+  // ==========================================================================
+  console.log('\nTest Suite 21: Production Mode & Debug Hardening (Security Check 19)');
+
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalAppEnv = process.env.APP_ENV;
+  const originalDebug = process.env.DEBUG;
+
+  try {
+    // 1. Production and Development Environment Detection
+    process.env.NODE_ENV = 'production';
+    assert(isProduction() === true, 'isProduction() returns true when NODE_ENV=production');
+    assert(isDevelopment() === false, 'isDevelopment() returns false when NODE_ENV=production');
+
+    process.env.NODE_ENV = 'development';
+    assert(isProduction() === false, 'isProduction() returns false when NODE_ENV=development');
+    assert(isDevelopment() === true, 'isDevelopment() returns true when NODE_ENV=development');
+
+    // 2. Debug Mode Hard-Disabled in Production
+    process.env.NODE_ENV = 'production';
+    process.env.DEBUG = 'true';
+    assert(isDebugModeEnabled() === false, 'isDebugModeEnabled() returns false in production even if DEBUG=true');
+
+    // 3. Client Headers/Query Params Cannot Force Debug Mode in Production
+    const debugReq = createMockReq({
+      method: 'GET',
+      url: '/api/ai/usage?debug=true',
+      headers: { 'x-debug-mode': 'true', 'x-node-env': 'development' }
+    });
+    assert(isDebugModeEnabled(debugReq) === false, 'Client headers or query params cannot force debug mode in production');
+
+    // 4. Debug Mode Enabled only in Development with Explicit Flag
+    process.env.NODE_ENV = 'development';
+    process.env.DEBUG = 'true';
+    assert(isDebugModeEnabled() === true, 'isDebugModeEnabled() returns true in development with DEBUG=true');
+    process.env.DEBUG = 'false';
+    assert(isDebugModeEnabled() === false, 'isDebugModeEnabled() returns false in development when DEBUG=false');
+
+    // 5. POST /api/auth/login Rejects Synthetic Test Users in Production (403 Forbidden)
+    process.env.NODE_ENV = 'production';
+    const prodSynthRes = createMockRes();
+    const prodSynthReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'content-type': 'application/json' },
+      body: {
+        email: 'synthetic@test.org',
+        password: 'ValidPassword123!',
+        syntheticUser: {
+          id: 'u-hacked',
+          role: 'super_admin',
+          assignedRoleIds: ['super_admin']
+        }
+      }
+    });
+    await aiMiddlewareHandler(prodSynthReq, prodSynthRes.res);
+    assert(prodSynthRes.getStatusCode() === 403, 'POST /api/auth/login with synthetic user in production returns 403 Forbidden');
+    assert(prodSynthRes.getData().code === ERROR_CODES.FORBIDDEN, 'Error code is FORBIDDEN');
+    assert(prodSynthRes.getData().error.includes('Synthetic test users'), 'Error message informs synthetic users disabled in production');
+
+    // 6. POST /api/auth/login Allows Synthetic Test Users in Development/Test Mode
+    process.env.NODE_ENV = 'development';
+    const devSynthRes = createMockRes();
+    const devSynthReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'content-type': 'application/json' },
+      body: {
+        email: 'synthetic-dev@test.org',
+        password: 'ValidPassword123!',
+        syntheticUser: {
+          id: 'u-synth-dev',
+          name: 'Synthetic Dev User',
+          role: 'staff_member',
+          assignedRoleIds: ['staff_member']
+        }
+      }
+    });
+    await aiMiddlewareHandler(devSynthReq, devSynthRes.res);
+    assert(devSynthRes.getStatusCode() === 200, 'POST /api/auth/login with synthetic user in development returns 200 OK');
+    assert(devSynthRes.getData().user.id === 'u-synth-dev', 'Synthetic user successfully authenticated in development');
+
+    // 7. sanitizeErrorDetails Strips Stack Traces, Debug Flags, and Internal Paths
+    process.env.NODE_ENV = 'production';
+    const rawDetails = {
+      userFacingField: 'Participant ID invalid',
+      stack: 'Error at /Users/developer/TIP-CRM/server/handler.ts:45:12',
+      stacktrace: 'Trace: internal kernel call',
+      debug: { verboseTrace: [1, 2, 3] },
+      internalError: 'PostgreSQL connection string postgresql://user:pass@db:5432/tip',
+      systemFilePath: '/var/app/secrets/vault.key',
+      serverEnv: 'production-us-west-2'
+    };
+    const cleanDetails = sanitizeErrorDetails(rawDetails);
+    assert(cleanDetails !== undefined, 'sanitizeErrorDetails returns sanitized object');
+    assert(cleanDetails?.userFacingField === 'Participant ID invalid', 'Legitimate user-facing details preserved');
+    assert(cleanDetails?.stack === undefined, 'Stack trace stripped from error details');
+    assert(cleanDetails?.stacktrace === undefined, 'Stacktrace key stripped from error details');
+    assert(cleanDetails?.debug === undefined, 'Debug key stripped from error details');
+    assert(cleanDetails?.internalError === undefined, 'Internal error key stripped from error details');
+    assert(cleanDetails?.systemFilePath === undefined, 'System file path stripped in production');
+    assert(cleanDetails?.serverEnv === undefined, 'Server env key stripped in production');
+
+    // 8. sendSafeError Integrates sanitizeErrorDetails and Prevents Stack Leaks
+    const safeErrorRes = createMockRes();
+    sendSafeError(
+      safeErrorRes.res,
+      500,
+      'Internal server failure occurred.',
+      ERROR_CODES.INTERNAL_SERVER_ERROR,
+      new Error('Database socket hangup'),
+      {
+        field: 'email',
+        stack: 'Error: Database socket hangup at /app/server/db.ts:100',
+        debug: true
+      }
+    );
+    assert(safeErrorRes.getStatusCode() === 500, 'sendSafeError sets status 500');
+    const safeErrorData = safeErrorRes.getData();
+    assert(safeErrorData.details?.field === 'email', 'Safe detail field preserved');
+    assert(safeErrorData.details?.stack === undefined, 'Stack trace never exposed in HTTP response');
+    assert(safeErrorData.details?.debug === undefined, 'Debug flag never exposed in HTTP response');
+    assert(Boolean(safeErrorData.correlationId), 'Response includes correlationId for backend operational tracing');
+
+    // 9. Environment Validation (validateEnvironment)
+    process.env.NODE_ENV = 'production';
+    process.env.CSRF_SECRET = 'random-high-entropy-csrf-secret-key-32-bytes-minimum';
+    process.env.SESSION_SECRET = 'random-high-entropy-session-secret-key-32-bytes-minimum';
+    delete process.env.GEMINI_API_KEY;
+    const validationResult = validateEnvironment();
+    assert(validationResult.valid === true, 'validateEnvironment passes even when optional GEMINI_API_KEY is missing');
+    assert(
+      validationResult.warnings.some(w => w.includes('GEMINI_API_KEY')),
+      'Missing optional GEMINI_API_KEY recorded as non-fatal warning'
+    );
+
+    // 10. Source Map and Debug Console Stripping in Production Vite Configuration
+    const viteConfigContent = fs.readFileSync(path.resolve(process.cwd(), 'vite.config.ts'), 'utf-8');
+    assert(viteConfigContent.includes('sourcemap: false'), 'vite.config.ts explicitly disables sourcemaps in production');
+    assert(viteConfigContent.includes('drop: isProd ?'), 'vite.config.ts drops console and debugger statements in production');
+
+    // 11. LoginPage Quick Sign-In and App.tsx Password Leaks Protected
+    const loginPageContent = fs.readFileSync(path.resolve(process.cwd(), 'src/components/auth/LoginPage.tsx'), 'utf-8');
+    assert(loginPageContent.includes('!(import.meta as any).env?.PROD'), 'LoginPage gates quick admin login behind !PROD');
+
+    const appContent = fs.readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf-8');
+    assert(appContent.includes('const isProd = (import.meta as any).env?.PROD'), 'App.tsx checks PROD mode for auth error messages');
+    assert(appContent.includes("isProd ? 'Invalid email or password.'"), 'App.tsx returns generic error without leaking password in production');
+  } finally {
+    process.env.NODE_ENV = originalNodeEnv;
+    process.env.APP_ENV = originalAppEnv;
+    process.env.DEBUG = originalDebug;
+  }
+
+  // ==========================================================================
+  // Test Suite 22: Complete Production Settings Audit (Security Check 20)
+  // ==========================================================================
+  console.log('\nTest Suite 22: Complete Production Settings Audit (Security Check 20)');
+
+  // 1. Production API Security Headers Verification
+  const headersReq = createMockReq({
+    method: 'GET',
+    url: '/api/auth/csrf-token'
+  });
+  const headersRes = createMockRes();
+  await aiMiddlewareHandler(headersReq, headersRes.res);
+  const respHeaders = headersRes.getHeaders();
+  assert(respHeaders['x-content-type-options'] === 'nosniff', 'API response sets X-Content-Type-Options: nosniff');
+  assert(respHeaders['x-frame-options'] === 'DENY', 'API response sets X-Frame-Options: DENY');
+  assert(respHeaders['referrer-policy'] === 'strict-origin-when-cross-origin', 'API response sets Referrer-Policy: strict-origin-when-cross-origin');
+
+  // 2. Production HSTS Header Verification
+  const originalEnvForHsts = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+    const hstsReq = createMockReq({
+      method: 'GET',
+      url: '/api/auth/csrf-token'
+    });
+    const hstsRes = createMockRes();
+    await aiMiddlewareHandler(hstsReq, hstsRes.res);
+    const prodHeaders = hstsRes.getHeaders();
+    assert(Boolean(prodHeaders['strict-transport-security']), 'Production API response enforces Strict-Transport-Security (HSTS)');
+    assert(prodHeaders['strict-transport-security'].includes('max-age=31536000'), 'HSTS enforces 1-year duration');
+  } finally {
+    process.env.NODE_ENV = originalEnvForHsts;
+  }
+
+  // 3. Official Canadian Organization Domains Allowed by CORS Policy
+  assert(isAllowedOrigin('https://theinclusionproject.ca') === true, 'CORS permits https://theinclusionproject.ca');
+  assert(isAllowedOrigin('https://www.theinclusionproject.ca') === true, 'CORS permits https://www.theinclusionproject.ca');
+  assert(isAllowedOrigin('https://crm.theinclusionproject.ca') === true, 'CORS permits https://crm.theinclusionproject.ca');
+  assert(isAllowedOrigin('https://evil-attacker.com') === false, 'CORS strictly rejects unapproved origin');
+
+  // 4. vercel.json Production Security Headers Configuration
+  const vercelJsonPath = path.resolve(process.cwd(), 'vercel.json');
+  assert(fs.existsSync(vercelJsonPath), 'vercel.json exists');
+  const vercelConfig = JSON.parse(fs.readFileSync(vercelJsonPath, 'utf-8'));
+  assert(Array.isArray(vercelConfig.headers), 'vercel.json defines production security headers');
+  const vercelHeadersList = vercelConfig.headers[0]?.headers || [];
+  const headerKeys = vercelHeadersList.map((h: any) => h.key.toLowerCase());
+  assert(headerKeys.includes('x-content-type-options'), 'vercel.json includes X-Content-Type-Options');
+  assert(headerKeys.includes('x-frame-options'), 'vercel.json includes X-Frame-Options');
+  assert(headerKeys.includes('referrer-policy'), 'vercel.json includes Referrer-Policy');
+  assert(headerKeys.includes('permissions-policy'), 'vercel.json includes Permissions-Policy');
+  assert(headerKeys.includes('strict-transport-security'), 'vercel.json includes Strict-Transport-Security');
+
+  // 5. .env.example Documents All Server-Only and Client-Safe Keys
+  const envExampleContent = fs.readFileSync(path.resolve(process.cwd(), '.env.example'), 'utf-8');
+  assert(envExampleContent.includes('CSRF_SECRET='), '.env.example includes CSRF_SECRET placeholder');
+  assert(envExampleContent.includes('SESSION_SECRET='), '.env.example includes SESSION_SECRET placeholder');
+  assert(envExampleContent.includes('GEMINI_API_KEY='), '.env.example includes GEMINI_API_KEY placeholder');
+  assert(envExampleContent.includes('VITE_SUPABASE_URL='), '.env.example includes VITE_SUPABASE_URL placeholder');
+  assert(envExampleContent.includes('VITE_SUPABASE_ANON_KEY='), '.env.example includes VITE_SUPABASE_ANON_KEY placeholder');
+
+  // 6. Exclusion of Real Secrets from Source Code and Git
+  const gitignoreContent = fs.readFileSync(path.resolve(process.cwd(), '.gitignore'), 'utf-8');
+  assert(gitignoreContent.includes('.env'), '.gitignore excludes .env files');
+  assert(gitignoreContent.includes('dist/'), '.gitignore excludes production build artifacts');
+
+  // 7. Database Migration & RLS Completeness Verification
+  const rlsMigrationPath = path.resolve(process.cwd(), 'src/db/migrations/20261014_security_check_14_rls.sql');
+  assert(fs.existsSync(rlsMigrationPath), 'Comprehensive RLS migration file exists');
+  const rlsMigrationSql = fs.readFileSync(rlsMigrationPath, 'utf-8');
+  assert(rlsMigrationSql.includes('trg_prevent_self_elevation_users'), 'RLS migration includes database self-elevation prevention trigger');
+  assert(rlsMigrationSql.includes('ENABLE ROW LEVEL SECURITY'), 'RLS migration enables row level security');
+
   // --------------------------------------------------------------------------
   // Summary
   // --------------------------------------------------------------------------
@@ -1567,6 +2111,7 @@ async function runTests() {
   if (failedCount > 0) {
     process.exit(1);
   }
+  process.exit(0);
 }
 
 runTests().catch(err => {

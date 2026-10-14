@@ -666,7 +666,12 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const switchUser = (userId: string) => {
     const found = users.find(u => u.id === userId);
     if (found) {
+      // Clear previous user's transient action state to prevent cross-account execution
+      setPendingActionPreview(null);
       setCurrentUser(found);
+      try {
+        localStorage.setItem('tip_crm_auth_user_id_v2', found.id);
+      } catch {}
       logAction('Switched User', 'User Session', found.name, `Active role: ${found.roleId} (${found.title})`);
     }
   };

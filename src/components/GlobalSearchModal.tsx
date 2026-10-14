@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useCrm } from '../context/CrmContext';
-import { NavTab } from './Sidebar';
+import { NavTab } from '../types';
 
 interface GlobalSearchModalProps {
   isOpen: boolean;
