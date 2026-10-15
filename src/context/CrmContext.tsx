@@ -90,6 +90,7 @@ import { updateAiBudget } from '../lib/aiOrchestrator';
 import { validateBackupStructure } from '../lib/fileValidation';
 import { cacheResource, clearUserOfflineCache } from '../lib/offlineStorage';
 import { 
+  toValidUuid,
   DatabaseHealthService, 
   DatabaseReadinessReport,
   PeopleService, 
@@ -1344,11 +1345,12 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Tasks
   const addTask = (data: Omit<TaskItem, 'id' | 'createdAt'>): TaskItem => {
+    const taskId = toValidUuid();
     const newTask: TaskItem = {
       ...data,
       source: data.source || 'MANUAL',
       assignmentMethod: data.assignmentMethod || 'MANUAL',
-      id: 'tsk-' + Date.now(),
+      id: taskId,
       createdAt: new Date().toISOString().split('T')[0]
     };
     setTasks(prev => [newTask, ...prev]);
@@ -1365,19 +1367,25 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const toggleTaskStatus = (id: string) => {
-    let nextStatus: TaskStatus = 'To Do';
-    let nextCompletedAt: string | undefined = undefined;
+    const targetTask = tasks.find(t => t.id === id);
+    const nextStatus: TaskStatus = targetTask && targetTask.status === 'Completed' ? 'To Do' : 'Completed';
+    const nextCompletedAt: string | undefined = nextStatus === 'Completed' ? new Date().toISOString().split('T')[0] : undefined;
 
     setTasks(prev => prev.map(t => {
       if (t.id === id) {
-        nextStatus = t.status === 'Completed' ? 'To Do' : 'Completed';
-        nextCompletedAt = nextStatus === 'Completed' ? new Date().toISOString().split('T')[0] : undefined;
-        logAction(nextStatus === 'Completed' ? 'Task Completed' : 'Task Reopened', 'Task', t.title);
         return { ...t, status: nextStatus, completedAt: nextCompletedAt };
       }
       return t;
     }));
+
+    logAction(
+      nextStatus === 'Completed' ? 'Task Completed' : 'Task Reopened',
+      'Task',
+      targetTask ? targetTask.title : id
+    );
+
     incrementAiDataVersion();
+
     syncEngine.queueMutation({
       userId: currentUser.id,
       resource: 'tasks',
@@ -1572,7 +1580,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const post = posts.find(p => p.id === rule.postId);
 
       const newTask: TaskItem = {
-        id: 'tsk-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5),
+        id: toValidUuid(),
         title,
         description,
         owner: designatedUser ? designatedUser.name : (post ? post.name : 'Unassigned'),

@@ -714,16 +714,24 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
                           onClick={() => toggleTaskStatus(task.id)}
                           className={`w-5 h-5 rounded-md border flex items-center justify-center cursor-pointer transition-all ${
                             task.status === 'Completed'
-                              ? 'bg-primary border-primary text-primary-foreground'
-                              : 'border-input hover:border-primary bg-card'
+                              ? 'bg-emerald-600 border-emerald-600 text-white'
+                              : 'border-input hover:border-emerald-600 bg-card'
                           }`}
+                          title={task.status === 'Completed' ? 'Mark as Incomplete' : 'Mark as Done'}
                         >
-                          {task.status === 'Completed' && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                          {task.status === 'Completed' && <Check className="w-3.5 h-3.5 stroke-[3] text-white" />}
                         </button>
                         <div className="min-w-0">
-                          <p className={`text-xs font-semibold ${task.status === 'Completed' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-                            {task.title}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <p className={`text-xs font-semibold ${task.status === 'Completed' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+                              {task.title}
+                            </p>
+                            {task.status === 'Completed' && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                                Done
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[11px] text-muted-foreground">Due {task.dueDate} • Assigned to {task.owner}</p>
                         </div>
                       </div>

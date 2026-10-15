@@ -132,7 +132,7 @@ export class TasksService {
 
   static async getById(id: string): Promise<ServiceResult<TaskItem>> {
     if (!supabase) return err('Supabase client not configured', 'NOT_CONFIGURED', 503);
-    if (!isUuid(id)) return err('Invalid ID format', 'VALIDATION_ERROR', 400);
+    const validId = toValidUuid(id);
 
     try {
       const { data, error, status } = await supabase
@@ -157,7 +157,7 @@ export class TasksService {
           programs ( name ),
           events ( name )
         `)
-        .eq('id', id)
+        .eq('id', validId)
         .single();
 
       if (error) return err(error.message, error.code, status);
@@ -167,13 +167,13 @@ export class TasksService {
     }
   }
 
-  static async create(task: Omit<TaskItem, 'id' | 'createdAt'>, creatorId?: string): Promise<ServiceResult<TaskItem>> {
+  static async create(task: Omit<TaskItem, 'id' | 'createdAt'> & { id?: string }, creatorId?: string): Promise<ServiceResult<TaskItem>> {
     if (!supabase) return err('Supabase client not configured', 'NOT_CONFIGURED', 503);
     if (!task.title || task.title.trim().length === 0) return err('Task title is required', 'VALIDATION_ERROR', 400);
 
     try {
       const dbPayload = mapTaskToDb(task, creatorId);
-      dbPayload.id = toValidUuid();
+      dbPayload.id = toValidUuid(task.id);
 
       const { data, error, status } = await supabase
         .from('tasks')
@@ -206,7 +206,7 @@ export class TasksService {
 
   static async update(id: string, updates: Partial<TaskItem>): Promise<ServiceResult<TaskItem>> {
     if (!supabase) return err('Supabase client not configured', 'NOT_CONFIGURED', 503);
-    if (!isUuid(id)) return err('Invalid ID format', 'VALIDATION_ERROR', 400);
+    const validId = toValidUuid(id);
 
     try {
       const dbPayload = mapTaskToDb(updates);
@@ -215,7 +215,7 @@ export class TasksService {
       const { data, error, status } = await supabase
         .from('tasks')
         .update(dbPayload)
-        .eq('id', id)
+        .eq('id', validId)
         .select(`
           id,
           title,
@@ -249,13 +249,13 @@ export class TasksService {
 
   static async delete(id: string): Promise<ServiceResult<{ id: string; success: boolean }>> {
     if (!supabase) return err('Supabase client not configured', 'NOT_CONFIGURED', 503);
-    if (!isUuid(id)) return err('Invalid ID format', 'VALIDATION_ERROR', 400);
+    const validId = toValidUuid(id);
 
     try {
       const { error, status } = await supabase
         .from('tasks')
         .delete()
-        .eq('id', id);
+        .eq('id', validId);
 
       if (error) return err(error.message, error.code, status);
       return ok({ id, success: true });

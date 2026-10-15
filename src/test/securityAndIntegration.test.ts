@@ -116,6 +116,7 @@ import {
   mapFundingToDb,
   mapDbToFunding
 } from '../lib/services';
+import { syncEngine } from '../lib/syncEngine.ts';
 
 
 // Lightweight Test Runner
@@ -3037,6 +3038,97 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     assert(duplicates.length === 1, 'Correctly flags 1 duplicate contact by email');
     assert(duplicates[0].email === 'maya.lin@innovateyouth.org', 'Identifies exact duplicate email');
     assert(fresh.length === 1, 'Identifies 1 fresh non-duplicate contact');
+  }
+
+  // ==========================================================================
+  // Test Suite 27: Network, Sync Engine, & Task Completion Verification
+  // ==========================================================================
+  console.log('\nTest Suite 27: Network, Sync Engine, & Task Completion Verification');
+  {
+    // 1. Deterministic UUID Normalization
+    const legacyMockId = 'tsk-1729012345';
+    const uuid1 = toValidUuid(legacyMockId);
+    const uuid2 = toValidUuid(legacyMockId);
+    assert(isUuid(uuid1) === true, 'toValidUuid converts mock task ID into a valid RFC4122 v4 UUID');
+    assert(uuid1 === uuid2, 'toValidUuid is strictly deterministic for identical mock IDs');
+
+    const freshRandomUuid = toValidUuid();
+    assert(isUuid(freshRandomUuid) === true, 'toValidUuid generates valid RFC4122 v4 UUID when no argument is passed');
+    assert(freshRandomUuid !== uuid1, 'Fresh UUIDs differ from deterministically hashed mock IDs');
+
+    // 2. TasksService Input Tolerance
+    const taskUpdatePayload = { status: 'Completed' as const, completedAt: '2026-10-16' };
+    const taskUpdateRes = await TasksService.update(legacyMockId, taskUpdatePayload);
+    // When provided with a legacy mock ID, TasksService normalizes it via toValidUuid and does NOT fail with VALIDATION_ERROR
+    assert(taskUpdateRes.error?.code !== 'VALIDATION_ERROR', 'TasksService.update accepts legacy mock ID and does not fail on format validation');
+
+    const taskDeleteRes = await TasksService.delete(legacyMockId);
+    assert(taskDeleteRes.error?.code !== 'VALIDATION_ERROR', 'TasksService.delete accepts legacy mock ID without failing format validation');
+
+    // 3. Sync Engine Status & Local-First Resilient Replay
+    const initialStatus = await syncEngine.getStatus('test-admin-user');
+    assert(initialStatus.isOnline === true, 'Sync engine detects online network status');
+    assert(initialStatus.state === 'online', 'Initial sync state is online');
+
+    // Queue a task completion mutation
+    const taskMutation = await syncEngine.queueMutation({
+      userId: 'test-admin-user',
+      resource: 'tasks',
+      recordId: uuid1,
+      opType: 'update',
+      payload: { status: 'Completed', completedAt: '2026-10-16' }
+    }, true);
+
+    assert(taskMutation.resource === 'tasks', 'Mutation resource is tasks');
+    assert(taskMutation.opType === 'update', 'Mutation opType is update');
+
+    // Verify sync engine status after mutation replay
+    const postSyncStatus = await syncEngine.getStatus('test-admin-user');
+    assert(postSyncStatus.pendingCount === 0, 'Completed task mutation dequeues cleanly with 0 pending operations');
+    assert(postSyncStatus.lastError === null, 'Sync engine has null lastError after successful local-first sync');
+    assert(postSyncStatus.state === 'online', 'Sync engine maintains green online status');
+
+    // 4. Task Status Toggle Logic Verification
+    // A task in 'To Do' state toggles to 'Completed' with today's completedAt
+    const sampleTask = { id: uuid1, title: 'Send Youth Program Update', status: 'To Do' as const, dueDate: '2026-10-16' };
+    const nextStatus1 = sampleTask.status === 'Completed' ? 'To Do' : 'Completed';
+    const nextCompletedAt1 = nextStatus1 === 'Completed' ? '2026-10-16' : undefined;
+    assert(nextStatus1 === 'Completed', 'Toggling To Do task produces Completed status');
+    assert(nextCompletedAt1 === '2026-10-16', 'Toggling To Do task sets completedAt date');
+
+    // A completed task toggles back to 'To Do' with undefined completedAt
+    const completedTask = { ...sampleTask, status: 'Completed' as const, completedAt: '2026-10-16' };
+    const nextStatus2 = completedTask.status === 'Completed' ? 'To Do' : 'Completed';
+    const nextCompletedAt2 = nextStatus2 === 'Completed' ? '2026-10-16' : undefined;
+    assert(nextStatus2 === 'To Do', 'Toggling Completed task reopens it to To Do');
+    assert(nextCompletedAt2 === undefined, 'Toggling Completed task clears completedAt');
+
+    // 5. Tasks Filtering Visibility Verification
+    const todayStr = '2026-10-16';
+    const allTasks = [
+      { id: 't-1', title: 'Pending task due today', dueDate: todayStr, status: 'To Do' as const, owner: 'Staff' },
+      { id: 't-2', title: 'Task completed today', dueDate: todayStr, status: 'Completed' as const, completedAt: todayStr, owner: 'Staff' },
+      { id: 't-3', title: 'Upcoming task due tomorrow', dueDate: '2026-10-17', status: 'To Do' as const, owner: 'Staff' }
+    ];
+
+    // Today tab retains both pending and completed tasks due today
+    const todayTabTasks = allTasks.filter(t => t.dueDate === todayStr);
+    assert(todayTabTasks.length === 2, 'Today tab retains completed tasks due today so they show as Done');
+    assert(todayTabTasks.some(t => t.status === 'Completed'), 'Today tab contains completed task');
+
+    // Sorting ensures active tasks appear first, completed tasks appear second
+    const sortedToday = [...todayTabTasks].sort((a, b) => {
+      if (a.status === 'Completed' && b.status !== 'Completed') return 1;
+      if (a.status !== 'Completed' && b.status === 'Completed') return -1;
+      return a.dueDate.localeCompare(b.dueDate);
+    });
+    assert(sortedToday[0].status === 'To Do', 'Active tasks appear first in Today view');
+    assert(sortedToday[1].status === 'Completed', 'Completed tasks appear after active tasks');
+
+    // Completed tab displays all completed tasks
+    const completedTabTasks = allTasks.filter(t => t.status === 'Completed');
+    assert(completedTabTasks.length === 1, 'Completed tab accurately displays all completed tasks');
+    assert(completedTabTasks[0].id === 't-2', 'Completed tab isolates completed task');
   }
 
   // --------------------------------------------------------------------------

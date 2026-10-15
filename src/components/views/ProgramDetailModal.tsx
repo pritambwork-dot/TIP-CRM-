@@ -530,12 +530,24 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
                         <button
                           type="button"
                           onClick={() => toggleTaskStatus(t.id)}
-                          className="w-4.5 h-4.5 rounded-md border border-zinc-300 flex items-center justify-center cursor-pointer transition-colors hover:border-[#140a8e]"
+                          className={`w-5 h-5 rounded-md border flex items-center justify-center cursor-pointer transition-colors ${
+                            t.status === 'Completed'
+                              ? 'bg-emerald-600 border-emerald-600 text-white'
+                              : 'border-zinc-300 hover:border-emerald-600'
+                          }`}
+                          title={t.status === 'Completed' ? 'Mark Incomplete' : 'Mark Done'}
                         >
-                          {t.status === 'Completed' && <Check className="w-3 h-3 text-[#ea0543] stroke-[3]" />}
+                          {t.status === 'Completed' && <Check className="w-3.5 h-3.5 stroke-[3] text-white" />}
                         </button>
                         <div>
-                          <p className={`text-xs font-semibold ${t.status === 'Completed' ? 'line-through text-zinc-400' : 'text-zinc-900'}`}>{t.title}</p>
+                          <div className="flex items-center gap-2">
+                            <p className={`text-xs font-semibold ${t.status === 'Completed' ? 'line-through text-zinc-400' : 'text-zinc-900'}`}>{t.title}</p>
+                            {t.status === 'Completed' && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                Done
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[11px] text-zinc-500">Due {t.dueDate} • {t.owner}</p>
                         </div>
                       </div>

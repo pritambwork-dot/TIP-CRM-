@@ -56,7 +56,24 @@ export function toValidUuid(id?: string | null): string {
     return id.trim().toLowerCase();
   }
 
-  // If modern crypto.randomUUID is available, use it
+  // Deterministically hash non-empty non-UUID strings into a consistent RFC4122 v4 UUID
+  if (id && typeof id === 'string' && id.trim().length > 0) {
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57, h3 = 0x9e3779b9, h4 = 0x85ebca6b;
+    const str = id.trim();
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+      h3 = Math.imul(h3 ^ ch, 3812015801);
+      h4 = Math.imul(h4 ^ ch, 2246822507);
+    }
+    const hex = (n: number) => (n >>> 0).toString(16).padStart(8, '0');
+    const full = hex(h1) + hex(h2) + hex(h3) + hex(h4);
+    // Format as 8-4-4-4-12 RFC4122 v4: 8-4-4(version 4)-4(variant a)-12
+    return `${full.substring(0, 8)}-${full.substring(8, 12)}-4${full.substring(13, 16)}-a${full.substring(17, 20)}-${full.substring(20, 32)}`;
+  }
+
+  // If modern crypto.randomUUID is available, use it for fresh ID generation
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }

@@ -89,14 +89,16 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
   const owners = Array.from(new Set(visibleTasks.map(t => t.owner).filter(Boolean)));
   const suggestedTasksCount = visibleTasks.filter(t => t.assignmentMethod === 'SUGGESTED' && t.status !== 'Completed').length;
+  const completedTasksCount = visibleTasks.filter(t => t.status === 'Completed').length;
+  const todayTasksCount = visibleTasks.filter(t => t.dueDate === today && t.status !== 'Completed').length;
 
   const filteredTasks = useMemo(() => {
-    return visibleTasks.filter(task => {
+    const list = visibleTasks.filter(task => {
       // Tab filter
       if (activeTab === 'Today') {
-        if (task.dueDate !== today || task.status === 'Completed') return false;
+        if (task.dueDate !== today) return false;
       } else if (activeTab === 'Upcoming') {
-        if (task.dueDate < today || task.status === 'Completed') return false;
+        if (task.dueDate < today) return false;
       } else if (activeTab === 'Suggested') {
         if (task.assignmentMethod !== 'SUGGESTED' || task.status === 'Completed') return false;
       } else if (activeTab === 'Completed') {
@@ -114,6 +116,17 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
       return true;
     });
+
+    // When viewing All, Today, or Upcoming, place active tasks first, followed by completed ones
+    if (activeTab !== 'Completed') {
+      return [...list].sort((a, b) => {
+        if (a.status === 'Completed' && b.status !== 'Completed') return 1;
+        if (a.status !== 'Completed' && b.status === 'Completed') return -1;
+        return a.dueDate.localeCompare(b.dueDate);
+      });
+    }
+
+    return list;
   }, [visibleTasks, activeTab, today, ownerFilter, priorityFilter, postFilter]);
 
   const handlePostSelectionChange = (postId: string) => {
@@ -249,11 +262,25 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   />
                 )}
                 <span className="relative z-10">{tab}</span>
+                {tab === 'Today' && todayTasksCount > 0 && (
+                  <span className={`relative z-10 text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    isActive ? 'bg-white text-rose-600' : 'bg-zinc-100 text-zinc-700'
+                  }`}>
+                    {todayTasksCount}
+                  </span>
+                )}
                 {tab === 'Suggested' && suggestedTasksCount > 0 && (
                   <span className={`relative z-10 text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                     isActive ? 'bg-white text-rose-600' : 'bg-amber-100 text-amber-800'
                   }`}>
                     {suggestedTasksCount}
+                  </span>
+                )}
+                {tab === 'Completed' && completedTasksCount > 0 && (
+                  <span className={`relative z-10 text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    isActive ? 'bg-white text-rose-600' : 'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {completedTasksCount}
                   </span>
                 )}
               </button>
@@ -332,12 +359,12 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       onClick={() => toggleTaskStatus(task.id)}
                       className={`mt-0.5 sm:mt-0 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 cursor-pointer transition-all ${
                         isDone 
-                          ? 'bg-primary border-primary text-primary-foreground scale-105' 
-                          : 'border-input hover:border-primary bg-card hover:scale-105'
+                          ? 'bg-emerald-600 border-emerald-600 text-white scale-105 shadow-2xs' 
+                          : 'border-input hover:border-emerald-600 bg-card hover:scale-105'
                       }`}
-                      title={isDone ? 'Mark uncompleted' : 'Mark completed'}
+                      title={isDone ? 'Mark as Incomplete' : 'Mark as Done'}
                     >
-                      {isDone && <Check className="w-3.5 h-3.5 stroke-[3] transition-transform" />}
+                      {isDone && <Check className="w-3.5 h-3.5 stroke-[3] transition-transform text-white" />}
                     </button>
 
                     <div className="min-w-0">
@@ -347,6 +374,14 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         }`}>
                           {task.title}
                         </p>
+
+                        {/* Explicit Done Badge */}
+                        {isDone && (
+                          <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800 text-[10px] font-bold flex items-center gap-1 shadow-2xs">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            Done
+                          </Badge>
+                        )}
 
                         {/* Post Badge */}
                         {task.assignedPostName && (
@@ -380,6 +415,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
                         <span>•</span>
                         <span className="font-medium text-foreground">{task.owner}</span>
+
+                        {isDone && task.completedAt && (
+                          <>
+                            <span>•</span>
+                            <span className="text-emerald-700 font-medium">Completed: {task.completedAt}</span>
+                          </>
+                        )}
 
                         {task.eventName && (
                           <>
