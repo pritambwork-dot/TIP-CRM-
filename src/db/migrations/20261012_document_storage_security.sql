@@ -66,7 +66,7 @@ CREATE POLICY documents_role_governed_view ON public.documents
       EXISTS (
         SELECT 1 FROM users u
         JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() 
+        WHERE u.auth_user_id = auth.uid()::text 
           AND ur.role_id IN ('super_admin', 'staff_manager')
       )
       OR
@@ -75,7 +75,7 @@ CREATE POLICY documents_role_governed_view ON public.documents
         EXISTS (
           SELECT 1 FROM users u
           JOIN user_roles ur ON ur.user_id = u.id
-          WHERE u.auth_user_id = auth.uid() 
+          WHERE u.auth_user_id = auth.uid()::text 
             AND ur.role_id = 'staff_member'
         )
         AND (is_confidential = FALSE OR access_tier IN ('all', 'staff'))
@@ -86,7 +86,7 @@ CREATE POLICY documents_role_governed_view ON public.documents
         EXISTS (
           SELECT 1 FROM users u
           JOIN user_roles ur ON ur.user_id = u.id
-          WHERE u.auth_user_id = auth.uid() 
+          WHERE u.auth_user_id = auth.uid()::text 
             AND ur.role_id = 'volunteer'
         )
         AND is_confidential = FALSE 
@@ -102,7 +102,7 @@ CREATE POLICY documents_staff_insert ON public.documents
     user_has_crm_access() AND EXISTS (
       SELECT 1 FROM users u
       JOIN user_roles ur ON ur.user_id = u.id
-      WHERE u.auth_user_id = auth.uid() 
+      WHERE u.auth_user_id = auth.uid()::text 
         AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
     )
   );
@@ -113,11 +113,11 @@ CREATE POLICY documents_owner_or_manager_modify ON public.documents
   FOR UPDATE USING (
     user_has_crm_access() AND (
       is_super_admin() OR
-      added_by = (SELECT id FROM users WHERE auth_user_id = auth.uid()) OR
+      added_by = (SELECT id FROM users WHERE auth_user_id = auth.uid()::text) OR
       EXISTS (
         SELECT 1 FROM users u
         JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND ur.role_id = 'staff_manager'
+        WHERE u.auth_user_id = auth.uid()::text AND ur.role_id = 'staff_manager'
       )
     )
   );
@@ -126,11 +126,11 @@ CREATE POLICY documents_owner_or_manager_delete ON public.documents
   FOR DELETE USING (
     user_has_crm_access() AND (
       is_super_admin() OR
-      added_by = (SELECT id FROM users WHERE auth_user_id = auth.uid()) OR
+      added_by = (SELECT id FROM users WHERE auth_user_id = auth.uid()::text) OR
       EXISTS (
         SELECT 1 FROM users u
         JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND ur.role_id = 'staff_manager'
+        WHERE u.auth_user_id = auth.uid()::text AND ur.role_id = 'staff_manager'
       )
     )
   );
@@ -139,6 +139,7 @@ CREATE POLICY documents_owner_or_manager_delete ON public.documents
 -- Enforce authorization directly on storage objects so knowledge of an object path does not bypass security.
 
 -- Storage Object SELECT (Download / Signed URL Generation)
+DROP POLICY IF EXISTS "tip_storage_private_select" ON storage.objects;
 CREATE POLICY "tip_storage_private_select" ON storage.objects
   FOR SELECT TO authenticated
   USING (
@@ -148,7 +149,7 @@ CREATE POLICY "tip_storage_private_select" ON storage.objects
       EXISTS (
         SELECT 1 FROM users u
         JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND ur.role_id IN ('super_admin', 'staff_manager')
+        WHERE u.auth_user_id = auth.uid()::text AND ur.role_id IN ('super_admin', 'staff_manager')
       ) OR
       -- Check corresponding document metadata record in public.documents
       EXISTS (
@@ -160,6 +161,7 @@ CREATE POLICY "tip_storage_private_select" ON storage.objects
   );
 
 -- Storage Object INSERT (Direct Upload)
+DROP POLICY IF EXISTS "tip_storage_private_insert" ON storage.objects;
 CREATE POLICY "tip_storage_private_insert" ON storage.objects
   FOR INSERT TO authenticated
   WITH CHECK (
@@ -168,12 +170,13 @@ CREATE POLICY "tip_storage_private_insert" ON storage.objects
     EXISTS (
       SELECT 1 FROM users u
       JOIN user_roles ur ON ur.user_id = u.id
-      WHERE u.auth_user_id = auth.uid() 
+      WHERE u.auth_user_id = auth.uid()::text 
         AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
     )
   );
 
 -- Storage Object DELETE
+DROP POLICY IF EXISTS "tip_storage_private_delete" ON storage.objects;
 CREATE POLICY "tip_storage_private_delete" ON storage.objects
   FOR DELETE TO authenticated
   USING (
@@ -183,7 +186,7 @@ CREATE POLICY "tip_storage_private_delete" ON storage.objects
       EXISTS (
         SELECT 1 FROM users u
         JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND ur.role_id = 'staff_manager'
+        WHERE u.auth_user_id = auth.uid()::text AND ur.role_id = 'staff_manager'
       )
     )
   );

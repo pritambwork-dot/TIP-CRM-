@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   CheckSquare, 
   Plus, 
@@ -90,29 +90,31 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const owners = Array.from(new Set(visibleTasks.map(t => t.owner).filter(Boolean)));
   const suggestedTasksCount = visibleTasks.filter(t => t.assignmentMethod === 'SUGGESTED' && t.status !== 'Completed').length;
 
-  const filteredTasks = visibleTasks.filter(task => {
-    // Tab filter
-    if (activeTab === 'Today') {
-      if (task.dueDate !== today || task.status === 'Completed') return false;
-    } else if (activeTab === 'Upcoming') {
-      if (task.dueDate < today || task.status === 'Completed') return false;
-    } else if (activeTab === 'Suggested') {
-      if (task.assignmentMethod !== 'SUGGESTED' || task.status === 'Completed') return false;
-    } else if (activeTab === 'Completed') {
-      if (task.status !== 'Completed') return false;
-    }
+  const filteredTasks = useMemo(() => {
+    return visibleTasks.filter(task => {
+      // Tab filter
+      if (activeTab === 'Today') {
+        if (task.dueDate !== today || task.status === 'Completed') return false;
+      } else if (activeTab === 'Upcoming') {
+        if (task.dueDate < today || task.status === 'Completed') return false;
+      } else if (activeTab === 'Suggested') {
+        if (task.assignmentMethod !== 'SUGGESTED' || task.status === 'Completed') return false;
+      } else if (activeTab === 'Completed') {
+        if (task.status !== 'Completed') return false;
+      }
 
-    // Owner filter
-    if (ownerFilter !== 'All' && task.owner !== ownerFilter) return false;
+      // Owner filter
+      if (ownerFilter !== 'All' && task.owner !== ownerFilter) return false;
 
-    // Priority filter
-    if (priorityFilter !== 'All' && task.priority !== priorityFilter) return false;
+      // Priority filter
+      if (priorityFilter !== 'All' && task.priority !== priorityFilter) return false;
 
-    // Post filter
-    if (postFilter !== 'All' && task.assignedPostId !== postFilter) return false;
+      // Post filter
+      if (postFilter !== 'All' && task.assignedPostId !== postFilter) return false;
 
-    return true;
-  });
+      return true;
+    });
+  }, [visibleTasks, activeTab, today, ownerFilter, priorityFilter, postFilter]);
 
   const handlePostSelectionChange = (postId: string) => {
     setNewAssignedPostId(postId);

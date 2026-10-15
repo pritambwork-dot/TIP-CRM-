@@ -3,13 +3,35 @@ import { AuthSession } from '../types';
 import { clientSafeLogger, mapToSafeErrorMessage } from './safeErrors';
 
 // Read optional environment variables
-const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+const SUPABASE_URL = 
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) ||
+  (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) ||
+  '';
+
+const SUPABASE_ANON_KEY = 
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ||
+  (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_ANON_KEY) ||
+  '';
+
+// Ensure Node.js environments without native WebSocket (Node < 22) have a safe fallback for RealtimeClient
+if (typeof window === 'undefined' && typeof globalThis !== 'undefined' && !globalThis.WebSocket) {
+  (globalThis as any).WebSocket = class MockWebSocket {
+    close() {}
+    send() {}
+  };
+}
 
 // If credentials exist, initialize real Supabase client
 export const supabase: SupabaseClient | null = 
   SUPABASE_URL && SUPABASE_ANON_KEY 
-    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) 
+    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          flowType: 'pkce'
+        }
+      }) 
     : null;
 
 const AUTH_STORAGE_KEY = 'tip_crm_supabase_auth_session';
@@ -21,22 +43,31 @@ const AUTH_STORAGE_KEY = 'tip_crm_supabase_auth_session';
  */
 export class SupabaseAuthEngine {
   private static listeners: Array<(session: AuthSession | null) => void> = [];
+  private static memorySession: AuthSession | null = null;
 
   static getStoredSession(): AuthSession | null {
     try {
-      const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw);
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      }
+      return this.memorySession;
     } catch {
-      return null;
+      return this.memorySession;
     }
   }
 
   static saveSession(session: AuthSession | null) {
-    if (session) {
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-    } else {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
+    this.memorySession = session;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        if (session) {
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+        } else {
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+        }
+      } catch {}
     }
     this.notifyListeners(session);
   }
@@ -56,24 +87,48 @@ export class SupabaseAuthEngine {
 
   /**
    * Google OAuth Flow
-   * Strictly verifies identity without requesting or collecting Google password.
+   * Initiates real Supabase Google OAuth redirect with minimum required profile and email scopes.
+   * If customEmail is provided (dev/testing), generates a verified local identity session.
    */
-  static async signInWithGoogle(customEmail?: string, customName?: string): Promise<AuthSession> {
-    // If real Supabase is configured:
-    if (supabase) {
+  static async signInWithGoogle(customEmail?: string, customName?: string): Promise<{
+    session?: AuthSession;
+    error?: string;
+    url?: string;
+  }> {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+
+    // If real Supabase is configured and no custom email override is passed:
+    if (supabase && !customEmail) {
       try {
-        await supabase.auth.signInWithOAuth({
+        const { data, error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
-            redirectTo: window.location.origin
+            redirectTo: `${origin}/`,
+            scopes: 'openid email profile',
+            queryParams: {
+              access_type: 'offline',
+              prompt: 'select_account'
+            }
           }
         });
-      } catch (err) {
-        clientSafeLogger.warn('Supabase OAuth redirected or failed, falling back to verified identity engine:', mapToSafeErrorMessage(err));
+
+        if (error) {
+          clientSafeLogger.warn('Supabase signInWithOAuth error:', mapToSafeErrorMessage(error));
+          return { error: error.message };
+        }
+
+        if (data?.url && typeof window !== 'undefined') {
+          window.location.assign(data.url);
+          return { url: data.url };
+        }
+        return { session: undefined };
+      } catch (err: any) {
+        clientSafeLogger.warn('Supabase OAuth error:', mapToSafeErrorMessage(err));
+        return { error: err?.message || 'Failed to initiate Google authentication.' };
       }
     }
 
-    // Authenticate verified Google Identity
+    // Authenticate verified Google Identity (for testing or when customEmail is provided)
     const email = customEmail?.trim().toLowerCase() || 'pritamb2k06@gmail.com';
     const name = customName || (email.includes('pritam') ? 'Pritam Biswas' : email.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase()));
     const authUserId = `auth-google-${btoa(email).replace(/=/g, '').slice(0, 16)}`;
@@ -92,7 +147,52 @@ export class SupabaseAuthEngine {
     };
 
     this.saveSession(session);
-    return session;
+    return { session };
+  }
+
+  /**
+   * Retrieve currently authenticated Supabase user from session, if any
+   */
+  static async getActiveSupabaseUser(): Promise<{
+    id: string;
+    email: string;
+    fullName: string;
+    avatarUrl?: string;
+  } | null> {
+    if (supabase) {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (!error && session?.user && session.user.email) {
+          const user = session.user;
+          const email = (user.email || '').toLowerCase().trim();
+          const fullName = user.user_metadata?.full_name || 
+                           user.user_metadata?.name || 
+                           email.split('@')[0];
+          const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture;
+
+          return {
+            id: user.id,
+            email,
+            fullName,
+            avatarUrl
+          };
+        }
+      } catch {
+        // Fall through to stored session
+      }
+    }
+
+    const stored = this.getStoredSession();
+    if (stored?.user?.email && typeof stored.expiresAt === 'number' && stored.expiresAt > Date.now()) {
+      return {
+        id: stored.user.id,
+        email: stored.user.email,
+        fullName: stored.user.fullName || stored.user.email.split('@')[0],
+        avatarUrl: stored.user.avatarUrl
+      };
+    }
+
+    return null;
   }
 
   /**

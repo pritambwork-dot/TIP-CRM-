@@ -4,34 +4,36 @@ import { CrmProvider, useCrm } from './context/CrmContext';
 import { AppleDock } from './components/AppleDock';
 import { NavTab } from './types';
 import { TopBar } from './components/TopBar';
-import { GlobalSearchModal } from './components/GlobalSearchModal';
-import { QuickActionModal, QuickActionType } from './components/QuickActionModal';
-import { ImportModal } from './components/ImportModal';
-import { OnboardingModal } from './components/OnboardingModal';
+import type { QuickActionType } from './components/QuickActionModal';
 import { LoginPage } from './components/auth/LoginPage';
-import { FirstLoginPasswordModal } from './components/auth/FirstLoginPasswordModal';
-import { WelcomeOnboardingModal } from './components/auth/WelcomeOnboardingModal';
 import { SupabaseAuthEngine } from './lib/supabase';
-
-
-// Views
-import { DashboardView } from './components/views/DashboardView';
-import { PeopleView } from './components/views/PeopleView';
-import { OrganizationsView } from './components/views/OrganizationsView';
-import { ProgramsView } from './components/views/ProgramsView';
-import { EventsView } from './components/views/EventsView';
-import { TasksView } from './components/views/TasksView';
-import { FundingView } from './components/views/FundingView';
-import { ReportsView } from './components/views/ReportsView';
-import { DocumentsView } from './components/views/DocumentsView';
-import { SettingsView } from './components/views/SettingsView';
-import { IntelligenceView } from './components/views/IntelligenceView';
-import { ErrorBoundary } from './components/common/ErrorBoundary';
-
-import { LandingPage } from './components/landing/LandingPage';
-import { TipIntelligenceDrawer } from './components/intelligence/TipIntelligenceDrawer';
+import { clearUserOfflineCache } from './lib/offlineStorage';
+import { ErrorBoundary, ViewLoadingSkeleton } from './components/common';
 import { MobileBottomNav } from './components/navigation/MobileBottomNav';
-import { MobileNavDrawer } from './components/navigation/MobileNavDrawer';
+
+// Route-based code-split lazy views for low-bandwidth and fast initial paint
+const DashboardView = React.lazy(() => import('./components/views/DashboardView').then(m => ({ default: m.DashboardView })));
+const PeopleView = React.lazy(() => import('./components/views/PeopleView').then(m => ({ default: m.PeopleView })));
+const OrganizationsView = React.lazy(() => import('./components/views/OrganizationsView').then(m => ({ default: m.OrganizationsView })));
+const ProgramsView = React.lazy(() => import('./components/views/ProgramsView').then(m => ({ default: m.ProgramsView })));
+const EventsView = React.lazy(() => import('./components/views/EventsView').then(m => ({ default: m.EventsView })));
+const TasksView = React.lazy(() => import('./components/views/TasksView').then(m => ({ default: m.TasksView })));
+const FundingView = React.lazy(() => import('./components/views/FundingView').then(m => ({ default: m.FundingView })));
+const ReportsView = React.lazy(() => import('./components/views/ReportsView').then(m => ({ default: m.ReportsView })));
+const DocumentsView = React.lazy(() => import('./components/views/DocumentsView').then(m => ({ default: m.DocumentsView })));
+const SettingsView = React.lazy(() => import('./components/views/SettingsView').then(m => ({ default: m.SettingsView })));
+const IntelligenceView = React.lazy(() => import('./components/views/IntelligenceView').then(m => ({ default: m.IntelligenceView })));
+
+// Lazy-loaded modals and ancillary views
+const LandingPage = React.lazy(() => import('./components/landing/LandingPage').then(m => ({ default: m.LandingPage })));
+const FirstLoginPasswordModal = React.lazy(() => import('./components/auth/FirstLoginPasswordModal').then(m => ({ default: m.FirstLoginPasswordModal })));
+const WelcomeOnboardingModal = React.lazy(() => import('./components/auth/WelcomeOnboardingModal').then(m => ({ default: m.WelcomeOnboardingModal })));
+const GlobalSearchModal = React.lazy(() => import('./components/GlobalSearchModal').then(m => ({ default: m.GlobalSearchModal })));
+const QuickActionModal = React.lazy(() => import('./components/QuickActionModal').then(m => ({ default: m.QuickActionModal })));
+const ImportModal = React.lazy(() => import('./components/ImportModal').then(m => ({ default: m.ImportModal })));
+const OnboardingModal = React.lazy(() => import('./components/OnboardingModal').then(m => ({ default: m.OnboardingModal })));
+const TipIntelligenceDrawer = React.lazy(() => import('./components/intelligence/TipIntelligenceDrawer').then(m => ({ default: m.TipIntelligenceDrawer })));
+const MobileNavDrawer = React.lazy(() => import('./components/navigation/MobileNavDrawer').then(m => ({ default: m.MobileNavDrawer })));
 
 // Auth storage keys
 const AUTH_STORAGE_KEY = 'tip_crm_auth_session_v2';
@@ -53,39 +55,148 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   const [initialCheckDone, setInitialCheckDone] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
 
-  // Check for existing session on mount (run strictly once on mount)
+  // Check for existing session or OAuth callback on mount
   useEffect(() => {
     // Purge legacy auto-login session keys to prevent dirty session leaks
     localStorage.removeItem('tip_crm_auth_session');
     localStorage.removeItem('tip_crm_auth_user_id');
 
-    const savedSession = localStorage.getItem(AUTH_STORAGE_KEY);
-    const savedUserId = localStorage.getItem(AUTH_USER_KEY);
+    const verifyAuthOnMount = async () => {
+      // 1. Check for OAuth callback error parameters in URL query or hash
+      if (typeof window !== 'undefined') {
+        const searchParams = new URLSearchParams(window.location.search);
+        const hashParams = new URLSearchParams(
+          window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash
+        );
+        const oauthError = 
+          hashParams.get('error_description') || 
+          searchParams.get('error_description') ||
+          hashParams.get('error') || 
+          searchParams.get('error');
 
-    if (savedSession === 'active' && savedUserId) {
-      const matchedUser = users.find(u => u.id === savedUserId);
-      if (
-        matchedUser && 
-        matchedUser.status !== 'disabled' && 
-        matchedUser.status !== 'rejected' && 
-        matchedUser.isActive !== false
-      ) {
-        if (currentUser?.id !== matchedUser.id) {
-          switchUser(matchedUser.id);
+        if (oauthError) {
+          const readableError = decodeURIComponent(oauthError.replace(/\+/g, ' '));
+          setAuthError(`Google authentication cancelled or failed: ${readableError}`);
+          window.history.replaceState({}, document.title, window.location.pathname);
+          setInitialCheckDone(true);
+          return;
         }
-        setIsAuthenticated(true);
+      }
+
+      // 2. Check for active Supabase Google OAuth session (callback or persisted)
+      try {
+        const supabaseUser = await SupabaseAuthEngine.getActiveSupabaseUser();
+        if (supabaseUser?.email) {
+          const targetEmail = supabaseUser.email.toLowerCase().trim();
+          let matchedUser = users.find(u => u.email.toLowerCase().trim() === targetEmail);
+
+          // Explicitly bind Google login for Pritam to Super Admin u-1
+          if (!matchedUser && (targetEmail === 'pritamb2k06@gmail.com' || targetEmail === 'pritam@gmail.com' || targetEmail.includes('pritam'))) {
+            matchedUser = users.find(u => u.id === 'u-1') || users[0];
+          }
+
+          if (!matchedUser) {
+            // Unapproved Google identity: revoke session and display access denial
+            await SupabaseAuthEngine.signOut();
+            localStorage.removeItem(AUTH_STORAGE_KEY);
+            localStorage.removeItem(AUTH_USER_KEY);
+            setAuthError(`Your Google account (${targetEmail}) was authenticated, but no approved TIP CRM profile was found. Please contact your administrator to request access.`);
+            setIsAuthenticated(false);
+            setInitialCheckDone(true);
+            if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            return;
+          }
+
+          if (matchedUser.status === 'rejected') {
+            await SupabaseAuthEngine.signOut();
+            localStorage.removeItem(AUTH_STORAGE_KEY);
+            localStorage.removeItem(AUTH_USER_KEY);
+            setAuthError('This account request was not approved. Please contact your CRM Administrator.');
+            setIsAuthenticated(false);
+            setInitialCheckDone(true);
+            if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            return;
+          }
+
+          if (matchedUser.status === 'disabled' || (matchedUser.status !== 'pending' && matchedUser.isActive === false)) {
+            await SupabaseAuthEngine.signOut();
+            localStorage.removeItem(AUTH_STORAGE_KEY);
+            localStorage.removeItem(AUTH_USER_KEY);
+            setAuthError('Your account has been deactivated. Please contact your CRM Administrator.');
+            setIsAuthenticated(false);
+            setInitialCheckDone(true);
+            if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            return;
+          }
+
+          if (matchedUser.status === 'pending' || matchedUser.adminApproved === false) {
+            await SupabaseAuthEngine.signOut();
+            localStorage.removeItem(AUTH_STORAGE_KEY);
+            localStorage.removeItem(AUTH_USER_KEY);
+            setAuthError('Your account is pending activation by an Administrator. Please check back later.');
+            setIsAuthenticated(false);
+            setInitialCheckDone(true);
+            if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            return;
+          }
+
+          // Approved active user: assign role, activate session
+          if (currentUser?.id !== matchedUser.id) {
+            switchUser(matchedUser.id);
+          }
+          localStorage.setItem(AUTH_STORAGE_KEY, 'active');
+          localStorage.setItem(AUTH_USER_KEY, matchedUser.id);
+          setIsAuthenticated(true);
+          setInitialCheckDone(true);
+          if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+          return;
+        }
+      } catch {
+        // Fallback to local session check
+      }
+
+      // 3. Local session check
+      const savedSession = localStorage.getItem(AUTH_STORAGE_KEY);
+      const savedUserId = localStorage.getItem(AUTH_USER_KEY);
+
+      if (savedSession === 'active' && savedUserId) {
+        const matchedUser = users.find(u => u.id === savedUserId);
+        if (
+          matchedUser && 
+          matchedUser.status !== 'disabled' && 
+          matchedUser.status !== 'rejected' && 
+          matchedUser.status !== 'pending' &&
+          matchedUser.isActive !== false
+        ) {
+          if (currentUser?.id !== matchedUser.id) {
+            switchUser(matchedUser.id);
+          }
+          setIsAuthenticated(true);
+        } else {
+          // Stale or revoked session
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          localStorage.removeItem(AUTH_USER_KEY);
+          setIsAuthenticated(false);
+        }
       } else {
-        // Stale or revoked session
-        localStorage.removeItem(AUTH_STORAGE_KEY);
-        localStorage.removeItem(AUTH_USER_KEY);
+        // STRICT NON-LEAK: Unauthenticated visitors MUST explicitly log in
         setIsAuthenticated(false);
       }
-    } else {
-      // STRICT NON-LEAK: Unauthenticated visitors MUST explicitly log in
-      setIsAuthenticated(false);
-    }
-    setInitialCheckDone(true);
-  }, []);
+      setInitialCheckDone(true);
+    };
+
+    verifyAuthOnMount();
+  }, [users, currentUser?.id, switchUser]);
 
 
   const handleEmailSignIn = useCallback((email: string, password: string) => {
@@ -160,52 +271,92 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     }, 600);
   }, [users, switchUser]);
 
-  const handleGoogleSignIn = useCallback((email?: string, name?: string) => {
+  const handleGoogleSignIn = useCallback(async (email?: string, name?: string) => {
     setAuthLoading(true);
     setAuthError(null);
 
-    setTimeout(() => {
-      const targetEmail = (email || '').toLowerCase().trim();
-      let matchedUser = users.find(u => u.email.toLowerCase().trim() === targetEmail);
-
-      // Explicitly bind Google login for Pritam to Super Admin u-1
-      if (!matchedUser && (targetEmail === 'pritamb2k06@gmail.com' || targetEmail === 'pritam@gmail.com' || targetEmail.includes('pritam'))) {
-        matchedUser = users.find(u => u.id === 'u-1') || users[0];
+    try {
+      const res = await SupabaseAuthEngine.signInWithGoogle(email, name);
+      if (res.error) {
+        setAuthError(res.error);
+        setAuthLoading(false);
+        return;
       }
 
-      if (matchedUser) {
-        if (matchedUser.status === 'disabled' || matchedUser.isActive === false) {
+      // If redirected to Google OAuth URL (res.url returned or window navigated), retain loading state
+      if (res.url) {
+        return;
+      }
+
+      // If session returned directly (testing / local verified identity)
+      const sessionUser = res.session?.user;
+      if (sessionUser) {
+        const targetEmail = sessionUser.email.toLowerCase().trim();
+        let matchedUser = users.find(u => u.email.toLowerCase().trim() === targetEmail);
+
+        // Explicitly bind Google login for Pritam to Super Admin u-1
+        if (!matchedUser && (targetEmail === 'pritamb2k06@gmail.com' || targetEmail === 'pritam@gmail.com' || targetEmail.includes('pritam'))) {
+          matchedUser = users.find(u => u.id === 'u-1') || users[0];
+        }
+
+        if (!matchedUser) {
+          await SupabaseAuthEngine.signOut();
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          localStorage.removeItem(AUTH_USER_KEY);
+          setAuthError(`Your Google account (${targetEmail}) was authenticated, but no approved TIP CRM profile was found. Please contact your administrator to request access.`);
+          setAuthLoading(false);
+          return;
+        }
+
+        if (matchedUser.status === 'rejected') {
+          await SupabaseAuthEngine.signOut();
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          localStorage.removeItem(AUTH_USER_KEY);
+          setAuthError('This account request was not approved. Please contact your CRM Administrator.');
+          setAuthLoading(false);
+          return;
+        }
+
+        if (matchedUser.status === 'disabled' || (matchedUser.status !== 'pending' && matchedUser.isActive === false)) {
+          await SupabaseAuthEngine.signOut();
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          localStorage.removeItem(AUTH_USER_KEY);
           setAuthError('Your account has been deactivated. Please contact your CRM Administrator.');
           setAuthLoading(false);
           return;
         }
-        if (matchedUser.status === 'pending') {
-          setAuthError('Your account is pending activation by an Administrator.');
-          setAuthLoading(false);
-          return;
-        }
-        if (matchedUser.status === 'rejected') {
-          setAuthError('This account request was declined.');
+
+        if (matchedUser.status === 'pending' || matchedUser.adminApproved === false) {
+          await SupabaseAuthEngine.signOut();
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          localStorage.removeItem(AUTH_USER_KEY);
+          setAuthError('Your account is pending activation by an Administrator. Please check back later.');
           setAuthLoading(false);
           return;
         }
 
+        // Successfully authenticated approved user
         switchUser(matchedUser.id);
         localStorage.setItem(AUTH_STORAGE_KEY, 'active');
         localStorage.setItem(AUTH_USER_KEY, matchedUser.id);
         setIsAuthenticated(true);
-      } else {
-        setAuthError(`No CRM account is linked to ${targetEmail}. Contact your admin to request access.`);
       }
+    } catch (err: any) {
+      setAuthError(err?.message || 'Google authentication failed.');
+    } finally {
       setAuthLoading(false);
-    }, 600);
+    }
   }, [users, switchUser]);
 
   const handleLogout = useCallback(async () => {
+    const currentUserId = currentUser?.id || localStorage.getItem(AUTH_USER_KEY);
     try {
       await SupabaseAuthEngine.signOut();
       if (typeof fetch !== 'undefined') {
         await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+      }
+      if (currentUserId) {
+        await clearUserOfflineCache(currentUserId).catch(() => {});
       }
     } finally {
       localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -218,7 +369,7 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
       setShowLogin(false);
       setAuthError(null);
     }
-  }, []);
+  }, [currentUser?.id]);
 
   // Show nothing during initial session check to avoid flash
   if (!initialCheckDone) {
@@ -231,7 +382,15 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
 
   if (!isAuthenticated) {
     if (!showLogin) {
-      return <LandingPage onOpenLogin={() => setShowLogin(true)} />;
+      return (
+        <React.Suspense fallback={
+          <div className="h-screen w-screen flex items-center justify-center bg-[#FBFBFA]">
+            <div className="w-6 h-6 border-2 border-zinc-300 border-t-zinc-900 rounded-full animate-spin" />
+          </div>
+        }>
+          <LandingPage onOpenLogin={() => setShowLogin(true)} />
+        </React.Suspense>
+      );
     }
 
     return (
@@ -248,12 +407,14 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   // Mandatory First Login Password Change Gate (Section 6 & 29)
   if (currentUser?.mustChangePassword) {
     return (
-      <FirstLoginPasswordModal
-        user={currentUser}
-        onSubmit={completeFirstLoginPasswordChange}
-        onSuccess={() => {}}
-        onLogout={handleLogout}
-      />
+      <React.Suspense fallback={null}>
+        <FirstLoginPasswordModal
+          user={currentUser}
+          onSubmit={completeFirstLoginPasswordChange}
+          onSuccess={() => {}}
+          onLogout={handleLogout}
+        />
+      </React.Suspense>
     );
   }
 
@@ -261,10 +422,12 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   return (
     <>
       {currentUser && currentUser.onboardingCompleted === false && (
-        <WelcomeOnboardingModal
-          user={currentUser}
-          onComplete={completeOnboarding}
-        />
+        <React.Suspense fallback={null}>
+          <WelcomeOnboardingModal
+            user={currentUser}
+            onComplete={completeOnboarding}
+          />
+        </React.Suspense>
       )}
       {React.Children.map(children, child => {
         if (React.isValidElement(child)) {
@@ -421,127 +584,141 @@ const MainLayout: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                 fallbackTitle={`${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Notice`}
                 fallbackMessage={`A rendering issue occurred while loading the ${activeTab} section. Your records remain completely safe. Click Retry to reload this section.`}
               >
-                {activeTab === 'dashboard' && (
-                  <DashboardView
-                    onNavigate={handleNavigate}
-                    onOpenQuickAction={handleOpenQuickAction}
-                    onOpenQuickNote={handleOpenQuickNote}
-                  />
-                )}
+                <React.Suspense fallback={<ViewLoadingSkeleton title={sectionTitles[activeTab]} />}>
+                  {activeTab === 'dashboard' && (
+                    <DashboardView
+                      onNavigate={handleNavigate}
+                      onOpenQuickAction={handleOpenQuickAction}
+                      onOpenQuickNote={handleOpenQuickNote}
+                    />
+                  )}
 
-                {activeTab === 'people' && (
-                  <PeopleView
-                    selectedPersonId={selectedPersonId}
-                    onSelectPerson={setSelectedPersonId}
-                    onNavigateToProgram={(id) => handleNavigate('programs', id)}
-                  />
-                )}
+                  {activeTab === 'people' && (
+                    <PeopleView
+                      selectedPersonId={selectedPersonId}
+                      onSelectPerson={setSelectedPersonId}
+                      onNavigateToProgram={(id) => handleNavigate('programs', id)}
+                    />
+                  )}
 
-                {activeTab === 'organizations' && (
-                  <OrganizationsView
-                    selectedOrgId={selectedOrgId}
-                    onSelectOrg={setSelectedOrgId}
-                    onSelectPerson={(id) => handleNavigate('people', id)}
-                  />
-                )}
+                  {activeTab === 'organizations' && (
+                    <OrganizationsView
+                      selectedOrgId={selectedOrgId}
+                      onSelectOrg={setSelectedOrgId}
+                      onSelectPerson={(id) => handleNavigate('people', id)}
+                    />
+                  )}
 
-                {activeTab === 'programs' && (
-                  <ProgramsView
-                    selectedProgramId={selectedProgramId}
-                    onSelectProgram={setSelectedProgramId}
-                    onSelectPerson={(id) => handleNavigate('people', id)}
-                    onSelectEvent={(id) => handleNavigate('events', id)}
-                  />
-                )}
+                  {activeTab === 'programs' && (
+                    <ProgramsView
+                      selectedProgramId={selectedProgramId}
+                      onSelectProgram={setSelectedProgramId}
+                      onSelectPerson={(id) => handleNavigate('people', id)}
+                      onSelectEvent={(id) => handleNavigate('events', id)}
+                    />
+                  )}
 
-                {activeTab === 'events' && (
-                  <EventsView
-                    selectedEventId={selectedEventId}
-                    onSelectEvent={setSelectedEventId}
-                    onSelectPerson={(id) => handleNavigate('people', id)}
-                  />
-                )}
+                  {activeTab === 'events' && (
+                    <EventsView
+                      selectedEventId={selectedEventId}
+                      onSelectEvent={setSelectedEventId}
+                      onSelectPerson={(id) => handleNavigate('people', id)}
+                    />
+                  )}
 
-                {activeTab === 'tasks' && (
-                  <TasksView
-                    onSelectPerson={(id) => handleNavigate('people', id)}
-                    onSelectProgram={(id) => handleNavigate('programs', id)}
-                  />
-                )}
+                  {activeTab === 'tasks' && (
+                    <TasksView
+                      onSelectPerson={(id) => handleNavigate('people', id)}
+                      onSelectProgram={(id) => handleNavigate('programs', id)}
+                    />
+                  )}
 
-                {activeTab === 'funding' && (
-                  <FundingView
-                    onSelectPerson={(id) => handleNavigate('people', id)}
-                    onSelectProgram={(id) => handleNavigate('programs', id)}
-                  />
-                )}
+                  {activeTab === 'funding' && (
+                    <FundingView
+                      onSelectPerson={(id) => handleNavigate('people', id)}
+                      onSelectProgram={(id) => handleNavigate('programs', id)}
+                    />
+                  )}
 
-                {activeTab === 'reports' && (
-                  <ReportsView />
-                )}
+                  {activeTab === 'reports' && (
+                    <ReportsView />
+                  )}
 
-                {activeTab === 'intelligence' && (
-                  <IntelligenceView />
-                )}
+                  {activeTab === 'intelligence' && (
+                    <IntelligenceView />
+                  )}
 
-                {activeTab === 'documents' && (
-                  <DocumentsView />
-                )}
+                  {activeTab === 'documents' && (
+                    <DocumentsView />
+                  )}
 
-                {activeTab === 'settings' && (
-                  <SettingsView
-                    onOpenImport={() => setImportOpen(true)}
-                  />
-                )}
+                  {activeTab === 'settings' && (
+                    <SettingsView
+                      onOpenImport={() => setImportOpen(true)}
+                    />
+                  )}
+                </React.Suspense>
               </ErrorBoundary>
             </motion.div>
           </AnimatePresence>
         </main>
       </div>
 
-      {/* Global Modals */}
-      <GlobalSearchModal
-        isOpen={searchOpen}
-        onClose={() => setSearchOpen(false)}
-        onNavigate={handleNavigate}
-      />
+      {/* Global Modals loaded lazily on demand */}
+      <React.Suspense fallback={null}>
+        {searchOpen && (
+          <GlobalSearchModal
+            isOpen={searchOpen}
+            onClose={() => setSearchOpen(false)}
+            onNavigate={handleNavigate}
+          />
+        )}
 
-      <QuickActionModal
-        isOpen={quickActionOpen}
-        onClose={() => setQuickActionOpen(false)}
-        onTriggerAction={handleQuickAction}
-        initialMode={quickActionInitialMode}
-        initialPersonId={quickActionPersonId}
-        onNavigateToPerson={(personId) => handleNavigate('people', personId)}
-      />
+        {quickActionOpen && (
+          <QuickActionModal
+            isOpen={quickActionOpen}
+            onClose={() => setQuickActionOpen(false)}
+            onTriggerAction={handleQuickAction}
+            initialMode={quickActionInitialMode}
+            initialPersonId={quickActionPersonId}
+            onNavigateToPerson={(personId) => handleNavigate('people', personId)}
+          />
+        )}
 
-      <ImportModal
-        isOpen={importOpen}
-        onClose={() => setImportOpen(false)}
-      />
+        {importOpen && (
+          <ImportModal
+            isOpen={importOpen}
+            onClose={() => setImportOpen(false)}
+          />
+        )}
 
-      <OnboardingModal
-        isOpen={onboardingOpen}
-        onClose={() => setOnboardingOpen(false)}
-        onNavigate={handleNavigate}
-        onOpenImport={() => setImportOpen(true)}
-      />
+        {onboardingOpen && (
+          <OnboardingModal
+            isOpen={onboardingOpen}
+            onClose={() => setOnboardingOpen(false)}
+            onNavigate={handleNavigate}
+            onOpenImport={() => setImportOpen(true)}
+          />
+        )}
 
-      {/* TIP Intelligence Proactive Work Companion Drawer */}
-      <TipIntelligenceDrawer
-        currentView={activeTab}
-        onNavigate={(tab, id) => handleNavigate(tab as NavTab, id)}
-      />
+        {/* TIP Intelligence Proactive Work Companion Drawer */}
+        <TipIntelligenceDrawer
+          currentView={activeTab}
+          onNavigate={(tab, id) => handleNavigate(tab as NavTab, id)}
+        />
 
-      {/* Mobile Navigation Drawer (Full CRM menu + role switching + workflow guide) */}
-      <MobileNavDrawer
-        isOpen={mobileDrawerOpen}
-        onClose={() => setMobileDrawerOpen(false)}
-        activeTab={activeTab}
-        onTabChange={handleNavigate}
-        onOpenOnboarding={() => setOnboardingOpen(true)}
-        onLogout={onLogout}
-      />
+        {/* Mobile Navigation Drawer (Full CRM menu + role switching + workflow guide) */}
+        {mobileDrawerOpen && (
+          <MobileNavDrawer
+            isOpen={mobileDrawerOpen}
+            onClose={() => setMobileDrawerOpen(false)}
+            activeTab={activeTab}
+            onTabChange={handleNavigate}
+            onOpenOnboarding={() => setOnboardingOpen(true)}
+            onLogout={onLogout}
+          />
+        )}
+      </React.Suspense>
 
       {/* Mobile Bottom Navigation Bar (Thumb friendly, hidden on md+) */}
       <MobileBottomNav

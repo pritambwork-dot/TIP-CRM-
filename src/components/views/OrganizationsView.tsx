@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Building2, 
   Search, 
@@ -60,15 +60,26 @@ export const OrganizationsView: React.FC<OrganizationsViewProps> = ({
   const [newProvince, setNewProvince] = useState('ON');
   const [newNotes, setNewNotes] = useState('');
 
-  const filteredOrgs = organizations.filter(org => {
-    const matchesFilter = selectedFilter === 'All' ? true : org.type === selectedFilter;
-    const q = searchQuery.toLowerCase().trim();
-    const matchesQuery = q === '' ? true : 
-      org.name.toLowerCase().includes(q) ||
-      org.sector.toLowerCase().includes(q) ||
-      (org.city && org.city.toLowerCase().includes(q));
-    return matchesFilter && matchesQuery;
-  });
+  const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 150);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const filteredOrgs = useMemo(() => {
+    const q = debouncedQuery.toLowerCase().trim();
+    return organizations.filter(org => {
+      const matchesFilter = selectedFilter === 'All' ? true : org.type === selectedFilter;
+      if (!matchesFilter) return false;
+      if (q === '') return true;
+      return (
+        org.name.toLowerCase().includes(q) ||
+        org.sector.toLowerCase().includes(q) ||
+        (org.city && org.city.toLowerCase().includes(q))
+      );
+    });
+  }, [organizations, selectedFilter, debouncedQuery]);
 
   const handleCreateOrg = (e: React.FormEvent) => {
     e.preventDefault();

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { 
   Sparkles, 
   Upload, 
@@ -43,6 +43,7 @@ import { useCrm } from '../../context/CrmContext';
 import { parseCsvText, profileDataset, CANONICAL_CRM_FIELDS } from '../../lib/dataProfiler';
 import { cleanDataset } from '../../lib/dataCleaner';
 import { runDeterministicAnalytics } from '../../lib/analyticsEngine';
+import { generateDeterministicGroundedAnalysis } from '../../lib/groundingProtocol';
 import { DEMO_DATASETS, DemoDatasetInfo } from '../../data/demoDatasets';
 import { 
   DataQualityReport, 
@@ -75,7 +76,7 @@ const PIE_CHART_MARGIN = { top: 5, right: 5, left: 5, bottom: 5 };
 
 
 export const IntelligenceView: React.FC = () => {
-  const { currentUser, programs, events, participants, funding, people, hasPermission } = useCrm();
+  const { currentUser, programs, events, participants, funding, people, tasks, hasPermission } = useCrm();
 
   // Navigation tab inside Intelligence: 'analyzer' | 'ask_data' | 'suggestions' | 'history'
   const [activeTab, setActiveTab] = useState<'analyzer' | 'ask_data' | 'suggestions' | 'history'>('suggestions');
@@ -99,6 +100,12 @@ export const IntelligenceView: React.FC = () => {
   const [aiInsights, setAiInsights] = useState<AnalysisInsight[]>([]);
   const [aiCaveats, setAiCaveats] = useState<string[]>([]);
   const [isAiFallback, setIsAiFallback] = useState(false);
+
+  // Deterministic grounded facts & insights derived directly from verified evidence
+  const activeGroundedFallback = useMemo(() => {
+    if (!analyticsResult) return null;
+    return generateDeterministicGroundedAnalysis(analyticsResult.structuredPayloadForAi, datasetName);
+  }, [analyticsResult, datasetName]);
 
   // Drag and drop state
   const [isDragging, setIsDragging] = useState(false);
@@ -152,6 +159,14 @@ export const IntelligenceView: React.FC = () => {
     setHeaders(hList);
     setRawRows(rows);
 
+    // Invalidate and reset prior dataset analytics to prevent stale bleed-through
+    setAnalyticsResult(null);
+    setHasAiInsightsBeenRequested(false);
+    setAiSummary('');
+    setAiInsights([]);
+    setAiCaveats([]);
+    setIsAiFallback(false);
+
     const { mappings: mapList, qualityReport: qReport } = profileDataset(hList, rows);
     setMappings(mapList);
     setQualityReport(qReport);
@@ -161,6 +176,15 @@ export const IntelligenceView: React.FC = () => {
   // Handle file upload
   const handleFileUpload = (file: File) => {
     setDatasetName(file.name);
+
+    // Invalidate and reset prior dataset analytics to prevent stale bleed-through
+    setAnalyticsResult(null);
+    setHasAiInsightsBeenRequested(false);
+    setAiSummary('');
+    setAiInsights([]);
+    setAiCaveats([]);
+    setIsAiFallback(false);
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
@@ -231,38 +255,23 @@ export const IntelligenceView: React.FC = () => {
       setIsAiFallback(Boolean(aiData.fallbackDeterministic));
     } catch (err) {
       console.warn('AI fetch error, using client-side deterministic fallback:', err);
-      // Fallback cleanly to deterministic insights
-      setAiSummary(analyticsResult.structuredPayloadForAi.summary);
-      setAiInsights([
-        {
-          id: 'ins-1',
-          analysisResultId: 'res-1',
-          insightType: 'finding',
-          category: 'observed',
-          title: 'Validated Arithmetic Findings',
-          description: analyticsResult.structuredPayloadForAi.summary,
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'ins-2',
-          analysisResultId: 'res-1',
-          insightType: 'trend',
-          category: 'interpretation',
-          title: 'Participation Stability',
-          description: 'Calculations demonstrate steady engagement across scheduled cohort activities.',
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'ins-3',
-          analysisResultId: 'res-1',
-          insightType: 'recommendation',
-          category: 'action',
-          title: 'Operational Follow-Up',
-          description: 'Review unattended registrations and ensure pre-event check-in communication is active.',
-          recommendation: 'Establish automated reminder emails 24 hours prior to workshop dates.',
-          createdAt: new Date().toISOString()
-        }
-      ]);
+      // Fallback cleanly to deterministic insights grounded strictly in the verified evidence
+      const grounded = generateDeterministicGroundedAnalysis(
+        analyticsResult.structuredPayloadForAi,
+        datasetName
+      );
+      setAiSummary(grounded.summary || analyticsResult.structuredPayloadForAi.summary);
+      setAiInsights(grounded.insights.map((ins, idx) => ({
+        id: `fallback-ins-${idx}`,
+        analysisResultId: 'res-1',
+        insightType: ins.type,
+        category: ins.category,
+        title: ins.title,
+        description: ins.description,
+        recommendation: ins.recommendation,
+        createdAt: new Date().toISOString()
+      })));
+      setAiCaveats(grounded.caveats || []);
       setIsAiFallback(true);
     } finally {
       setAiLoading(false);
@@ -276,9 +285,9 @@ export const IntelligenceView: React.FC = () => {
     setQueryLoading(true);
 
     // Compute live CRM summary facts deterministically
-    const totalFundingAmount = funding.reduce((acc, f) => acc + f.amountCad, 0);
+    const totalFundingAmount = funding.reduce((acc, f) => acc + (f.amountCad || 0), 0);
     const attendedCount = participants.filter(p => p.status === 'Attended').length;
-    const avgAttendance = participants.length > 0 ? `${Math.round((attendedCount / participants.length) * 100)}%` : '78.4%';
+    const avgAttendance = participants.length > 0 ? `${Math.round((attendedCount / participants.length) * 100)}%` : '0%';
 
     const crmSummary = {
       peopleCount: people.length,
@@ -287,8 +296,8 @@ export const IntelligenceView: React.FC = () => {
       participantsCount: participants.length,
       avgAttendance,
       totalFunding: totalFundingAmount,
-      fundersCount: new Set(funding.map(f => f.donorOrFunder)).size,
-      tasksCount: 15
+      fundersCount: new Set(funding.map(f => f.funderName || f.donorOrFunder).filter(Boolean)).size,
+      tasksCount: tasks?.length ?? 0
     };
 
     try {
@@ -312,10 +321,10 @@ export const IntelligenceView: React.FC = () => {
       // Fallback
       setQueryHistory(prev => [{
         question: q,
-        interpretedIntent: 'Operational inquiry on CRM data',
+        interpretedIntent: 'Operational inquiry on CRM data (deterministic fallback)',
         authorized: true,
-        calculationFact: `Overall CRM record count: ${people.length} contacts across ${programs.length} active initiatives.`,
-        aiExplanation: `Operational engagement remains active across Vancouver and regional community programs.`,
+        calculationFact: `Overall CRM record count: ${people.length} contacts across ${programs.length} active initiatives with ${avgAttendance} recorded attendance.`,
+        aiExplanation: `Operational metrics derived deterministically from authorized CRM records.`,
         suggestedAction: 'Review follow-ups in the Operations section.'
       }, ...prev]);
       setUserQuery('');
@@ -957,15 +966,18 @@ export const IntelligenceView: React.FC = () => {
                       <span className="w-2 h-2 rounded-full bg-blue-600"></span>
                       <span>Observed Facts</span>
                     </div>
-                    {aiInsights.filter(i => i.category === 'observed' || !i.category).slice(0, 2).map((ins, idx) => (
+                    {aiInsights.filter(i => i.category === 'observed' || !i.category).slice(0, 3).map((ins, idx) => (
                       <div key={idx} className="space-y-1">
                         <h5 className="text-xs font-semibold text-zinc-800">{ins.title}</h5>
                         <p className="text-xs text-zinc-600 leading-relaxed">{ins.description}</p>
                       </div>
                     ))}
-                    {aiInsights.filter(i => i.category === 'observed').length === 0 && (
-                      <p className="text-xs text-zinc-500">Calculations reflect empirical attendance and distribution counts verified by the math engine.</p>
-                    )}
+                    {aiInsights.length === 0 && activeGroundedFallback?.observed_facts.slice(0, 3).map((f, idx) => (
+                      <div key={idx} className="space-y-1">
+                        <h5 className="text-xs font-semibold text-zinc-800">{f.title}</h5>
+                        <p className="text-xs text-zinc-600 leading-relaxed">{f.fact}</p>
+                      </div>
+                    ))}
                   </div>
 
                   {/* Category 2: Interpretation & Trends */}
@@ -974,15 +986,18 @@ export const IntelligenceView: React.FC = () => {
                       <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                       <span>Interpretation & Patterns</span>
                     </div>
-                    {aiInsights.filter(i => i.category === 'interpretation').slice(0, 2).map((ins, idx) => (
+                    {aiInsights.filter(i => i.category === 'interpretation').slice(0, 3).map((ins, idx) => (
                       <div key={idx} className="space-y-1">
                         <h5 className="text-xs font-semibold text-amber-950">{ins.title}</h5>
                         <p className="text-xs text-amber-900 leading-relaxed">{ins.description}</p>
                       </div>
                     ))}
-                    {aiInsights.filter(i => i.category === 'interpretation').length === 0 && (
-                      <p className="text-xs text-amber-800">Patterns suggest cohort engagement remains highest in multi-session youth initiatives.</p>
-                    )}
+                    {aiInsights.length === 0 && activeGroundedFallback?.interpretations.slice(0, 3).map((p, idx) => (
+                      <div key={idx} className="space-y-1">
+                        <h5 className="text-xs font-semibold text-amber-950">{p.title}</h5>
+                        <p className="text-xs text-amber-900 leading-relaxed">{p.pattern}</p>
+                      </div>
+                    ))}
                   </div>
 
                   {/* Category 3: Suggested Actions */}
@@ -991,7 +1006,7 @@ export const IntelligenceView: React.FC = () => {
                       <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
                       <span>Suggested Actions</span>
                     </div>
-                    {aiInsights.filter(i => i.category === 'action').slice(0, 2).map((ins, idx) => (
+                    {aiInsights.filter(i => i.category === 'action').slice(0, 3).map((ins, idx) => (
                       <div key={idx} className="space-y-1">
                         <h5 className="text-xs font-semibold text-emerald-950">{ins.title}</h5>
                         <p className="text-xs text-emerald-900 leading-relaxed">{ins.description}</p>
@@ -1002,17 +1017,23 @@ export const IntelligenceView: React.FC = () => {
                         )}
                       </div>
                     ))}
-                    {aiInsights.filter(i => i.category === 'action').length === 0 && (
-                      <p className="text-xs text-emerald-800">Consider conducting brief exit surveys for participants who registered but did not attend.</p>
-                    )}
+                    {aiInsights.length === 0 && activeGroundedFallback?.recommendations.slice(0, 3).map((r, idx) => (
+                      <div key={idx} className="space-y-1">
+                        <h5 className="text-xs font-semibold text-emerald-950">{r.title}</h5>
+                        <p className="text-xs text-emerald-900 leading-relaxed">{r.rationale}</p>
+                        <div className="text-[11px] font-medium text-emerald-800 pt-1">
+                          Action: {r.suggestion}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
                 {/* Caveats and Data Quality Notes */}
-                {aiCaveats.length > 0 && (
+                {(aiCaveats.length > 0 || (activeGroundedFallback?.limitations && activeGroundedFallback.limitations.length > 0)) && (
                   <div className="pt-3 border-t border-zinc-100 text-xs text-zinc-400 space-y-1">
                     <span className="font-semibold text-zinc-500">Sampling & Data Quality Considerations:</span>
-                    {aiCaveats.map((c, i) => (
+                    {(aiCaveats.length > 0 ? aiCaveats : (activeGroundedFallback?.limitations || [])).map((c, i) => (
                       <div key={i}>• {c}</div>
                     ))}
                   </div>

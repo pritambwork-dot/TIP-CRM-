@@ -31,3 +31,9 @@ serviceAccountKey.json
 secrets.*
 *.cert
 *.crt
+
+# Local scratch scripts (may contain hardcoded credentials)
+scratch/
+
+# Ephemeral server-side logs (lost on serverless redeploy)
+server/audit_logs.jsonl

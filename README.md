@@ -310,10 +310,54 @@ The application strictly separates **server-only secrets** (isolated to Node.js)
 ## 8. Authentication and Authorization
 
 ### Authentication Model
-The application implements a secure **AuthGate** with two verified authentication paths:
-1. **Google OAuth**: One-click verified identity login delegating identity verification to Google.
-2. **Email & Password**: Secondary direct credentials for team members.
+The application implements an enterprise **AuthGate** with two verified authentication paths and strict CRM access controls:
+1. **Google OAuth 2.0**: Enterprise identity verification via Supabase Auth and Google Cloud Console.
+   - **Minimum Scopes**: Explicitly restricted to `openid email profile`. Never requests sensitive drive, contacts, or calendar permissions.
+   - **Account Selection**: Enforces `prompt: 'select_account'` and `access_type: 'offline'`.
+   - **PKCE Flow**: Secure proof-key-for-code-exchange (`flowType: 'pkce'`) prevents credential interception.
+2. **Email & Password**: Secondary direct credentials for team members and admin fallback.
 3. **First-Login Password Gate**: Admin-provisioned users with temporary credentials (`mustChangePassword: true`) are intercepted by [`FirstLoginPasswordModal.tsx`](src/components/auth/FirstLoginPasswordModal.tsx) and forced to set a private password before accessing CRM records.
+
+### Google OAuth Configuration & Setup Guide
+
+To connect Google OAuth in local development or production:
+
+#### 1. Google Cloud Console Setup
+1. Navigate to **Google Cloud Console** → **APIs & Services** → **Credentials**.
+2. Configure **OAuth Consent Screen** (User Type: External, Scopes: `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile`).
+3. Create **OAuth 2.0 Client ID** (Application type: *Web application*).
+4. Add **Authorized JavaScript Origins**:
+   - `http://localhost:3000`
+   - `http://localhost:5173`
+   - `https://crm.theinclusionproject.ca`
+   - `https://theinclusionproject.ca`
+   - `https://osbsacgmjkqyfkjdeten.supabase.co`
+5. Add **Authorized Redirect URIs**:
+   - `https://osbsacgmjkqyfkjdeten.supabase.co/auth/v1/callback`
+   *(Replace with your project reference if deploying to your own Supabase instance)*.
+6. Copy the generated **Client ID** and **Client Secret**.
+
+#### 2. Supabase Dashboard Configuration
+1. Open **Supabase Dashboard** → **Authentication** → **Providers** → **Google**.
+2. Toggle Google to **Enabled**.
+3. Paste the **Client ID** and **Client Secret** obtained from Google Cloud Console.
+4. Navigate to **Authentication** → **URL Configuration**:
+   - Set **Site URL**: `http://localhost:3000/` (or production URL).
+   - Add **Redirect URLs**:
+     - `http://localhost:3000/**`
+     - `http://localhost:5173/**`
+     - `https://crm.theinclusionproject.ca/**`
+     - `https://theinclusionproject.ca/**`
+
+#### 3. Strict TIP CRM RBAC & Access Approval Enforcement
+Google OAuth verifies *identity*, but does **NOT** grant automatic CRM access:
+- **Zero Auto-Registration**: An unknown Google user receives a secure 403 access denial screen with no session created.
+- **Account Status Validation**:
+  - **Unapproved / Stranger**: Blocked with polite request access notice; logged in audit trail as `AUTH_LOGIN_FAILED`.
+  - **Pending Approval** (`status: 'pending'`): Blocked until activated by a Super Admin.
+  - **Deactivated** (`status: 'disabled'` / `isActive: false`): Blocked from all protected views and data.
+  - **Rejected** (`status: 'rejected'`): Blocked with contact administrator notice.
+- **Role Binding (No Privilege Elevation)**: Approved users log in with their exact assigned role (`staff_manager`, `staff_member`, `volunteer`). A Google sign-in is **never** elevated to `super_admin` unless explicitly provisioned in CRM records.
 
 ### Four-Level Role Hierarchy
 Defined in [`src/lib/permissions.ts`](src/lib/permissions.ts):

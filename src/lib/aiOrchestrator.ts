@@ -137,13 +137,16 @@ export async function askNaturalLanguageDataQuery(
 
     return await res.json();
   } catch (err: any) {
-    console.warn('AI Query failed, providing fallback answer:', err);
+    console.warn('AI Query failed, providing grounded fallback answer:', err);
+    const avgAttendance = crmSummary?.avgAttendance || '0%';
+    const progCount = crmSummary?.programsCount ?? 0;
+    const peopleCount = crmSummary?.peopleCount ?? 0;
     return {
       question,
-      interpretedIntent: 'Query of operational CRM records',
+      interpretedIntent: 'Query of operational CRM records (deterministic fallback)',
       authorized: true,
-      calculationFact: `Overall attendance is ${crmSummary.avgAttendance || '78.4%'}, with ${crmSummary.programsCount || '8'} active programs.`,
-      aiExplanation: 'Participant engagement is highest in youth and equity cohorts across Ontario and federal partnerships.',
+      calculationFact: `Overall attendance is ${avgAttendance}, with ${peopleCount} contacts recorded across ${progCount} active programs.`,
+      aiExplanation: 'Operational metrics derived deterministically from authorized CRM records.',
       suggestedAction: 'Review program follow-ups in the Operations section.'
     };
   }

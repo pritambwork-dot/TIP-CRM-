@@ -1,3 +1,32 @@
+# CRITICAL SECURITY RULE — NEVER PUSH ENVIRONMENT FILES OR SECRETS TO GITHUB
+
+**NON-NEGOTIABLE INSTRUCTION**: This rule takes priority over all other implementation, testing, and deployment instructions.
+
+1. **NEVER COMMIT OR PUSH ENVIRONMENT FILES**: Under no circumstances should `.env`, `.env.local`, `.env.production`, `.env.development`, `.env.test`, or any other file containing real environment variables, credentials, API keys, passwords, tokens, or secrets ever be committed or pushed to Git or GitHub.
+2. **STRICT GITIGNORE EXCLUSION**: Ensure `.gitignore` continuously excludes:
+   - `.env`
+   - `.env.*`
+   - `.env.local`
+   - `.env.development.local`
+   - `.env.test.local`
+   - `.env.production.local`
+   - `*.pem`, `*.key`, `*.cert`, `credentials.json`, `serviceAccountKey.json`, `secrets.*`
+   - *Exception*: `!.env.example` may be allowed only when it contains placeholders and zero real credentials.
+3. **MANDATORY PRE-COMMIT & PRE-PUSH INSPECTION**: Before every commit or push, inspect:
+   - `git status`
+   - `git diff --cached`
+   - `git ls-files .env*` (must return only `.env.example`)
+   - `git check-ignore -v .env .env.local .env.production .env.development`
+4. **VERIFY NO STAGED SECRETS**: Verify that no environment file or secret-bearing file is staged or included in the outgoing commit.
+5. **UNTRACK ACCIDENTALLY COMMITTED FILES**: If an environment file is already tracked, remove it from Git tracking using `git rm --cached <file>`, while preserving the local file. Commit the removal before pushing.
+6. **NEVER PRINT SECRETS**: Never print real secrets in terminal output, logs, reports, screenshots, or commit messages.
+7. **PRESERVE LOCAL DEVELOPER ENVIRONMENT**: Never overwrite or delete the developer's local environment files while fixing Git configuration.
+8. **STOP AND REPORT PREVIOUS LEAKS**: If a secret was previously committed or pushed, stop and report it. Recommend immediate credential rotation and appropriate Git-history remediation.
+9. **ABORT ON VERIFICATION FAILURE**: Do not push if the repository's secret-safety checks fail or if the staged changes cannot be verified.
+10. **NO BYPASS OR FORCE-PUSH**: Do not disable existing security checks, force-push, or rewrite shared Git history without explicit authorization.
+
+---
+
 # Ponytail, lazy senior dev mode
 
 You are a lazy senior developer. Lazy means efficient, not careless. The best code is the code never written.

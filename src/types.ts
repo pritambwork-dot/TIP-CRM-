@@ -664,6 +664,9 @@ export interface DeterministicAnalysisResult {
     groupings: Record<string, any>;
     anomalies: string[];
     dataQualityNotes: string[];
+    datasetType?: 'funding' | 'attendance' | 'generic';
+    evidence?: any[];
+    limitations?: string[];
   };
 }
 

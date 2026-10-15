@@ -24,6 +24,29 @@ export default defineConfig(({ mode }) => {
     ],
     build: {
       sourcemap: false,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('html2canvas') || id.includes('jspdf')) {
+                return 'vendor-export';
+              }
+              if (id.includes('recharts') || id.includes('d3-') || id.includes('victory-vendor')) {
+                return 'vendor-charts';
+              }
+              if (id.includes('lucide-react')) {
+                return 'vendor-icons';
+              }
+              if (id.includes('motion')) {
+                return 'vendor-motion';
+              }
+              if (id.includes('@radix-ui')) {
+                return 'vendor-radix';
+              }
+            }
+          }
+        }
+      }
     },
     esbuild: {
       drop: isProd ? ['console', 'debugger'] : [],

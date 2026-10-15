@@ -115,43 +115,139 @@ export function parseCsvText(rawText: string): { headers: string[]; rows: Record
 
 // Canonical CRM Field Definitions for Column Intelligence (Section 8)
 export const CANONICAL_CRM_FIELDS = [
-  { id: 'person_name', label: 'Person Name', patterns: ['name', 'full_name', 'participant_name', 'attendee', 'individual', 'client'] },
-  { id: 'email', label: 'Email Address', patterns: ['email', 'email_address', 'mail', 'contact_email'] },
-  { id: 'phone', label: 'Phone Number', patterns: ['phone', 'phone_number', 'tel', 'mobile', 'cell'] },
-  { id: 'organization', label: 'Partner Organization', patterns: ['org', 'organization', 'company', 'agency', 'institution', 'partner'] },
-  { id: 'program', label: 'Program Name', patterns: ['program', 'program_name', 'cohort', 'initiative', 'track'] },
-  { id: 'event', label: 'Event / Session', patterns: ['event', 'event_name', 'workshop', 'session', 'activity', 'meeting'] },
-  { id: 'event_date', label: 'Event Date', patterns: ['date', 'event_date', 'session_date', 'date_of_event', 'timestamp'] },
-  { id: 'attendance_status', label: 'Attendance Status', patterns: ['attendance', 'attendance_status', 'attended', 'presence', 'check_in', 'rsvp_status'] },
-  { id: 'record_status', label: 'Status / Stage', patterns: ['status', 'stage', 'grant_status', 'deal_status', 'state', 'phase'] },
-  { id: 'role', label: 'Role / Relationship', patterns: ['role', 'relationship', 'type', 'category', 'participant_role'] },
-  { id: 'funding_amount', label: 'Funding Amount ($ CAD)', patterns: ['amount', 'amount_cad', 'funding', 'grant_amount', 'donation', 'contribution', 'value'] },
-  { id: 'donor', label: 'Donor / Funder', patterns: ['donor', 'funder', 'donor_name', 'funding_source', 'sponsor', 'source'] },
-  { id: 'location', label: 'Location / Venue', patterns: ['location', 'venue', 'city', 'province', 'room', 'address'] },
-  { id: 'notes', label: 'Notes & Follow-ups', patterns: ['notes', 'comments', 'details', 'feedback', 'summary'] }
+  { 
+    id: 'person_name', 
+    label: 'Person Name', 
+    patterns: ['name', 'full_name', 'fullname', 'participant_name', 'participantname', 'attendee', 'individual', 'client', 'contact_name'] 
+  },
+  { 
+    id: 'email', 
+    label: 'Email Address', 
+    patterns: ['email', 'email_address', 'emailaddress', 'mail', 'contact_email'] 
+  },
+  { 
+    id: 'phone', 
+    label: 'Phone Number', 
+    patterns: ['phone', 'phone_number', 'phonenumber', 'tel', 'telephone', 'mobile', 'cell'] 
+  },
+  { 
+    id: 'organization', 
+    label: 'Partner Organization', 
+    patterns: ['organization', 'partner_organization', 'org', 'company', 'agency', 'institution', 'partner'] 
+  },
+  { 
+    id: 'program', 
+    label: 'Program Name', 
+    patterns: ['program', 'program_name', 'programname', 'funded_program', 'cohort', 'initiative', 'track'] 
+  },
+  { 
+    id: 'event', 
+    label: 'Event / Session', 
+    patterns: ['event', 'event_name', 'eventname', 'workshop', 'session', 'session_name', 'activity', 'meeting'] 
+  },
+  { 
+    id: 'event_date', 
+    label: 'Event Date', 
+    patterns: ['contribution_date', 'contributiondate', 'grant_date', 'grantdate', 'funding_date', 'fundingdate', 'event_date', 'eventdate', 'session_date', 'date_of_event', 'date', 'timestamp'] 
+  },
+  { 
+    id: 'attendance_status', 
+    label: 'Attendance Status', 
+    patterns: ['attendance_status', 'attendancestatus', 'attendance', 'attended', 'presence', 'check_in', 'checkin', 'rsvp_status'] 
+  },
+  { 
+    id: 'record_status', 
+    label: 'Status / Stage', 
+    patterns: ['funding_status', 'fundingstatus', 'grant_status', 'grantstatus', 'deal_status', 'record_status', 'status', 'stage', 'state', 'phase'] 
+  },
+  { 
+    id: 'role', 
+    label: 'Role / Relationship', 
+    patterns: ['role', 'relationship', 'participant_role', 'category', 'funder_type', 'fundertype', 'funding_type', 'fundingtype', 'type'] 
+  },
+  { 
+    id: 'funding_amount', 
+    label: 'Funding Amount ($ CAD)', 
+    patterns: ['fundingcad', 'funding_cad', 'funding_amount', 'fundingamount', 'amount_cad', 'amountcad', 'grant_amount', 'grantamount', 'contribution_amount', 'contributionamount', 'contributioncad', 'contribution_cad', 'amount', 'funding', 'donation', 'contribution', 'value'] 
+  },
+  { 
+    id: 'donor', 
+    label: 'Donor / Funder', 
+    patterns: ['funder_name', 'fundername', 'donor_name', 'donorname', 'funding_source', 'fundingsource', 'funder', 'donor', 'sponsor', 'grantor', 'source'] 
+  },
+  { 
+    id: 'location', 
+    label: 'Location / Venue', 
+    patterns: ['location', 'venue', 'city', 'province', 'room', 'address'] 
+  },
+  { 
+    id: 'notes', 
+    label: 'Notes & Follow-ups', 
+    patterns: ['notes', 'comments', 'details', 'feedback', 'summary', 'description'] 
+  }
 ];
 
 /**
- * Infers the canonical CRM field for a given CSV column header
+ * Infers the canonical CRM field for a given CSV column header with disambiguation
  */
 export function inferColumnMapping(header: string): { fieldId: string; confidence: number } {
-  const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, '_').trim();
+  const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').trim();
+  const rawNoUnderscores = header.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
 
   // 1. Exact match check first across all fields
   for (const field of CANONICAL_CRM_FIELDS) {
     for (const pattern of field.patterns) {
-      if (normalized === pattern) {
+      const patNoUnder = pattern.replace(/_/g, '');
+      if (normalized === pattern || rawNoUnderscores === patNoUnder) {
         return { fieldId: field.id, confidence: 0.98 };
       }
     }
   }
 
-  // 2. Partial match check
+  // 2. Disambiguation rules for compound column names:
+  // - If column contains "status", prioritize Status fields over amount/date
+  if (normalized.includes('status')) {
+    if (normalized.includes('attend')) {
+      return { fieldId: 'attendance_status', confidence: 0.92 };
+    }
+    return { fieldId: 'record_status', confidence: 0.92 };
+  }
+
+  // - If column contains "date", prioritize Date field over amount/status
+  if (normalized.includes('date') || normalized.includes('time')) {
+    return { fieldId: 'event_date', confidence: 0.92 };
+  }
+
+  // - If column contains "funder" or "donor" without "amount"/"cad", prioritize donor/funder
+  if ((normalized.includes('funder') || normalized.includes('donor')) && !normalized.includes('amount') && !normalized.includes('cad')) {
+    if (normalized.includes('type')) {
+      return { fieldId: 'role', confidence: 0.90 };
+    }
+    return { fieldId: 'donor', confidence: 0.95 };
+  }
+
+  // - If column contains "amount", "cad", "fundingcad", or financial amount patterns:
+  if (normalized.includes('amount') || normalized.includes('cad') || normalized.includes('fundingcad') || normalized.includes('contributioncad')) {
+    return { fieldId: 'funding_amount', confidence: 0.95 };
+  }
+
+  // 3. Fallback: Prioritized partial match (longer patterns first to avoid greedy substring collisions)
+  const allPatternsWithField: Array<{ fieldId: string; pattern: string; patLen: number }> = [];
   for (const field of CANONICAL_CRM_FIELDS) {
     for (const pattern of field.patterns) {
-      if (normalized.includes(pattern) || (pattern.length >= 4 && pattern.includes(normalized))) {
-        return { fieldId: field.id, confidence: 0.85 };
-      }
+      allPatternsWithField.push({ fieldId: field.id, pattern, patLen: pattern.length });
+    }
+  }
+  allPatternsWithField.sort((a, b) => b.patLen - a.patLen);
+
+  for (const item of allPatternsWithField) {
+    const patNoUnder = item.pattern.replace(/_/g, '');
+    if (
+      normalized.includes(item.pattern) || 
+      (rawNoUnderscores.length >= 4 && rawNoUnderscores.includes(patNoUnder)) ||
+      (item.pattern.length >= 4 && item.pattern.includes(normalized))
+    ) {
+      return { fieldId: item.fieldId, confidence: 0.85 };
     }
   }
 

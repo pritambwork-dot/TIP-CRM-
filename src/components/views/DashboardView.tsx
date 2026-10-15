@@ -136,12 +136,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     setAskLoading(true);
     try {
+      const attendedCount = participants.filter(p => p.status === 'Attended').length;
+      const computedAttendance = participants.length > 0 
+        ? `${Math.round((attendedCount / participants.length) * 100)}%` 
+        : '0%';
       const crmSummary = {
         programsCount: programs.length,
         eventsCount: events.length,
         peopleCount: people.length,
         tasksCount: tasks.length,
-        avgAttendance: '78.4%',
+        avgAttendance: computedAttendance,
         totalFunding: funding.reduce((acc, f) => acc + (f.amountCad || 0), 0)
       };
       const res = await askNaturalLanguageDataQuery(askQuestion, currentUser, crmSummary);

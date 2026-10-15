@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Search, 
   Plus, 
@@ -64,23 +64,33 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
   const [newInterests, setNewInterests] = useState('');
   const [newNotes, setNewNotes] = useState('');
 
-  // Filter and search on scoped people collection
-  const filteredPeople = scopedPeople.filter(person => {
-    const matchesCategory = selectedFilter === 'All' 
-      ? true 
-      : person.relationshipTypes.includes(selectedFilter);
+  const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
 
-    const q = searchQuery.toLowerCase().trim();
-    const matchesQuery = q === '' 
-      ? true 
-      : person.name.toLowerCase().includes(q) ||
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 150);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Filter and search on scoped people collection with debouncing and memoization
+  const filteredPeople = useMemo(() => {
+    const q = debouncedQuery.toLowerCase().trim();
+    return scopedPeople.filter(person => {
+      const matchesCategory = selectedFilter === 'All' 
+        ? true 
+        : person.relationshipTypes.includes(selectedFilter);
+
+      if (!matchesCategory) return false;
+      if (q === '') return true;
+
+      return (
+        person.name.toLowerCase().includes(q) ||
         person.email.toLowerCase().includes(q) ||
         (person.organizationName && person.organizationName.toLowerCase().includes(q)) ||
         (person.role && person.role.toLowerCase().includes(q)) ||
-        person.interests.some(i => i.toLowerCase().includes(q));
-
-    return matchesCategory && matchesQuery;
-  });
+        person.interests.some(i => i.toLowerCase().includes(q))
+      );
+    });
+  }, [scopedPeople, selectedFilter, debouncedQuery]);
 
   const handleCreatePerson = (e: React.FormEvent) => {
     e.preventDefault();

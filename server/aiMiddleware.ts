@@ -16,6 +16,11 @@ import {
   validateAuthenticatedUser, 
   callGeminiChat 
 } from './lib/ai/gemini.ts';
+import {
+  generateDeterministicGroundedAnalysis,
+  validateAiClaimsAgainstEvidence,
+  sanitizeForPrompt
+} from './lib/ai/groundingProtocol.ts';
 import { sendSafeError, ERROR_CODES } from './lib/safeErrors.ts';
 import { recordAuditEvent, queryAuditLogs, type AuditOutcome } from './lib/auditLogger.ts';
 import { 
@@ -181,86 +186,13 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
 }
 
 /**
- * Deterministic fallback generator when Gemini API is offline or unconfigured
+ * Deterministic fallback generator when Gemini API is offline or unconfigured.
+ * Delegates strictly to the Grounded AI Protocol to guarantee 100% mathematical accuracy.
  */
 function generateDeterministicFallbackInsights(payload: any, datasetName?: string) {
-  const metrics = payload.keyMetrics || {};
-  const anomalies = payload.anomalies || [];
-  const insights: any[] = [];
-
-  // 1. Observed Facts
-  if (metrics.attendanceRatePercentage !== undefined) {
-    insights.push({
-      category: 'observed',
-      type: 'finding',
-      title: 'Overall Attendance Benchmark',
-      description: `Confirmed attendance across all sessions is ${metrics.attendanceRatePercentage}% (${metrics.confirmedAttendance?.toLocaleString('en-CA')} attendees out of ${metrics.totalRegistrations?.toLocaleString('en-CA')} registrations).`,
-      supportingMetrics: { attendanceRate: metrics.attendanceRatePercentage }
-    });
-  } else if (metrics.totalFundingCad !== undefined) {
-    insights.push({
-      category: 'observed',
-      type: 'finding',
-      title: 'Total Capital Allocated',
-      description: `$${metrics.totalFundingCad?.toLocaleString('en-CA')} CAD in total funding recorded across ${metrics.fundersCount} funding sources.`,
-      supportingMetrics: { totalFunding: metrics.totalFundingCad }
-    });
-  }
-
-  // 2. Interpretation & Trends
-  if (metrics.repeatParticipationRate !== undefined) {
-    insights.push({
-      category: 'interpretation',
-      type: 'trend',
-      title: 'Cohort Engagement & Retention',
-      description: `Repeat participation stands at ${metrics.repeatParticipationRate}%, indicating that a meaningful core of participants engages across multiple sessions.`,
-      supportingMetrics: { repeatRate: metrics.repeatParticipationRate }
-    });
-  } else if (metrics.topFunderSharePercentage !== undefined) {
-    insights.push({
-      category: 'interpretation',
-      type: 'anomaly',
-      title: 'Funder Dependency Profile',
-      description: `The top funding partner accounts for ${metrics.topFunderSharePercentage}% of total recorded revenue. This suggests a concentrated revenue distribution worth monitoring.`,
-      supportingMetrics: { concentration: metrics.topFunderSharePercentage }
-    });
-  }
-
-  // 3. Attention & Anomalies
-  if (anomalies.length > 0) {
-    insights.push({
-      category: 'interpretation',
-      type: 'anomaly',
-      title: 'Operational Anomalies Detected',
-      description: anomalies[0],
-      supportingMetrics: { anomalyCount: anomalies.length }
-    });
-  }
-
-  // 4. Practical Nonprofit Recommendations
-  if (metrics.attendanceRatePercentage !== undefined) {
-    insights.push({
-      category: 'action',
-      type: 'recommendation',
-      title: 'Attendance Follow-up Workflow',
-      description: 'Review timing and pre-event SMS/email reminders for sessions with lower turnout, and follow up directly with registered participants who did not attend.',
-      recommendation: 'Establish a 48-hour post-event feedback check-in for unattended participants.'
-    });
-  } else if (metrics.totalFundingCad !== undefined) {
-    insights.push({
-      category: 'action',
-      type: 'recommendation',
-      title: 'Funder Diversification Strategy',
-      description: 'Consider exploring complementary government and foundation grant applications to diversify funding across upcoming fiscal cycles.',
-      recommendation: 'Map upcoming community initiatives to multi-year foundation grant deadlines.'
-    });
-  }
-
+  const grounded = generateDeterministicGroundedAnalysis(payload, datasetName);
   return {
-    summary: payload.summary || `Analysis completed deterministically for ${datasetName || 'uploaded dataset'}.`,
-    insights,
-    caveats: payload.dataQualityNotes || ['Insights derived deterministically from validated dataset metrics.'],
-    fallbackDeterministic: true,
+    ...grounded,
     model: 'deterministic-rules-engine'
   };
 }
@@ -409,13 +341,243 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
           sendSafeError(res, 400, 'Email is required for Google OAuth sign-in.', ERROR_CODES.BAD_REQUEST);
           return true;
         }
-        const isPritam = cleanEmail === 'pritam@gmail.com' || cleanEmail === 'pritamb2k06@gmail.com';
+
+        // Authoritative CRM User Directory mapping for Google OAuth Authentication
+        interface CrmDirectoryAccount {
+          id: string;
+          email: string;
+          name: string;
+          role: string;
+          assignedRoleIds: string[];
+          status: 'approved' | 'pending' | 'rejected' | 'disabled';
+          adminApproved: boolean;
+          isActive: boolean;
+        }
+
+        const CRM_GOOGLE_ACCOUNTS: Record<string, CrmDirectoryAccount> = {
+          'pritam@gmail.com': {
+            id: 'u-1',
+            email: 'pritam@gmail.com',
+            name: 'Pritam Biswas',
+            role: 'super_admin',
+            assignedRoleIds: ['super_admin'],
+            status: 'approved',
+            adminApproved: true,
+            isActive: true
+          },
+          'pritamb2k06@gmail.com': {
+            id: 'u-1',
+            email: 'pritamb2k06@gmail.com',
+            name: 'Pritam Biswas',
+            role: 'super_admin',
+            assignedRoleIds: ['super_admin'],
+            status: 'approved',
+            adminApproved: true,
+            isActive: true
+          },
+          'marcus.chen@inclusionproject.ca': {
+            id: 'u-2',
+            email: 'marcus.chen@inclusionproject.ca',
+            name: 'Marcus Chen',
+            role: 'staff_manager',
+            assignedRoleIds: ['staff_manager'],
+            status: 'approved',
+            adminApproved: true,
+            isActive: true
+          },
+          'marcus@theinclusionproject.ca': {
+            id: 'u-2',
+            email: 'marcus@theinclusionproject.ca',
+            name: 'Marcus Chen',
+            role: 'staff_manager',
+            assignedRoleIds: ['staff_manager'],
+            status: 'approved',
+            adminApproved: true,
+            isActive: true
+          },
+          'sarah.thompson@inclusionproject.ca': {
+            id: 'u-3',
+            email: 'sarah.thompson@inclusionproject.ca',
+            name: 'Sarah Thompson',
+            role: 'program_coordinator',
+            assignedRoleIds: ['program_coordinator', 'event_coordinator'],
+            status: 'approved',
+            adminApproved: true,
+            isActive: true
+          },
+          'sarah@theinclusionproject.ca': {
+            id: 'u-3',
+            email: 'sarah@theinclusionproject.ca',
+            name: 'Sarah Thompson',
+            role: 'staff_manager',
+            assignedRoleIds: ['staff_manager'],
+            status: 'approved',
+            adminApproved: true,
+            isActive: true
+          },
+          'jordan.volunteer@inclusionproject.ca': {
+            id: 'u-4',
+            email: 'jordan.volunteer@inclusionproject.ca',
+            name: 'Jordan Lee',
+            role: 'volunteer',
+            assignedRoleIds: ['volunteer'],
+            status: 'approved',
+            adminApproved: true,
+            isActive: true
+          },
+          'divyanshaa@theinclusionproject.ca': {
+            id: 'u-divyanshaa',
+            email: 'divyanshaa@theinclusionproject.ca',
+            name: 'Divyanshaa',
+            role: 'super_admin',
+            assignedRoleIds: ['super_admin'],
+            status: 'approved',
+            adminApproved: true,
+            isActive: true
+          },
+          'elena.rostova@gmail.com': {
+            id: 'u-5',
+            email: 'elena.rostova@gmail.com',
+            name: 'Elena Rostova',
+            role: 'staff_member',
+            assignedRoleIds: ['staff_member'],
+            status: 'pending',
+            adminApproved: false,
+            isActive: false
+          },
+          'elena@theinclusionproject.ca': {
+            id: 'u-5',
+            email: 'elena@theinclusionproject.ca',
+            name: 'Elena Rostova',
+            role: 'volunteer',
+            assignedRoleIds: ['volunteer'],
+            status: 'pending',
+            adminApproved: false,
+            isActive: false
+          },
+          'david.kalu@gmail.com': {
+            id: 'u-6',
+            email: 'david.kalu@gmail.com',
+            name: 'David Kalu',
+            role: 'volunteer',
+            assignedRoleIds: ['volunteer'],
+            status: 'rejected',
+            adminApproved: false,
+            isActive: false
+          },
+          'alex.mercer@gmail.com': {
+            id: 'u-7',
+            email: 'alex.mercer@gmail.com',
+            name: 'Alex Mercer',
+            role: 'staff_member',
+            assignedRoleIds: ['staff_member'],
+            status: 'disabled',
+            adminApproved: true,
+            isActive: false
+          }
+        };
+
+        const account = CRM_GOOGLE_ACCOUNTS[cleanEmail];
+
+        // 1. Unapproved Stranger Account (Not found in CRM Directory)
+        if (!account) {
+          recordAuditEvent({
+            actorId: 'unauthorized_google',
+            actorName: name || cleanEmail,
+            actorRole: 'unauthenticated',
+            action: 'AUTH_LOGIN_FAILED',
+            resourceType: 'UserSession',
+            resourceId: 'none',
+            outcome: 'FAILURE',
+            description: `Google OAuth login rejected: No approved CRM account linked to ${cleanEmail}.`,
+            ipAddress: clientIp
+          });
+
+          sendSafeError(
+            res,
+            403,
+            `Forbidden: No TIP CRM account is linked to ${cleanEmail}. Please contact your administrator to request access.`,
+            ERROR_CODES.FORBIDDEN
+          );
+          return true;
+        }
+
+        // 2. Rejected Account
+        if (account.status === 'rejected') {
+          recordAuditEvent({
+            actorId: account.id,
+            actorName: account.name,
+            actorRole: account.role,
+            action: 'AUTH_LOGIN_FAILED',
+            resourceType: 'UserSession',
+            resourceId: account.id,
+            outcome: 'FAILURE',
+            description: `Google OAuth login rejected: Account request for ${cleanEmail} was declined.`,
+            ipAddress: clientIp
+          });
+
+          sendSafeError(
+            res,
+            403,
+            'Forbidden: This account request was declined. Please contact your CRM Administrator.',
+            ERROR_CODES.FORBIDDEN
+          );
+          return true;
+        }
+
+        // 3. Deactivated / Disabled Account
+        if (account.status === 'disabled' || (!account.isActive && account.status !== 'pending')) {
+          recordAuditEvent({
+            actorId: account.id,
+            actorName: account.name,
+            actorRole: account.role,
+            action: 'AUTH_LOGIN_FAILED',
+            resourceType: 'UserSession',
+            resourceId: account.id,
+            outcome: 'FAILURE',
+            description: `Google OAuth login rejected: Account ${cleanEmail} has been deactivated.`,
+            ipAddress: clientIp
+          });
+
+          sendSafeError(
+            res,
+            403,
+            'Forbidden: Your account has been deactivated. Please contact your CRM Administrator.',
+            ERROR_CODES.FORBIDDEN
+          );
+          return true;
+        }
+
+        // 4. Pending Approval
+        if (account.status === 'pending' || !account.adminApproved) {
+          recordAuditEvent({
+            actorId: account.id,
+            actorName: account.name,
+            actorRole: account.role,
+            action: 'AUTH_LOGIN_FAILED',
+            resourceType: 'UserSession',
+            resourceId: account.id,
+            outcome: 'FAILURE',
+            description: `Google OAuth login rejected: Account ${cleanEmail} is pending administrator approval.`,
+            ipAddress: clientIp
+          });
+
+          sendSafeError(
+            res,
+            403,
+            'Forbidden: Your TIP CRM account is pending activation by an Administrator.',
+            ERROR_CODES.FORBIDDEN
+          );
+          return true;
+        }
+
+        // 5. Approved & Active: Create authenticated session with their EXACT assigned role (never elevated)
         const user: SessionUser = {
-          id: isPritam ? 'u-1' : `auth-google-${btoa(cleanEmail).replace(/=/g, '').slice(0, 16)}`,
-          email: cleanEmail,
-          role: isPritam ? 'super_admin' : 'staff_member',
-          name: name || (isPritam ? 'Pritam Biswas' : cleanEmail.split('@')[0]),
-          assignedRoleIds: isPritam ? ['super_admin'] : ['staff_member']
+          id: account.id,
+          email: account.email,
+          role: account.role,
+          name: account.name || name || cleanEmail.split('@')[0],
+          assignedRoleIds: account.assignedRoleIds
         };
 
         const { sessionToken, sessionData } = createSession(user);
@@ -429,7 +591,7 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
           resourceType: 'UserSession',
           resourceId: sessionData.sessionId,
           outcome: 'SUCCESS',
-          description: `User authenticated via Google OAuth (${user.email}).`,
+          description: `User authenticated via Google OAuth (${user.email}) with role ${user.role}.`,
           ipAddress: clientIp
         });
 
@@ -853,8 +1015,10 @@ Respond ONLY with valid JSON strictly adhering to this schema:
 `;
 
         const { data: parsed, model } = await provider.generateStructured<any>(prompt, 'STANDARD');
+        // Authoritative Server-Side Evidence Verification (Rule 6 & 7)
+        const validated = validateAiClaimsAgainstEvidence(parsed, payload, datasetName);
         const duration = Date.now() - startTime;
-        const estimatedTokens = Math.round(prompt.length / 4 + JSON.stringify(parsed).length / 4);
+        const estimatedTokens = Math.round(prompt.length / 4 + JSON.stringify(validated).length / 4);
 
         aiUsageLogs.push({
           id: 'req-' + Date.now(),
@@ -868,13 +1032,13 @@ Respond ONLY with valid JSON strictly adhering to this schema:
 
         // Store in Server Cache (24h TTL)
         serverResponseCache.set(cacheKey, {
-          data: { ...parsed, model, fallbackDeterministic: false },
+          data: { ...validated, model, fallbackDeterministic: false },
           expiresAt: Date.now() + 24 * 60 * 60 * 1000,
           tokensSaved: estimatedTokens
         });
 
         sendJson(res, 200, {
-          ...parsed,
+          ...validated,
           model,
           cached: false,
           fallbackDeterministic: false
@@ -900,6 +1064,22 @@ Respond ONLY with valid JSON strictly adhering to this schema:
         return true;
       }
 
+      // 1. Prompt Injection Defense (Section 11 & 13)
+      const sanitizedQuestion = sanitizeForPrompt(question);
+      if (sanitizedQuestion.includes('[REDACTED_INJECTION_ATTEMPT]') || sanitizedQuestion.includes('[REDACTED_PROMPT_MANIPULATION]')) {
+        sendJson(res, 200, {
+          question,
+          interpretedIntent: 'Rejected instruction override attempt',
+          authorized: false,
+          refusalReason: 'Security Policy: Prompt injection or system instruction override attempt detected and rejected.',
+          calculationFact: 'Grounded AI security active.',
+          aiExplanation: 'The TIP CRM Intelligence gateway enforces strict grounding rules and cannot be instructed to ignore system data policies.',
+          suggestedAction: 'Please submit a standard operational or analytical inquiry regarding verified records.',
+          fallbackDeterministic: true
+        });
+        return true;
+      }
+
       // Check RBAC: Volunteers CANNOT query funding or organization-wide finances (Rule 28 & 29)
       const qLower = question.toLowerCase();
       if (userRole === 'volunteer' && (qLower.includes('fund') || qLower.includes('donor') || qLower.includes('grant') || qLower.includes('budget') || qLower.includes('money') || qLower.includes('financial'))) {
@@ -911,6 +1091,28 @@ Respond ONLY with valid JSON strictly adhering to this schema:
           calculationFact: 'Restricted by RBAC security policies.',
           aiExplanation: 'Under TIP data security guidelines, funding intelligence is restricted to Staff Managers and Super Administrators.',
           suggestedAction: 'Contact your program coordinator if you require authorized financial figures.'
+        });
+        return true;
+      }
+
+      // 2. Safe Abstention on Missing Historical Records (Rule G & C)
+      if (
+        qLower.includes('last year') || 
+        qLower.includes('previous year') || 
+        qLower.includes('2024') || 
+        qLower.includes('2025') || 
+        qLower.includes('historical trend') ||
+        qLower.includes('compare to historical')
+      ) {
+        sendJson(res, 200, {
+          question,
+          interpretedIntent: 'Historical comparative inquiry',
+          authorized: true,
+          calculationFact: 'Historical comparison records for previous fiscal periods are not loaded in the current dataset.',
+          aiExplanation: "I don't have sufficient verified historical data to answer this comparison accurately. Please provide records for the requested historical period or specify the date range.",
+          suggestedAction: 'Import multi-year records to enable comparative trend analysis.',
+          fallbackDeterministic: true,
+          refusalReason: 'Insufficient historical data for requested comparison.'
         });
         return true;
       }
@@ -930,14 +1132,18 @@ Respond ONLY with valid JSON strictly adhering to this schema:
       const budgetCheck = checkBudget('query');
       if (!budgetCheck.allowed) {
         deterministicQueriesHandled++;
+        const peopleCount = crmSummary?.peopleCount ?? 0;
+        const progCount = crmSummary?.programsCount ?? 0;
+        const attendance = crmSummary?.avgAttendance ?? 'N/A';
+
         sendJson(res, 200, {
           question,
           interpretedIntent: 'Operational query (deterministic mode)',
           authorized: true,
           budgetExceeded: true,
-          calculationFact: `Overall attendance is ${crmSummary?.avgAttendance || '78.4%'}, with ${crmSummary?.peopleCount || '186'} participants across ${crmSummary?.programsCount || '8'} programs.`,
-          aiExplanation: `[AI Budget Limit Reached] Operations are tracking normally across active programs.`,
-          suggestedAction: 'Review event scheduling in the Tasks tab.',
+          calculationFact: `Verified CRM records: ${peopleCount} active contacts across ${progCount} initiatives (Average Attendance: ${attendance}).`,
+          aiExplanation: `[AI Budget Limit Reached] Operating in deterministic privacy mode. All metrics computed from verified records.`,
+          suggestedAction: 'Review operational records in the Tasks tab.',
           cached: false,
           fallbackDeterministic: true
         });
@@ -946,24 +1152,38 @@ Respond ONLY with valid JSON strictly adhering to this schema:
 
       const apiKey = getApiKey();
 
-      // If no Gemini key, answer deterministically based on crmSummary
-      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+      // If no Gemini key or deterministic mode requested, answer deterministically based strictly on crmSummary (no synthetic defaults)
+      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || body.forceDeterministic) {
         deterministicQueriesHandled++;
-        let answer = 'Based on your authorized CRM data:';
         let fact = '';
+        let answer = '';
         let action = 'Review program follow-ups in the Operations section.';
 
         if (qLower.includes('attendance') || qLower.includes('participa')) {
-          fact = `Overall CRM attendance rate is currently ${crmSummary?.avgAttendance || '78.4%'} across ${crmSummary?.programsCount || '8'} active programs.`;
-          answer = `The data shows consistent participation across youth and diversity programs, led by the Youth Leadership Initiative.`;
-          action = 'Consider reviewing sessions with drop-offs to improve cohort completion.';
-        } else if (qLower.includes('fund') || qLower.includes('donor')) {
-          fact = `Total recorded funding is $${crmSummary?.totalFunding?.toLocaleString('en-CA') || '184,000'} CAD across ${crmSummary?.fundersCount || '6'} active grants and donors.`;
-          answer = `Funding is anchored primarily by government diversity partnerships and foundation contributions.`;
-          action = 'Ensure interim grant milestone reporting is up to date.';
+          const attendance = crmSummary?.avgAttendance !== undefined ? crmSummary.avgAttendance : 'N/A';
+          const pCount = crmSummary?.participantsCount ?? crmSummary?.peopleCount ?? 0;
+          const progCount = crmSummary?.programsCount ?? 0;
+          fact = `Verified CRM attendance: Average attendance rate is ${attendance} across ${progCount} initiatives (${pCount} recorded participants).`;
+          answer = `Calculations reflect confirmed participant check-ins and session attendance sheets currently recorded in the CRM.`;
+          action = 'Review attendance records for upcoming sessions in Events.';
+        } else if (qLower.includes('fund') || qLower.includes('donor') || qLower.includes('grant')) {
+          const fundingAmt = crmSummary?.totalFunding !== undefined ? `$${crmSummary.totalFunding.toLocaleString('en-CA')} CAD` : '$0 CAD';
+          const funderCount = crmSummary?.fundersCount !== undefined ? crmSummary.fundersCount : 0;
+          fact = `Total recorded funding is ${fundingAmt} across ${funderCount} funding sources.`;
+          answer = `Funding records reflect active grants and contributions registered in the organizational ledger.`;
+          action = 'Verify interim grant deliverables and compliance schedules in Funding.';
+        } else if (qLower.includes('task') || qLower.includes('overdue')) {
+          const taskCount = crmSummary?.tasksCount ?? 0;
+          fact = `${taskCount} operational tasks are currently recorded in the active ledger.`;
+          answer = `Tasks are prioritized according to assignment dates and program deliverables.`;
+          action = 'Review open items in the Tasks view.';
         } else {
-          fact = `CRM encompasses ${crmSummary?.peopleCount || '186'} active contacts, ${crmSummary?.eventsCount || '24'} events, and ${crmSummary?.tasksCount || '15'} follow-up tasks.`;
-          answer = `Operations are progressing steadily with high engagement across community initiatives.`;
+          const peopleCount = crmSummary?.peopleCount ?? 0;
+          const eventCount = crmSummary?.eventsCount ?? 0;
+          const taskCount = crmSummary?.tasksCount ?? 0;
+          const progCount = crmSummary?.programsCount ?? 0;
+          fact = `Active authorized CRM ledger contains ${peopleCount} contacts, ${progCount} programs, ${eventCount} events, and ${taskCount} operational tasks.`;
+          answer = `Operations are tracking normally across all authorized community initiatives.`;
         }
 
         sendJson(res, 200, {
@@ -987,7 +1207,7 @@ You are the TIP CRM Intelligent Analyst answering an authorized staff member's q
 User Role: "${userRole}"
 Data Scope: "${JSON.stringify(dataScope)}"
 
-User Question: "${question}"
+User Question: "${sanitizedQuestion}"
 
 Authorized CRM Summary (100% deterministic facts):
 ${JSON.stringify(crmSummary, null, 2)}
@@ -996,7 +1216,8 @@ Instructions:
 1. Provide the exact calculation fact directly from the authorized summary.
 2. Provide a thoughtful, grounded explanation using nonprofit phrasing ("suggests", "the data shows").
 3. Suggest an actionable next operational step for TIP staff.
-4. Never invent numbers not present in the authorized summary.
+4. NEVER invent numbers, donor names, or program outcomes not present in the authorized summary.
+5. If the user asks for historical comparisons (e.g. last year) and the summary does not contain past data, state clearly that historical data is not available.
 
 Return valid JSON with keys:
 {
@@ -1039,13 +1260,17 @@ Return valid JSON with keys:
       } catch (err: any) {
         safeLogger.warn('Gemini query failed, returning deterministic response:', err?.message || err);
         deterministicQueriesHandled++;
+        const peopleCount = crmSummary?.peopleCount ?? 0;
+        const progCount = crmSummary?.programsCount ?? 0;
+        const attendance = crmSummary?.avgAttendance ?? 'N/A';
+
         sendJson(res, 200, {
           question,
-          interpretedIntent: 'Operational query',
+          interpretedIntent: 'Operational query (deterministic mode)',
           authorized: true,
-          calculationFact: `Overall attendance is ${crmSummary?.avgAttendance || '78.4%'}, with ${crmSummary?.peopleCount || '186'} participants across ${crmSummary?.programsCount || '8'} programs.`,
-          aiExplanation: `Based on authorized CRM records, participant engagement is strongest in youth and cohort-based workshops.`,
-          suggestedAction: 'Review event scheduling and attendance follow-up in the Tasks tab.',
+          calculationFact: `Overall attendance is ${attendance}, with ${peopleCount} contacts across ${progCount} programs.`,
+          aiExplanation: `Grounded deterministic summary based on authorized CRM records.`,
+          suggestedAction: 'Review operational records in the Tasks tab.',
           fallbackDeterministic: true
         });
         return true;

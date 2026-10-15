@@ -88,6 +88,19 @@ import {
 } from '../lib/tipIntelligenceService';
 import { updateAiBudget } from '../lib/aiOrchestrator';
 import { validateBackupStructure } from '../lib/fileValidation';
+import { cacheResource, clearUserOfflineCache } from '../lib/offlineStorage';
+import { 
+  DatabaseHealthService, 
+  DatabaseReadinessReport,
+  PeopleService, 
+  OrganizationsService, 
+  ProgramsService, 
+  EventsService, 
+  TasksService, 
+  FundingService,
+  DocumentsService 
+} from '../lib/services';
+import { syncEngine } from '../lib/syncEngine';
 
 export interface PermissionsUtility {
   can: (action: ActionType, resource: ResourceType) => boolean;
@@ -312,6 +325,10 @@ interface CrmContextType {
   
   // Reset demo data
   resetAllData: () => void;
+
+  // Supabase Database Connection & Readiness
+  databaseReadiness: DatabaseReadinessReport | null;
+  refreshDatabaseReadiness: (forceRefresh?: boolean) => Promise<DatabaseReadinessReport>;
 }
 
 const CrmContext = createContext<CrmContextType | undefined>(undefined);
@@ -398,12 +415,61 @@ function normalizeUser(rawUser: any): UserProfile {
   };
 }
 
-function saveToStorage<T>(key: string, value: T) {
-  try {
-    localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(value));
-  } catch (e) {
-    clientSafeLogger.error(`Error writing localStorage for key: ${key}`, mapToSafeErrorMessage(e));
+const pendingSaveTimers = new Map<string, any>();
+const pendingSaveValues = new Map<string, any>();
+
+export function flushPendingCrmSaves() {
+  for (const [key, val] of pendingSaveValues.entries()) {
+    try {
+      localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(val));
+    } catch (e) {
+      clientSafeLogger.error(`Error flushing localStorage for key: ${key}`, mapToSafeErrorMessage(e));
+    }
   }
+  for (const timer of pendingSaveTimers.values()) {
+    clearTimeout(timer);
+  }
+  pendingSaveTimers.clear();
+  pendingSaveValues.clear();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushPendingCrmSaves);
+  window.addEventListener('pagehide', flushPendingCrmSaves);
+}
+
+function saveToStorage<T>(key: string, value: T, immediate = false, userId?: string) {
+  if (immediate) {
+    try {
+      localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(value));
+      if (userId) {
+        cacheResource(userId, key, value).catch(() => {});
+      }
+    } catch (e) {
+      clientSafeLogger.error(`Error writing localStorage for key: ${key}`, mapToSafeErrorMessage(e));
+    }
+    return;
+  }
+
+  pendingSaveValues.set(key, value);
+  if (pendingSaveTimers.has(key)) {
+    clearTimeout(pendingSaveTimers.get(key));
+  }
+
+  const timer = setTimeout(() => {
+    pendingSaveTimers.delete(key);
+    pendingSaveValues.delete(key);
+    try {
+      localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(value));
+      if (userId) {
+        cacheResource(userId, key, value).catch(() => {});
+      }
+    } catch (e) {
+      clientSafeLogger.error(`Error writing localStorage for key: ${key}`, mapToSafeErrorMessage(e));
+    }
+  }, 250);
+
+  pendingSaveTimers.set(key, timer);
 }
 
 export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -595,32 +661,79 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAiDrawerOpen, setIsAiDrawerOpen] = useState<boolean>(false);
   const [pendingActionPreview, setPendingActionPreview] = useState<AiActionPreview | null>(null);
 
-  // Sync to localStorage
-  useEffect(() => { saveToStorage('crm_users', users); }, [users]);
-  useEffect(() => { saveToStorage('current_user', currentUser); }, [currentUser]);
-  useEffect(() => { saveToStorage('people', people); }, [people]);
-  useEffect(() => { saveToStorage('organizations', organizations); }, [organizations]);
-  useEffect(() => { saveToStorage('programs', programs); }, [programs]);
-  useEffect(() => { saveToStorage('events', events); }, [events]);
-  useEffect(() => { saveToStorage('participants', participants); }, [participants]);
-  useEffect(() => { saveToStorage('tasks', tasks); }, [tasks]);
-  useEffect(() => { saveToStorage('funding', funding); }, [funding]);
-  useEffect(() => { saveToStorage('interactions', interactions); }, [interactions]);
-  useEffect(() => { saveToStorage('documents', documents); }, [documents]);
-  useEffect(() => { saveToStorage('audit_logs', auditLogs); }, [auditLogs]);
-  useEffect(() => { saveToStorage('posts', posts); }, [posts]);
-  useEffect(() => { saveToStorage('post_responsibilities', postResponsibilities); }, [postResponsibilities]);
-  useEffect(() => { saveToStorage('task_templates', taskTemplates); }, [taskTemplates]);
-  useEffect(() => { saveToStorage('task_rules', taskRules); }, [taskRules]);
-  useEffect(() => { saveToStorage('task_assignments', taskAssignments); }, [taskAssignments]);
-  useEffect(() => { saveToStorage('task_activity', taskActivity); }, [taskActivity]);
-  useEffect(() => { saveToStorage('ai_suggestions', aiSuggestions); }, [aiSuggestions]);
-  useEffect(() => { saveToStorage('ai_conversations', aiConversations); }, [aiConversations]);
-  useEffect(() => { saveToStorage('ai_messages', aiMessages); }, [aiMessages]);
-  useEffect(() => { saveToStorage('ai_behavior_snapshots', aiBehaviorSnapshots); }, [aiBehaviorSnapshots]);
-  useEffect(() => { saveToStorage('ai_user_settings', aiUserSettings); }, [aiUserSettings]);
-  useEffect(() => { saveToStorage('ai_budget', aiBudgetConfig); }, [aiBudgetConfig]);
-  useEffect(() => { saveToStorage('ai_dismissed_hashes', dismissedSuggestionHashes); }, [dismissedSuggestionHashes]);
+  // Supabase Database Readiness & Cloud Sync
+  const [databaseReadiness, setDatabaseReadiness] = useState<DatabaseReadinessReport | null>(null);
+
+  const refreshDatabaseReadiness = async (forceRefresh = true): Promise<DatabaseReadinessReport> => {
+    const report = await DatabaseHealthService.checkReadiness(forceRefresh);
+    setDatabaseReadiness(report);
+    return report;
+  };
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      syncEngine.setUserId(currentUser.id);
+    }
+    refreshDatabaseReadiness(false);
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadCloudDataIfReady() {
+      try {
+        const report = await DatabaseHealthService.checkReadiness();
+        if (isMounted) setDatabaseReadiness(report);
+        if (report.isSchemaDeployed && isMounted) {
+          const [peopleRes, orgsRes, progsRes, evtsRes, tasksRes, fundRes] = await Promise.all([
+            PeopleService.getAll(),
+            OrganizationsService.getAll(),
+            ProgramsService.getAll(),
+            EventsService.getAll(),
+            TasksService.getAll(),
+            FundingService.getAll()
+          ]);
+          if (!isMounted) return;
+          if (peopleRes.data && peopleRes.data.length > 0) setPeople(peopleRes.data);
+          if (orgsRes.data && orgsRes.data.length > 0) setOrganizations(orgsRes.data);
+          if (progsRes.data && progsRes.data.length > 0) setPrograms(progsRes.data);
+          if (evtsRes.data && evtsRes.data.length > 0) setEvents(evtsRes.data);
+          if (tasksRes.data && tasksRes.data.length > 0) setTasks(tasksRes.data);
+          if (fundRes.data && fundRes.data.length > 0) setFunding(fundRes.data);
+        }
+      } catch (err) {
+        clientSafeLogger.warn('Cloud data initialization fallback to local storage:', err);
+      }
+    }
+    loadCloudDataIfReady();
+    return () => { isMounted = false; };
+  }, []);
+
+  // Sync to localStorage and IndexedDB with debounce
+  useEffect(() => { saveToStorage('crm_users', users, false, currentUser?.id); }, [users, currentUser?.id]);
+  useEffect(() => { saveToStorage('current_user', currentUser, true, currentUser?.id); }, [currentUser]);
+  useEffect(() => { saveToStorage('people', people, false, currentUser?.id); }, [people, currentUser?.id]);
+  useEffect(() => { saveToStorage('organizations', organizations, false, currentUser?.id); }, [organizations, currentUser?.id]);
+  useEffect(() => { saveToStorage('programs', programs, false, currentUser?.id); }, [programs, currentUser?.id]);
+  useEffect(() => { saveToStorage('events', events, false, currentUser?.id); }, [events, currentUser?.id]);
+  useEffect(() => { saveToStorage('participants', participants, false, currentUser?.id); }, [participants, currentUser?.id]);
+  useEffect(() => { saveToStorage('tasks', tasks, false, currentUser?.id); }, [tasks, currentUser?.id]);
+  useEffect(() => { saveToStorage('funding', funding, false, currentUser?.id); }, [funding, currentUser?.id]);
+  useEffect(() => { saveToStorage('interactions', interactions, false, currentUser?.id); }, [interactions, currentUser?.id]);
+  useEffect(() => { saveToStorage('documents', documents, false, currentUser?.id); }, [documents, currentUser?.id]);
+  useEffect(() => { saveToStorage('audit_logs', auditLogs, false, currentUser?.id); }, [auditLogs, currentUser?.id]);
+  useEffect(() => { saveToStorage('posts', posts, false, currentUser?.id); }, [posts, currentUser?.id]);
+  useEffect(() => { saveToStorage('post_responsibilities', postResponsibilities, false, currentUser?.id); }, [postResponsibilities, currentUser?.id]);
+  useEffect(() => { saveToStorage('task_templates', taskTemplates, false, currentUser?.id); }, [taskTemplates, currentUser?.id]);
+  useEffect(() => { saveToStorage('task_rules', taskRules, false, currentUser?.id); }, [taskRules, currentUser?.id]);
+  useEffect(() => { saveToStorage('task_assignments', taskAssignments, false, currentUser?.id); }, [taskAssignments, currentUser?.id]);
+  useEffect(() => { saveToStorage('task_activity', taskActivity, false, currentUser?.id); }, [taskActivity, currentUser?.id]);
+  useEffect(() => { saveToStorage('ai_suggestions', aiSuggestions, false, currentUser?.id); }, [aiSuggestions, currentUser?.id]);
+  useEffect(() => { saveToStorage('ai_conversations', aiConversations, false, currentUser?.id); }, [aiConversations, currentUser?.id]);
+  useEffect(() => { saveToStorage('ai_messages', aiMessages, false, currentUser?.id); }, [aiMessages, currentUser?.id]);
+  useEffect(() => { saveToStorage('ai_behavior_snapshots', aiBehaviorSnapshots, false, currentUser?.id); }, [aiBehaviorSnapshots, currentUser?.id]);
+  useEffect(() => { saveToStorage('ai_user_settings', aiUserSettings, false, currentUser?.id); }, [aiUserSettings, currentUser?.id]);
+  useEffect(() => { saveToStorage('ai_budget', aiBudgetConfig, false, currentUser?.id); }, [aiBudgetConfig, currentUser?.id]);
+  useEffect(() => { saveToStorage('ai_dismissed_hashes', dismissedSuggestionHashes, false, currentUser?.id); }, [dismissedSuggestionHashes, currentUser?.id]);
 
   const logAction = (action: string, entityType: string, entityName: string, details?: string) => {
     const now = new Date();
@@ -985,6 +1098,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPeople(prev => [newPerson, ...prev]);
     logAction('Added Person', 'Person', newPerson.name, `${newPerson.role || 'Contact'} (${newPerson.email})`);
     incrementAiDataVersion();
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'people',
+      recordId: newPerson.id,
+      opType: 'create',
+      payload: newPerson
+    }, true).catch(() => {});
     return newPerson;
   };
 
@@ -998,6 +1118,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return p;
     }));
     incrementAiDataVersion();
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'people',
+      recordId: id,
+      opType: 'update',
+      payload: updates
+    }, true).catch(() => {});
   };
 
   const deletePerson = (id: string) => {
@@ -1006,6 +1133,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setPeople(prev => prev.filter(p => p.id !== id));
       logAction('Removed Person', 'Person', person.name);
       incrementAiDataVersion();
+      syncEngine.queueMutation({
+        userId: currentUser.id,
+        resource: 'people',
+        recordId: id,
+        opType: 'delete',
+        payload: { id }
+      }, true).catch(() => {});
     }
   };
 
@@ -1018,6 +1152,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setOrganizations(prev => [newOrg, ...prev]);
     logAction('Added Organization', 'Organization', newOrg.name, `${newOrg.sector} (${newOrg.type})`);
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'organizations',
+      recordId: newOrg.id,
+      opType: 'create',
+      payload: newOrg
+    }, true).catch(() => {});
     return newOrg;
   };
 
@@ -1030,6 +1171,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return org;
     }));
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'organizations',
+      recordId: id,
+      opType: 'update',
+      payload: updates
+    }, true).catch(() => {});
   };
 
   const deleteOrganization = (id: string) => {
@@ -1037,6 +1185,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (org) {
       setOrganizations(prev => prev.filter(o => o.id !== id));
       logAction('Deleted Organization', 'Organization', org.name, `Removed organization record`);
+      syncEngine.queueMutation({
+        userId: currentUser.id,
+        resource: 'organizations',
+        recordId: id,
+        opType: 'delete',
+        payload: { id }
+      }, true).catch(() => {});
     }
   };
 
@@ -1049,6 +1204,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setPrograms(prev => [newProg, ...prev]);
     logAction('Created Program', 'Program', newProg.name, `Status: ${newProg.status}`);
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'programs',
+      recordId: newProg.id,
+      opType: 'create',
+      payload: newProg
+    }, true).catch(() => {});
     return newProg;
   };
 
@@ -1061,6 +1223,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return prog;
     }));
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'programs',
+      recordId: id,
+      opType: 'update',
+      payload: updates
+    }, true).catch(() => {});
   };
 
   const deleteProgram = (id: string) => {
@@ -1068,6 +1237,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (prog) {
       setPrograms(prev => prev.filter(p => p.id !== id));
       logAction('Deleted Program', 'Program', prog.name, 'Removed program record and cohort references');
+      syncEngine.queueMutation({
+        userId: currentUser.id,
+        resource: 'programs',
+        recordId: id,
+        opType: 'delete',
+        payload: { id }
+      }, true).catch(() => {});
     }
   };
 
@@ -1081,6 +1257,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setEvents(prev => [newEvt, ...prev]);
     logAction('Created Event', 'Event', newEvt.name, `${newEvt.date} | Facilitator: ${newEvt.facilitator}`);
     incrementAiDataVersion();
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'events',
+      recordId: newEvt.id,
+      opType: 'create',
+      payload: newEvt
+    }, true).catch(() => {});
     return newEvt;
   };
 
@@ -1094,6 +1277,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return evt;
     }));
     incrementAiDataVersion();
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'events',
+      recordId: id,
+      opType: 'update',
+      payload: updates
+    }, true).catch(() => {});
   };
 
   const deleteEvent = (id: string) => {
@@ -1102,6 +1292,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setEvents(prev => prev.filter(e => e.id !== id));
       logAction('Deleted Event', 'Event', evt.name, `Cancelled and deleted event record for ${evt.date}`);
       incrementAiDataVersion();
+      syncEngine.queueMutation({
+        userId: currentUser.id,
+        resource: 'events',
+        recordId: id,
+        opType: 'delete',
+        payload: { id }
+      }, true).catch(() => {});
     }
   };
 
@@ -1119,6 +1316,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return pt;
     }));
+    EventsService.updateParticipantStatus(id, status).catch(() => {});
   };
 
   const addParticipant = (data: Omit<ParticipantRecord, 'id' | 'registeredAt'>) => {
@@ -1143,25 +1341,49 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTasks(prev => [newTask, ...prev]);
     logAction('Created Task', 'Task', newTask.title, `Due: ${newTask.dueDate}, Owner: ${newTask.owner}`);
     incrementAiDataVersion();
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'tasks',
+      recordId: newTask.id,
+      opType: 'create',
+      payload: newTask
+    }, true).catch(() => {});
     return newTask;
   };
 
   const toggleTaskStatus = (id: string) => {
+    let nextStatus: TaskStatus = 'To Do';
+    let nextCompletedAt: string | undefined = undefined;
+
     setTasks(prev => prev.map(t => {
       if (t.id === id) {
-        const newStatus: TaskStatus = t.status === 'Completed' ? 'To Do' : 'Completed';
-        const completedAt = newStatus === 'Completed' ? new Date().toISOString().split('T')[0] : undefined;
-        logAction(newStatus === 'Completed' ? 'Task Completed' : 'Task Reopened', 'Task', t.title);
-        return { ...t, status: newStatus, completedAt };
+        nextStatus = t.status === 'Completed' ? 'To Do' : 'Completed';
+        nextCompletedAt = nextStatus === 'Completed' ? new Date().toISOString().split('T')[0] : undefined;
+        logAction(nextStatus === 'Completed' ? 'Task Completed' : 'Task Reopened', 'Task', t.title);
+        return { ...t, status: nextStatus, completedAt: nextCompletedAt };
       }
       return t;
     }));
     incrementAiDataVersion();
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'tasks',
+      recordId: id,
+      opType: 'update',
+      payload: { status: nextStatus, completedAt: nextCompletedAt }
+    }, true).catch(() => {});
   };
 
   const updateTask = (id: string, updates: Partial<TaskItem>) => {
     setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...updates } : t)));
     incrementAiDataVersion();
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'tasks',
+      recordId: id,
+      opType: 'update',
+      payload: updates
+    }, true).catch(() => {});
   };
 
   const deleteTask = (id: string) => {
@@ -1170,6 +1392,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setTasks(prev => prev.filter(t => t.id !== id));
       logAction('Deleted Task', 'Task', task.title);
       incrementAiDataVersion();
+      syncEngine.queueMutation({
+        userId: currentUser.id,
+        resource: 'tasks',
+        recordId: id,
+        opType: 'delete',
+        payload: { id }
+      }, true).catch(() => {});
     }
   };
 
@@ -1372,11 +1601,25 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setFunding(prev => [newFunding, ...prev]);
     logAction('Added Funding Record', 'Funding', newFunding.donorOrFunder, `$${newFunding.amountCad.toLocaleString('en-CA')} CAD (${newFunding.fundingType})`);
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'funding',
+      recordId: newFunding.id,
+      opType: 'create',
+      payload: newFunding
+    }, true).catch(() => {});
     return newFunding;
   };
 
   const updateFunding = (id: string, updates: Partial<FundingRecord>) => {
     setFunding(prev => prev.map(f => (f.id === id ? { ...f, ...updates } : f)));
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'funding',
+      recordId: id,
+      opType: 'update',
+      payload: updates
+    }, true).catch(() => {});
   };
 
   const deleteFunding = (id: string) => {
@@ -1384,6 +1627,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (item) {
       setFunding(prev => prev.filter(f => f.id !== id));
       logAction('Deleted Funding Record', 'Funding', item.donorOrFunder, `Removed grant/allocation of $${item.amountCad.toLocaleString('en-CA')} CAD`);
+      syncEngine.queueMutation({
+        userId: currentUser.id,
+        resource: 'funding',
+        recordId: id,
+        opType: 'delete',
+        payload: { id }
+      }, true).catch(() => {});
     }
   };
 
@@ -1423,6 +1673,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setDocuments(prev => [newDoc, ...prev]);
     logAction('Added Document Reference', 'Document', newDoc.title, `${newDoc.type} linked to ${newDoc.relatedName || newDoc.relatedType}`);
+    syncEngine.queueMutation({
+      userId: currentUser.id,
+      resource: 'documents',
+      recordId: newDoc.id,
+      opType: 'create',
+      payload: newDoc
+    }, true).catch(() => {});
     return newDoc;
   };
 
@@ -1431,6 +1688,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (doc) {
       setDocuments(prev => prev.filter(d => d.id !== id));
       logAction('Deleted Document Reference', 'Document', doc.title, `Removed document reference (${doc.type})`);
+      syncEngine.queueMutation({
+        userId: currentUser.id,
+        resource: 'documents',
+        recordId: id,
+        opType: 'delete',
+        payload: { id }
+      }, true).catch(() => {});
     }
   };
 
@@ -1963,7 +2227,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateAiUserSettings,
       refreshAiSuggestions,
       pendingActionPreview,
-      setPendingActionPreview
+      setPendingActionPreview,
+      databaseReadiness,
+      refreshDatabaseReadiness
     }}>
       {children}
     </CrmContext.Provider>

@@ -110,6 +110,10 @@ export const FundingView: React.FC<FundingViewProps> = ({
     .filter(f => f.status === 'Approved' || f.status === 'Applied' || f.status === 'Pledged' || f.status === 'Pending Review')
     .reduce((sum, f) => sum + f.amountCad, 0);
 
+  const totalRecordedFunding = funding.reduce((sum, f) => sum + (f.amountCad || 0), 0);
+  const activeFundersCount = new Set(funding.map(f => f.funderName || f.donorOrFunder).filter(Boolean)).size;
+  const fundedProgramsCount = new Set(funding.map(f => f.relatedProgramId || f.programId).filter(Boolean)).size;
+
   const handleCreateFunding = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFunderName.trim()) return;
@@ -250,15 +254,15 @@ export const FundingView: React.FC<FundingViewProps> = ({
             <span className="text-xs text-muted-foreground font-mono">Restricted RBAC Access</span>
           </div>
           <h4 className="text-sm font-semibold text-foreground font-serif">
-            $184,000 Total Recorded Funding · Concentrated Across 3 Major Programs
+            ${totalRecordedFunding.toLocaleString('en-CA')} CAD Total Recorded Funding · {fundedProgramsCount} Program{fundedProgramsCount === 1 ? '' : 's'} Funded
           </h4>
           <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
-            AI Observations: Funding is anchored across the Youth Leadership and BIPOC Leadership initiatives. Two programs currently have no dedicated external funding recorded for this fiscal cycle. Consider reviewing upcoming foundation deadlines in Reports.
+            AI Observations: {funding.length} total funding agreement{funding.length === 1 ? '' : 's'} recorded totaling ${totalRecordedFunding.toLocaleString('en-CA')} CAD (${totalReceived.toLocaleString('en-CA')} CAD received, ${totalPipeline.toLocaleString('en-CA')} CAD in pipeline). {activeFundersCount} distinct funding partner{activeFundersCount === 1 ? '' : 's'} supporting {fundedProgramsCount} initiative{fundedProgramsCount === 1 ? '' : 's'}.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Badge variant="outline" className="bg-card text-foreground text-xs py-1 px-2.5">
-            6 active funders
+            {activeFundersCount} active funder{activeFundersCount === 1 ? '' : 's'}
           </Badge>
         </div>
       </div>

@@ -44,6 +44,21 @@ export function normalizeAttendanceStatus(rawVal: string): { status: string; cha
 }
 
 /**
+ * Cleans and normalizes numeric/currency values (accounting negatives, commas, currency symbols)
+ */
+export function cleanNumericCell(val: string): string {
+  if (!val) return '';
+  let numVal = val.trim();
+  // Accounting negative format: (5,000) -> -5000
+  const isNegativeAccounting = /^\s*\((.+)\)\s*$/.test(numVal);
+  if (isNegativeAccounting) {
+    numVal = '-' + numVal.replace(/^\s*\((.+)\)\s*$/, '$1');
+  }
+  const numStr = numVal.replace(/[^0-9.-]/g, '');
+  return numStr;
+}
+
+/**
  * Clean and standardize raw rows based on column mappings
  */
 export function cleanDataset(
@@ -106,7 +121,7 @@ export function cleanDataset(
 
       // Clean funding/currency numbers
       else if (mappedField.toLowerCase().includes('funding') || mappedField.toLowerCase().includes('amount')) {
-        const numStr = val.replace(/[^0-9.-]/g, '');
+        const numStr = cleanNumericCell(val);
         if (val !== numStr && numStr !== '') {
           recordTransform('number_sanitized', val, numStr);
           val = numStr;

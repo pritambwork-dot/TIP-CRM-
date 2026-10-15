@@ -7,6 +7,19 @@
 
 import { DeterministicAnalysisResult, DataQualityReport, ColumnMapping } from '../types';
 
+/**
+ * Calculates the exact statistical median of an array of numbers
+ */
+export function calculateMedian(numbers: number[]): number {
+  if (!numbers || numbers.length === 0) return 0;
+  const sorted = [...numbers].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 !== 0) {
+    return sorted[mid];
+  }
+  return Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 100) / 100;
+}
+
 export function runDeterministicAnalytics(
   rows: Record<string, string>[],
   mappings: ColumnMapping[],
@@ -49,16 +62,30 @@ export function runDeterministicAnalytics(
   // ============================================================================
   if (isFundingData) {
     let totalFunding = 0;
+    let receivedFunding = 0;
+    let pipelineFunding = 0;
     const amounts: number[] = [];
+    const validAmountRecords: Array<{ amount: number; donor: string; program: string; status: string }> = [];
     const donorFundingMap: Record<string, number> = {};
     const programFundingMap: Record<string, number> = {};
+    const statusFundingMap: Record<string, number> = {};
+    let largestGrantAmount = 0;
+    let largestGrantFunder = 'Anonymous Donor';
 
     rows.forEach(r => {
       const rawAmt = amountCol ? r[amountCol] : '0';
-      const cleanNum = Number(rawAmt.replace(/[^0-9.-]/g, ''));
+      // Accounting format: (5000) -> -5000
+      let numVal = rawAmt;
+      if (/^\s*\((.+)\)\s*$/.test(numVal)) {
+        numVal = '-' + numVal.replace(/^\s*\((.+)\)\s*$/, '$1');
+      }
+      const cleanNum = Number(numVal.replace(/[^0-9.-]/g, ''));
       const amt = !isNaN(cleanNum) ? cleanNum : 0;
+      const statusRaw = statusCol && r[statusCol] ? r[statusCol].trim() : 'Received';
+      const statusNorm = statusRaw.toLowerCase();
 
-      if (amt > 0) {
+      // Track all non-negative valid amounts
+      if (amt >= 0) {
         totalFunding += amt;
         amounts.push(amt);
 
@@ -67,27 +94,45 @@ export function runDeterministicAnalytics(
 
         const prog = programCol && r[programCol] ? r[programCol].trim() : 'General Operations';
         programFundingMap[prog] = (programFundingMap[prog] || 0) + amt;
+
+        // Group by status
+        statusFundingMap[statusRaw] = (statusFundingMap[statusRaw] || 0) + amt;
+
+        if (['received', 'deposited', 'cleared'].includes(statusNorm)) {
+          receivedFunding += amt;
+        } else {
+          pipelineFunding += amt;
+        }
+
+        validAmountRecords.push({ amount: amt, donor, program: prog, status: statusRaw });
+
+        if (amt > largestGrantAmount) {
+          largestGrantAmount = amt;
+          largestGrantFunder = donor;
+        }
       }
     });
 
+    // Statistical Median Calculation (Even vs Odd Lengths)
     amounts.sort((a, b) => a - b);
     const avgFunding = amounts.length > 0 ? Math.round(totalFunding / amounts.length) : 0;
-    const medianFunding = amounts.length > 0 ? amounts[Math.floor(amounts.length / 2)] : 0;
-    const maxFunding = amounts.length > 0 ? amounts[amounts.length - 1] : 0;
+    const medianFunding = calculateMedian(amounts);
+    const maxFunding = largestGrantAmount;
 
     // Top donor concentration calculation
     const donorRankings = Object.entries(donorFundingMap).sort(([, a], [, b]) => b - a);
     const topDonorAmount = donorRankings.length > 0 ? donorRankings[0][1] : 0;
+    const topDonorName = donorRankings.length > 0 ? donorRankings[0][0] : 'None';
     const topDonorConcentration = totalFunding > 0 ? Math.round((topDonorAmount / totalFunding) * 1000) / 10 : 0;
 
     if (topDonorConcentration >= 40 && donorRankings.length > 0) {
-      anomalies.push(`Funding concentration risk: ${donorRankings[0][0]} accounts for ${topDonorConcentration}% of total recorded funding.`);
+      anomalies.push(`Funding concentration risk: ${topDonorName} accounts for ${topDonorConcentration}% of total recorded funding.`);
     }
 
     kpis.push(
-      { label: 'Total Recorded Funding', value: `$${totalFunding.toLocaleString('en-CA')} CAD`, subtext: `${amounts.length} contributions received` },
+      { label: 'Total Recorded Funding', value: `$${totalFunding.toLocaleString('en-CA')} CAD`, subtext: `${amounts.length} contributions recorded` },
       { label: 'Average Contribution', value: `$${avgFunding.toLocaleString('en-CA')}`, subtext: `Median: $${medianFunding.toLocaleString('en-CA')}` },
-      { label: 'Largest Single Grant', value: `$${maxFunding.toLocaleString('en-CA')}`, subtext: donorRankings[0] ? donorRankings[0][0] : undefined },
+      { label: 'Largest Single Grant', value: `$${maxFunding.toLocaleString('en-CA')}`, subtext: largestGrantFunder },
       { label: 'Top Donor Concentration', value: `${topDonorConcentration}%`, subtext: `${donorRankings.length} total funding sources` }
     );
 
@@ -125,22 +170,41 @@ export function runDeterministicAnalytics(
       kpis,
       charts,
       structuredPayloadForAi: {
+        datasetType: 'funding',
         summary: `$${totalFunding.toLocaleString('en-CA')} CAD total funding recorded across ${donorRankings.length} funding sources and ${Object.keys(programFundingMap).length} programs.`,
         keyMetrics: {
           totalFundingCad: totalFunding,
+          receivedFundingCad: receivedFunding,
+          pipelineFundingCad: pipelineFunding,
           averageGrantCad: avgFunding,
           medianGrantCad: medianFunding,
           largestGrantCad: maxFunding,
+          largestGrantFunder: largestGrantFunder,
           topFunderSharePercentage: topDonorConcentration,
+          topFunderName: topDonorName,
           fundersCount: donorRankings.length,
-          programsFundedCount: Object.keys(programFundingMap).length
+          programsFundedCount: Object.keys(programFundingMap).length,
+          fundingByStatus: statusFundingMap
         },
         groupings: {
           topFunders: donorRankings.slice(0, 5).map(([d, a]) => ({ donor: d, amount: a })),
           programsAllocation: programFundingMap
         },
         anomalies,
-        dataQualityNotes
+        dataQualityNotes,
+        evidence: [
+          { metricId: 'total_funding_cad', label: 'Total Recorded Funding', value: `$${totalFunding.toLocaleString('en-CA')} CAD`, rawNumber: totalFunding },
+          { metricId: 'average_grant_cad', label: 'Average Contribution', value: `$${avgFunding.toLocaleString('en-CA')} CAD`, rawNumber: avgFunding },
+          { metricId: 'median_grant_cad', label: 'Median Contribution', value: `$${medianFunding.toLocaleString('en-CA')} CAD`, rawNumber: medianFunding },
+          { metricId: 'largest_grant_cad', label: 'Largest Single Grant', value: `$${maxFunding.toLocaleString('en-CA')} CAD`, rawNumber: maxFunding, entity: largestGrantFunder },
+          { metricId: 'top_funder_share', label: 'Top Funder Concentration', value: `${topDonorConcentration}%`, rawNumber: topDonorConcentration, entity: topDonorName },
+          { metricId: 'funders_count', label: 'Funding Sources Count', value: `${donorRankings.length} sources`, rawNumber: donorRankings.length },
+          { metricId: 'programs_funded_count', label: 'Programs Funded Count', value: `${Object.keys(programFundingMap).length} programs`, rawNumber: Object.keys(programFundingMap).length }
+        ],
+        limitations: [
+          `Analysis is strictly confined to the ${rowCount} recorded entries in this dataset.`,
+          `No multi-year comparative historical records were loaded in this dataset session.`
+        ]
       }
     };
   }
@@ -322,6 +386,7 @@ export function runDeterministicAnalytics(
       kpis,
       charts,
       structuredPayloadForAi: {
+        datasetType: 'attendance',
         summary: `${rowCount} attendance records analyzed across ${programsSet.size} programs and ${eventsSet.size} events with ${uniqueParticipants.size} unique participants.`,
         keyMetrics: {
           totalRegistrations: totalRecords,
@@ -338,7 +403,19 @@ export function runDeterministicAnalytics(
           programs: programStats.slice(0, 6)
         },
         anomalies,
-        dataQualityNotes
+        dataQualityNotes,
+        evidence: [
+          { metricId: 'total_registrations', label: 'Total Registrations', value: `${totalRecords} registrations`, rawNumber: totalRecords },
+          { metricId: 'confirmed_attendance', label: 'Confirmed Attendance', value: `${attendedCount} attendees`, rawNumber: attendedCount },
+          { metricId: 'attendance_rate', label: 'Attendance Rate', value: `${attendanceRate}%`, rawNumber: attendanceRate },
+          { metricId: 'repeat_participation', label: 'Repeat Participation', value: `${repeatRate}%`, rawNumber: repeatRate },
+          { metricId: 'unique_participants', label: 'Unique Participants', value: `${uniqueParticipants.size} participants`, rawNumber: uniqueParticipants.size },
+          { metricId: 'programs_count', label: 'Active Programs Count', value: `${programsSet.size} programs`, rawNumber: programsSet.size }
+        ],
+        limitations: [
+          `Attendance calculations are strictly based on the ${totalRecords} uploaded records.`,
+          `No historical multi-year records were provided in this dataset.`
+        ]
       }
     };
   }
@@ -361,6 +438,7 @@ export function runDeterministicAnalytics(
     kpis,
     charts,
     structuredPayloadForAi: {
+      datasetType: 'generic',
       summary: `${rowCount} records processed across ${mappings.length} attributes.`,
       keyMetrics: {
         totalRows: rowCount,
@@ -369,7 +447,15 @@ export function runDeterministicAnalytics(
       },
       groupings: {},
       anomalies,
-      dataQualityNotes
+      dataQualityNotes,
+      evidence: [
+        { metricId: 'total_rows', label: 'Total Rows', value: `${rowCount} rows`, rawNumber: rowCount },
+        { metricId: 'valid_rows', label: 'Valid Rows', value: `${qualityReport.validRows} rows`, rawNumber: qualityReport.validRows },
+        { metricId: 'quality_pct', label: 'Quality Percentage', value: `${qualityReport.validPercentage}%`, rawNumber: qualityReport.validPercentage }
+      ],
+      limitations: [
+        `Generic dataset without designated financial or attendance schema. Analysis is strictly statistical.`
+      ]
     }
   };
 }

@@ -11,7 +11,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TYPE user_role_level AS ENUM ('super_admin', 'staff_manager', 'staff_member', 'volunteer');
 CREATE TYPE user_account_status AS ENUM ('pending', 'approved', 'rejected', 'suspended', 'disabled');
-CREATE TYPE data_scope_type AS ENUM ('GLOBAL', 'ORGANIZATION', 'PROGRAM', 'EVENT', 'ASSIGNED', 'OWN_RECORD');
+CREATE TYPE data_scope_type AS ENUM ('ALL', 'GLOBAL', 'ORGANIZATION', 'PROGRAM', 'EVENT', 'ASSIGNED', 'OWN_RECORD', 'SCOPED');
 
 CREATE TYPE relationship_type AS ENUM (
   'Partner', 'Funder / Donor', 'Participant', 'Volunteer', 
@@ -961,16 +961,18 @@ ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS analysis_files_super_admin ON analysis_files;
 CREATE POLICY analysis_files_super_admin ON analysis_files FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS analysis_files_read ON analysis_files;
-CREATE POLICY analysis_files_read ON analysis_files FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS analysis_files_insert ON analysis_files FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS analysis_files_delete ON analysis_files FOR DELETE USING (is_staff_manager_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS analysis_files_insert ON analysis_files;
+CREATE POLICY analysis_files_insert ON analysis_files FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS analysis_files_delete ON analysis_files;
+CREATE POLICY analysis_files_delete ON analysis_files FOR DELETE USING (is_staff_manager_or_higher() AND organization_id = current_user_org_id());
 
 -- Policies for analysis_jobs
 DROP POLICY IF EXISTS super_admin_all_intelligence ON analysis_jobs;
 CREATE POLICY super_admin_all_intelligence ON analysis_jobs FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS staff_intelligence_access ON analysis_jobs;
 CREATE POLICY staff_intelligence_access ON analysis_jobs FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS staff_intelligence_insert ON analysis_jobs FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS staff_intelligence_insert ON analysis_jobs;
+CREATE POLICY staff_intelligence_insert ON analysis_jobs FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
 
 -- Policies for analysis_results
 DROP POLICY IF EXISTS analysis_results_super_admin ON analysis_results;
@@ -1057,7 +1059,13 @@ ON CONFLICT (id) DO UPDATE SET
   allowed_mime_types = EXCLUDED.allowed_mime_types;
 
 -- 2. Storage Row Level Security (RLS) Policies on storage.objects
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END $$;
 
 -- Policy: Documents & Attachments Read Scoping (Restricted to authorized roles; volunteers cannot read general documents)
 DROP POLICY IF EXISTS storage_documents_read ON storage.objects;
@@ -1170,7 +1178,7 @@ CREATE POLICY documents_role_governed_view ON public.documents
       EXISTS (
         SELECT 1 FROM users u
         JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() 
+        WHERE u.auth_user_id = auth.uid()::text 
           AND ur.role_id IN ('super_admin', 'staff_manager')
       )
       OR
@@ -1179,7 +1187,7 @@ CREATE POLICY documents_role_governed_view ON public.documents
         EXISTS (
           SELECT 1 FROM users u
           JOIN user_roles ur ON ur.user_id = u.id
-          WHERE u.auth_user_id = auth.uid() 
+          WHERE u.auth_user_id = auth.uid()::text 
             AND ur.role_id = 'staff_member'
         )
         AND (is_confidential = FALSE OR access_tier IN ('all', 'staff'))
@@ -1190,7 +1198,7 @@ CREATE POLICY documents_role_governed_view ON public.documents
         EXISTS (
           SELECT 1 FROM users u
           JOIN user_roles ur ON ur.user_id = u.id
-          WHERE u.auth_user_id = auth.uid() 
+          WHERE u.auth_user_id = auth.uid()::text 
             AND ur.role_id = 'volunteer'
         )
         AND is_confidential = FALSE 
@@ -1206,7 +1214,7 @@ CREATE POLICY documents_staff_insert ON public.documents
     user_has_crm_access() AND EXISTS (
       SELECT 1 FROM users u
       JOIN user_roles ur ON ur.user_id = u.id
-      WHERE u.auth_user_id = auth.uid() 
+      WHERE u.auth_user_id = auth.uid()::text 
         AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
     )
   );
@@ -1217,11 +1225,11 @@ CREATE POLICY documents_owner_or_manager_modify ON public.documents
   FOR UPDATE USING (
     user_has_crm_access() AND (
       is_super_admin() OR
-      added_by = (SELECT id FROM users WHERE auth_user_id = auth.uid()) OR
+      added_by = (SELECT id FROM users WHERE auth_user_id = auth.uid()::text) OR
       EXISTS (
         SELECT 1 FROM users u
         JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND ur.role_id = 'staff_manager'
+        WHERE u.auth_user_id = auth.uid()::text AND ur.role_id = 'staff_manager'
       )
     )
   );
@@ -1230,11 +1238,11 @@ CREATE POLICY documents_owner_or_manager_delete ON public.documents
   FOR DELETE USING (
     user_has_crm_access() AND (
       is_super_admin() OR
-      added_by = (SELECT id FROM users WHERE auth_user_id = auth.uid()) OR
+      added_by = (SELECT id FROM users WHERE auth_user_id = auth.uid()::text) OR
       EXISTS (
         SELECT 1 FROM users u
         JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND ur.role_id = 'staff_manager'
+        WHERE u.auth_user_id = auth.uid()::text AND ur.role_id = 'staff_manager'
       )
     )
   );
@@ -1243,6 +1251,7 @@ CREATE POLICY documents_owner_or_manager_delete ON public.documents
 -- Enforce authorization directly on storage objects so knowledge of an object path does not bypass security.
 
 -- Storage Object SELECT (Download / Signed URL Generation)
+DROP POLICY IF EXISTS "tip_storage_private_select" ON storage.objects;
 CREATE POLICY "tip_storage_private_select" ON storage.objects
   FOR SELECT TO authenticated
   USING (
@@ -1252,7 +1261,7 @@ CREATE POLICY "tip_storage_private_select" ON storage.objects
       EXISTS (
         SELECT 1 FROM users u
         JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND ur.role_id IN ('super_admin', 'staff_manager')
+        WHERE u.auth_user_id = auth.uid()::text AND ur.role_id IN ('super_admin', 'staff_manager')
       ) OR
       -- Check corresponding document metadata record in public.documents
       EXISTS (
@@ -1264,6 +1273,7 @@ CREATE POLICY "tip_storage_private_select" ON storage.objects
   );
 
 -- Storage Object INSERT (Direct Upload)
+DROP POLICY IF EXISTS "tip_storage_private_insert" ON storage.objects;
 CREATE POLICY "tip_storage_private_insert" ON storage.objects
   FOR INSERT TO authenticated
   WITH CHECK (
@@ -1272,12 +1282,13 @@ CREATE POLICY "tip_storage_private_insert" ON storage.objects
     EXISTS (
       SELECT 1 FROM users u
       JOIN user_roles ur ON ur.user_id = u.id
-      WHERE u.auth_user_id = auth.uid() 
+      WHERE u.auth_user_id = auth.uid()::text 
         AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
     )
   );
 
 -- Storage Object DELETE
+DROP POLICY IF EXISTS "tip_storage_private_delete" ON storage.objects;
 CREATE POLICY "tip_storage_private_delete" ON storage.objects
   FOR DELETE TO authenticated
   USING (
@@ -1287,7 +1298,7 @@ CREATE POLICY "tip_storage_private_delete" ON storage.objects
       EXISTS (
         SELECT 1 FROM users u
         JOIN user_roles ur ON ur.user_id = u.id
-        WHERE u.auth_user_id = auth.uid() AND ur.role_id = 'staff_manager'
+        WHERE u.auth_user_id = auth.uid()::text AND ur.role_id = 'staff_manager'
       )
     )
   );
@@ -1343,8 +1354,11 @@ ALTER TABLE IF EXISTS ai_usage_logs ENABLE ROW LEVEL SECURITY;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'storage' AND table_name = 'objects') THEN
-    EXECUTE 'ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;';
+    ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
   END IF;
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
 END $$;
 
 -- ==============================================================================
@@ -1791,14 +1805,17 @@ DROP POLICY IF EXISTS analysis_files_super_admin ON public.analysis_files;
 CREATE POLICY analysis_files_super_admin ON public.analysis_files FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS analysis_files_read ON public.analysis_files;
 CREATE POLICY analysis_files_read ON public.analysis_files FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS analysis_files_insert ON public.analysis_files FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS analysis_files_delete ON public.analysis_files FOR DELETE USING (is_staff_manager_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS analysis_files_insert ON public.analysis_files;
+CREATE POLICY analysis_files_insert ON public.analysis_files FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS analysis_files_delete ON public.analysis_files;
+CREATE POLICY analysis_files_delete ON public.analysis_files FOR DELETE USING (is_staff_manager_or_higher() AND organization_id = current_user_org_id());
 
 DROP POLICY IF EXISTS super_admin_all_intelligence ON public.analysis_jobs;
 CREATE POLICY super_admin_all_intelligence ON public.analysis_jobs FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS staff_intelligence_access ON public.analysis_jobs;
 CREATE POLICY staff_intelligence_access ON public.analysis_jobs FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS staff_intelligence_insert ON public.analysis_jobs FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS staff_intelligence_insert ON public.analysis_jobs;
+CREATE POLICY staff_intelligence_insert ON public.analysis_jobs FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
 
 DROP POLICY IF EXISTS analysis_results_super_admin ON public.analysis_results;
 CREATE POLICY analysis_results_super_admin ON public.analysis_results FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());

@@ -11,7 +11,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TYPE user_role_level AS ENUM ('super_admin', 'staff_manager', 'staff_member', 'volunteer');
 CREATE TYPE user_account_status AS ENUM ('pending', 'approved', 'rejected', 'suspended', 'disabled');
-CREATE TYPE data_scope_type AS ENUM ('GLOBAL', 'ORGANIZATION', 'PROGRAM', 'EVENT', 'ASSIGNED', 'OWN_RECORD');
+CREATE TYPE data_scope_type AS ENUM ('ALL', 'GLOBAL', 'ORGANIZATION', 'PROGRAM', 'EVENT', 'ASSIGNED', 'OWN_RECORD', 'SCOPED');
 
 CREATE TYPE relationship_type AS ENUM (
   'Partner', 'Funder / Donor', 'Participant', 'Volunteer', 
@@ -961,16 +961,18 @@ ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS analysis_files_super_admin ON analysis_files;
 CREATE POLICY analysis_files_super_admin ON analysis_files FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS analysis_files_read ON analysis_files;
-CREATE POLICY analysis_files_read ON analysis_files FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS analysis_files_insert ON analysis_files FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS analysis_files_delete ON analysis_files FOR DELETE USING (is_staff_manager_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS analysis_files_insert ON analysis_files;
+CREATE POLICY analysis_files_insert ON analysis_files FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS analysis_files_delete ON analysis_files;
+CREATE POLICY analysis_files_delete ON analysis_files FOR DELETE USING (is_staff_manager_or_higher() AND organization_id = current_user_org_id());
 
 -- Policies for analysis_jobs
 DROP POLICY IF EXISTS super_admin_all_intelligence ON analysis_jobs;
 CREATE POLICY super_admin_all_intelligence ON analysis_jobs FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS staff_intelligence_access ON analysis_jobs;
 CREATE POLICY staff_intelligence_access ON analysis_jobs FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS staff_intelligence_insert ON analysis_jobs FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS staff_intelligence_insert ON analysis_jobs;
+CREATE POLICY staff_intelligence_insert ON analysis_jobs FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
 
 -- Policies for analysis_results
 DROP POLICY IF EXISTS analysis_results_super_admin ON analysis_results;
@@ -1057,7 +1059,13 @@ ON CONFLICT (id) DO UPDATE SET
   allowed_mime_types = EXCLUDED.allowed_mime_types;
 
 -- 2. Storage Row Level Security (RLS) Policies on storage.objects
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+  ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END $$;
 
 -- Policy: Documents & Attachments Read Scoping (Restricted to authorized roles; volunteers cannot read general documents)
 DROP POLICY IF EXISTS storage_documents_read ON storage.objects;

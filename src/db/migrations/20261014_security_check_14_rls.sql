@@ -50,8 +50,11 @@ ALTER TABLE IF EXISTS ai_usage_logs ENABLE ROW LEVEL SECURITY;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'storage' AND table_name = 'objects') THEN
-    EXECUTE 'ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;';
+    ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
   END IF;
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
 END $$;
 
 -- ==============================================================================
@@ -498,14 +501,17 @@ DROP POLICY IF EXISTS analysis_files_super_admin ON public.analysis_files;
 CREATE POLICY analysis_files_super_admin ON public.analysis_files FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS analysis_files_read ON public.analysis_files;
 CREATE POLICY analysis_files_read ON public.analysis_files FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS analysis_files_insert ON public.analysis_files FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS analysis_files_delete ON public.analysis_files FOR DELETE USING (is_staff_manager_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS analysis_files_insert ON public.analysis_files;
+CREATE POLICY analysis_files_insert ON public.analysis_files FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS analysis_files_delete ON public.analysis_files;
+CREATE POLICY analysis_files_delete ON public.analysis_files FOR DELETE USING (is_staff_manager_or_higher() AND organization_id = current_user_org_id());
 
 DROP POLICY IF EXISTS super_admin_all_intelligence ON public.analysis_jobs;
 CREATE POLICY super_admin_all_intelligence ON public.analysis_jobs FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS staff_intelligence_access ON public.analysis_jobs;
 CREATE POLICY staff_intelligence_access ON public.analysis_jobs FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
-DROP POLICY IF EXISTS staff_intelligence_insert ON public.analysis_jobs FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+DROP POLICY IF EXISTS staff_intelligence_insert ON public.analysis_jobs;
+CREATE POLICY staff_intelligence_insert ON public.analysis_jobs FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
 
 DROP POLICY IF EXISTS analysis_results_super_admin ON public.analysis_results;
 CREATE POLICY analysis_results_super_admin ON public.analysis_results FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());

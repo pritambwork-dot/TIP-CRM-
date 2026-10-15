@@ -1,0 +1,17 @@
+{
+  "name": "The Inclusion Project CRM",
+  "short_name": "TIP CRM",
+  "description": "The Inclusion Project CRM - Grounded CRM, Programs, Reporting, and Work Intelligence",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FBFBFA",
+  "theme_color": "#140a8e",
+  "icons": [
+    {
+      "src": "/tip-emblem.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

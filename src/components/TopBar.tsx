@@ -21,6 +21,7 @@ import { useCrm } from '../context/CrmContext';
 import { NavTab, RoleId } from '../types';
 import { TipLogo } from './TipLogo';
 import { Button, Badge } from './ui';
+import { SyncStatusIndicator } from './common';
 import { ROLE_DEFINITIONS } from '../lib/permissions';
 
 interface TopBarProps {
@@ -199,6 +200,9 @@ export const TopBar: React.FC<TopBarProps> = ({
           <Plus className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Add</span>
         </Button>
+
+        {/* Network & Offline Synchronization Status Indicator */}
+        <SyncStatusIndicator userId={currentUser?.id} />
 
         {/* Notifications Bell with macOS/iOS Flyout */}
         <div className="relative">
