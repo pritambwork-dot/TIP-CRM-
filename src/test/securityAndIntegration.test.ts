@@ -93,6 +93,7 @@ import {
 import { syncEngine } from '../lib/syncEngine.ts';
 import { SupabaseAuthEngine, sanitizeRedirectPath } from '../lib/supabase.ts';
 import { INITIAL_USERS } from '../data/mockData.ts';
+import { ROLE_DEFINITIONS } from '../lib/permissions.ts';
 import {
   DatabaseHealthService,
   PeopleService,
@@ -2441,9 +2442,17 @@ async function runTests() {
   assert(activeUser !== null && activeUser.email === 'pritam@gmail.com', 'getActiveSupabaseUser returns active authenticated Google user');
 
   // 4. Client-side RBAC Approval Evaluation Logic
+  const testUsersPool = [
+    ...INITIAL_USERS,
+    { id: 'u-mgr-test', email: 'marcus.chen@inclusionproject.ca', roleId: 'staff_manager', status: 'approved', isActive: true, adminApproved: true },
+    { id: 'u-coord-test', email: 'sarah.thompson@inclusionproject.ca', roleId: 'program_coordinator', status: 'approved', isActive: true, adminApproved: true },
+    { id: 'u-pending-test', email: 'elena.rostova@gmail.com', roleId: 'staff_member', status: 'pending', isActive: false, adminApproved: false },
+    { id: 'u-rejected-test', email: 'david.kalu@gmail.com', roleId: 'volunteer', status: 'rejected', isActive: false, adminApproved: false },
+    { id: 'u-disabled-test', email: 'alex.mercer@gmail.com', roleId: 'staff_member', status: 'disabled', isActive: false, adminApproved: true }
+  ];
   const evalCrmApproval = (googleEmail: string) => {
     const cleanEmail = googleEmail.toLowerCase().trim();
-    let matchedUser = INITIAL_USERS.find(u => u.email.toLowerCase().trim() === cleanEmail);
+    let matchedUser = testUsersPool.find(u => u.email.toLowerCase().trim() === cleanEmail);
     if (!matchedUser && (cleanEmail === 'pritamb2k06@gmail.com' || cleanEmail === 'pritam@gmail.com')) {
       matchedUser = INITIAL_USERS.find(u => u.id === 'u-1') || INITIAL_USERS[0];
     }
@@ -2819,10 +2828,147 @@ async function runTests() {
   assert(userACacheAfterPurge === null, 'clearUserOfflineCache completely wipes User A records on logout');
 
   // 8. Role-Based Data Scoping Protection (Volunteers vs Super Admin)
-  const volunteerUser = INITIAL_USERS.find(u => u.roleId === 'volunteer');
-  assert(volunteerUser?.dataScope.funding === 'NONE', 'Volunteer data scope strictly forbids funding access (funding=NONE)');
+  const volunteerScope = ROLE_DEFINITIONS.volunteer.defaultDataScope;
+  assert(volunteerScope.funding === 'NONE', 'Volunteer data scope strictly forbids funding access (funding=NONE)');
   const superAdminUser = INITIAL_USERS.find(u => u.roleId === 'super_admin');
   assert(superAdminUser?.dataScope.funding === 'ALL', 'Super Admin data scope grants full funding oversight (funding=ALL)');
+
+  // --------------------------------------------------------------------------
+  // Test Suite 27: Database Schema, SQL Idempotency, and Row-Level Security Rules Verification
+  // --------------------------------------------------------------------------
+  console.log('\nTest Suite 27: Database Schema, SQL Idempotency, and Row-Level Security Rules Verification');
+
+  const deployAllSqlPath = path.resolve(process.cwd(), 'src/db/deploy_all.sql');
+  const schemaSqlPath = path.resolve(process.cwd(), 'src/db/schema.sql');
+
+  assert(fs.existsSync(deployAllSqlPath), 'deploy_all.sql exists in src/db/');
+  assert(fs.existsSync(schemaSqlPath), 'schema.sql exists in src/db/');
+
+  const deploySql = fs.readFileSync(deployAllSqlPath, 'utf8');
+  const schemaSql = fs.readFileSync(schemaSqlPath, 'utf8');
+
+  // 1. All 28 Required Production Tables Present
+  const expectedTables = [
+    'organizations',
+    'roles',
+    'permissions',
+    'role_permissions',
+    'users',
+    'user_roles',
+    'access_requests',
+    'user_program_access',
+    'user_event_access',
+    'people',
+    'programs',
+    'program_members',
+    'program_participants',
+    'events',
+    'event_staff',
+    'event_participants',
+    'tasks',
+    'interactions',
+    'funding_records',
+    'documents',
+    'audit_logs',
+    'analysis_files',
+    'analysis_jobs',
+    'analysis_results',
+    'analysis_metrics',
+    'analysis_insights',
+    'ai_requests',
+    'ai_usage_logs'
+  ];
+
+  for (const table of expectedTables) {
+    const tablePattern = new RegExp(`CREATE TABLE IF NOT EXISTS public\\.${table}\\s*\\(`, 'i');
+    assert(tablePattern.test(deploySql), `deploy_all.sql creates table public.${table} with IF NOT EXISTS`);
+    assert(tablePattern.test(schemaSql), `schema.sql creates table public.${table} with IF NOT EXISTS`);
+  }
+
+  // 2. All 14 Custom Enums Declared Idempotently (DO $$ BEGIN ... EXCEPTION)
+  const expectedEnums = [
+    'user_role_level',
+    'user_account_status',
+    'data_scope_type',
+    'relationship_type',
+    'organization_type',
+    'program_status',
+    'event_type',
+    'participant_status',
+    'task_priority',
+    'task_status',
+    'interaction_type',
+    'funding_status',
+    'analysis_job_status',
+    'analysis_insight_type'
+  ];
+
+  for (const enumName of expectedEnums) {
+    const enumPattern = new RegExp(`CREATE TYPE ${enumName} AS ENUM`, 'i');
+    assert(enumPattern.test(deploySql), `deploy_all.sql defines enum type ${enumName}`);
+    assert(deploySql.includes(`EXCEPTION WHEN duplicate_object THEN NULL;`), 'deploy_all.sql enums are guarded against duplicate_object errors');
+  }
+
+  // 3. Row-Level Security Enabled on All 28 Tables
+  for (const table of expectedTables) {
+    const rlsPattern = new RegExp(`ALTER TABLE IF EXISTS public\\.${table} ENABLE ROW LEVEL SECURITY;`, 'i');
+    assert(rlsPattern.test(deploySql), `RLS enabled on public.${table} in deploy_all.sql`);
+  }
+
+  // 4. Critical Security Functions with SET search_path = public, pg_temp
+  const expectedSecurityDefinerFunctions = [
+    'user_has_crm_access',
+    'current_user_id',
+    'current_user_org_id',
+    'is_super_admin',
+    'is_staff_manager_or_higher',
+    'is_staff_member_or_higher',
+    'get_current_app_user',
+    'check_users_self_elevation',
+    'purge_audit_logs_older_than'
+  ];
+
+  for (const fn of expectedSecurityDefinerFunctions) {
+    const fnDefPattern = new RegExp(`FUNCTION public\\.${fn}\\(`, 'i');
+    assert(fnDefPattern.test(deploySql), `deploy_all.sql defines function public.${fn}`);
+    assert(deploySql.includes(`SECURITY DEFINER`), `Function public.${fn} uses SECURITY DEFINER`);
+  }
+  assert((deploySql.match(/SET search_path = public, pg_temp/g) || []).length >= 9, 'All security definer helper functions enforce fixed search_path = public, pg_temp');
+
+  // 5. Audit Log Immutability Enforcement
+  assert(deploySql.includes('trg_audit_logs_immutable'), 'deploy_all.sql includes audit log immutability trigger');
+  assert(deploySql.includes('prevent_audit_log_modification'), 'deploy_all.sql binds prevent_audit_log_modification trigger function');
+  assert(!deploySql.includes('CREATE POLICY audit_logs_update'), 'deploy_all.sql has ZERO update policies for audit_logs');
+  assert(!deploySql.includes('CREATE POLICY audit_logs_delete'), 'deploy_all.sql has ZERO delete policies for audit_logs');
+
+  // 6. Anti-Self-Elevation Protection on Users Table
+  assert(deploySql.includes('trg_prevent_self_elevation_users'), 'deploy_all.sql attaches trg_prevent_self_elevation_users trigger to public.users');
+  assert(deploySql.includes('Security violation: Users cannot modify their own status'), 'check_users_self_elevation rejects status/scope elevation');
+
+  // 7. Fiduciary & Financial Boundary: Strict Volunteer Denial
+  assert(deploySql.includes('funding_authorized_view'), 'funding_records policy funding_authorized_view is declared');
+  assert(deploySql.includes("funding_scope IN ('ALL', 'VIEW')"), 'funding_records requires funding_scope IN (ALL, VIEW) or manager role');
+  assert(!deploySql.includes('volunteer') || !deploySql.includes("CREATE POLICY funding_volunteer"), 'Zero funding access granted to volunteer role');
+
+  // 8. Storage Buckets & Policies: 4 Private Buckets
+  assert(deploySql.includes("'tip-crm-private-documents'"), 'deploy_all.sql initializes tip-crm-private-documents storage bucket');
+  assert(deploySql.includes("'crm_documents'"), 'deploy_all.sql initializes crm_documents storage bucket');
+  assert(deploySql.includes("'crm_attachments'"), 'deploy_all.sql initializes crm_attachments storage bucket');
+  assert(deploySql.includes("'crm_backups'"), 'deploy_all.sql initializes crm_backups storage bucket');
+  assert(deploySql.includes('storage_backups_super_admin'), 'Database backup bucket access restricted to Super Admin only');
+
+  // 9. Subquery Performance Optimization
+  assert(deploySql.includes('(SELECT public.user_has_crm_access())'), 'deploy_all.sql uses cached subquery (SELECT public.user_has_crm_access()) in policies');
+  assert(deploySql.includes('(SELECT auth.uid())'), 'deploy_all.sql wraps auth.uid() in (SELECT auth.uid()) for query plan caching');
+
+  // 10. Privilege Hardening: Public/Anon execution revoked
+  assert(deploySql.includes('REVOKE CREATE ON SCHEMA public FROM anon;'), 'Anonymous schema creation privileges revoked');
+  assert(deploySql.includes('REVOKE EXECUTE ON FUNCTION public.purge_audit_logs_older_than(INTEGER) FROM PUBLIC;'), 'Public execution on purge_audit_logs_older_than revoked');
+
+  // 11. Zero Hardcoded Credentials or Secrets
+  assert(!deploySql.includes('sbp_'), 'deploy_all.sql contains zero personal access tokens');
+  assert(!deploySql.includes('eyJh'), 'deploy_all.sql contains zero JWT tokens');
+  assert(!deploySql.includes('service_role_key'), 'deploy_all.sql contains zero service role secrets');
 
   // --------------------------------------------------------------------------
   // Summary

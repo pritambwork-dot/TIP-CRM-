@@ -397,11 +397,11 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                     </p>
                     <div className="flex flex-wrap gap-1.5">
                       {[
-                        { label: 'Sarah Thompson', query: 'Sarah Thompson' },
-                        { label: 'Youth Leadership', query: 'Youth Leadership' },
-                        { label: 'Accessibility Lab', query: 'Accessibility' },
-                        { label: 'Trillium Foundation', query: 'Trillium Foundation' },
-                        { label: 'Research Methodology', query: 'Research Methodology' }
+                        { label: 'Programs', query: 'Program' },
+                        { label: 'Workshops & Events', query: 'Workshop' },
+                        { label: 'Partner Organizations', query: 'Partner' },
+                        { label: 'Grants & Funding', query: 'Grant' },
+                        { label: 'Open Tasks', query: 'Task' }
                       ].map(item => (
                         <button
                           key={item.label}

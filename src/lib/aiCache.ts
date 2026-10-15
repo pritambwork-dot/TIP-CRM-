@@ -25,9 +25,9 @@ export interface CacheStats {
 
 class AiCacheManager {
   private cache = new Map<string, CacheEntry>();
-  private hits = 18; // seeded baseline
-  private misses = 4;
-  private tokensSaved = 14200;
+  private hits = 0;
+  private misses = 0;
+  private tokensSaved = 0;
 
   /**
    * Fast, stable string hashing (Murmur-style 32-bit hash converted to hex)

@@ -1,42 +1,106 @@
 -- ==============================================================================
 -- TIP CRM — PostgreSQL / Supabase Production Database Schema
--- Architecture: 4-Level RBAC + Data-Level Access Control (RLS)
--- Domains: Identity, CRM, Programs, Work, Funding, Documents, Audit
+-- Version: 2.0.0 (Consolidated, Idempotent, Dependency-Safe, Production-Hardened)
+-- Architecture: 4-Level RBAC + Grounded AI + Private Storage + Strict Data-Level RLS
+-- Security Standard: OWASP Top 10 / SOC 2 Least Privilege / Zero Leaked Secrets
+-- Notice: Safe for execution on fresh projects or existing partially-migrated databases.
 -- ==============================================================================
 
--- ------------------------------------------------------------------------------
--- 1. EXTENSIONS & ENUMS
--- ------------------------------------------------------------------------------
+BEGIN;
+
+-- ==============================================================================
+-- 1. EXTENSIONS
+-- ==============================================================================
+
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-CREATE TYPE user_role_level AS ENUM ('super_admin', 'staff_manager', 'staff_member', 'volunteer');
-CREATE TYPE user_account_status AS ENUM ('pending', 'approved', 'rejected', 'suspended', 'disabled');
-CREATE TYPE data_scope_type AS ENUM ('ALL', 'GLOBAL', 'ORGANIZATION', 'PROGRAM', 'EVENT', 'ASSIGNED', 'OWN_RECORD', 'SCOPED');
+-- ==============================================================================
+-- 2. ENUMS & DOMAIN TYPES (Idempotent Creation)
+-- ==============================================================================
 
-CREATE TYPE relationship_type AS ENUM (
-  'Partner', 'Funder / Donor', 'Participant', 'Volunteer', 
-  'Advisor', 'Facilitator', 'Stakeholder', 'Other'
-);
+DO $$ BEGIN
+  CREATE TYPE user_role_level AS ENUM ('super_admin', 'staff_manager', 'staff_member', 'volunteer');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TYPE organization_type AS ENUM (
-  'Partner', 'Funder', 'Community Organization', 'Institution', 
-  'Company', 'Government Organization', 'University', 'Other'
-);
+DO $$ BEGIN
+  CREATE TYPE user_account_status AS ENUM ('pending', 'approved', 'rejected', 'suspended', 'disabled');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TYPE program_status AS ENUM ('Planning', 'Active', 'On Hold', 'Completed', 'Archived');
-CREATE TYPE event_type AS ENUM ('Workshop', 'Consultation', 'Community Forum', 'Training', 'Panel', 'Youth Lab');
-CREATE TYPE participant_status AS ENUM ('Registered', 'Attended', 'Did not attend', 'Completed', 'Waitlisted', 'Withdrawn');
-CREATE TYPE task_priority AS ENUM ('Low', 'Medium', 'High');
-CREATE TYPE task_status AS ENUM ('To Do', 'In Progress', 'Completed');
-CREATE TYPE interaction_type AS ENUM ('Email', 'Meeting', 'Call', 'Workshop', 'Note', 'Follow-up');
-CREATE TYPE funding_status AS ENUM ('Received', 'Pledged', 'Pending Review', 'Approved', 'Applied', 'Prospective');
+DO $$ BEGIN
+  CREATE TYPE data_scope_type AS ENUM ('ALL', 'GLOBAL', 'ORGANIZATION', 'PROGRAM', 'EVENT', 'ASSIGNED', 'OWN_RECORD', 'SCOPED');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
--- ------------------------------------------------------------------------------
--- 2. IDENTITY & ACCESS CONTROL (RBAC - Sections 13-21)
--- ------------------------------------------------------------------------------
+DO $$ BEGIN
+  CREATE TYPE relationship_type AS ENUM (
+    'Partner', 'Funder / Donor', 'Participant', 'Volunteer', 
+    'Advisor', 'Facilitator', 'Stakeholder', 'Other'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
--- Organizations (Root entity for multi-tenant isolation)
-CREATE TABLE organizations (
+DO $$ BEGIN
+  CREATE TYPE organization_type AS ENUM (
+    'Partner', 'Funder', 'Community Organization', 'Institution', 
+    'Company', 'Government Organization', 'University', 'Other'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE program_status AS ENUM ('Planning', 'Active', 'On Hold', 'Completed', 'Archived');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE event_type AS ENUM ('Workshop', 'Consultation', 'Community Forum', 'Training', 'Panel', 'Youth Lab');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE participant_status AS ENUM ('Registered', 'Attended', 'Did not attend', 'Completed', 'Waitlisted', 'Withdrawn');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE task_priority AS ENUM ('Low', 'Medium', 'High');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE task_status AS ENUM ('To Do', 'In Progress', 'Completed');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE interaction_type AS ENUM ('Email', 'Meeting', 'Call', 'Workshop', 'Note', 'Follow-up');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE funding_status AS ENUM ('Received', 'Pledged', 'Pending Review', 'Approved', 'Applied', 'Prospective');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE analysis_job_status AS ENUM ('queued', 'processing', 'completed', 'failed');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE analysis_insight_type AS ENUM ('finding', 'trend', 'anomaly', 'opportunity', 'risk', 'recommendation', 'caveat');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ==============================================================================
+-- 3. IDENTITY, MULTI-TENANCY & RBAC TABLES (Tables 1 - 9)
+-- ==============================================================================
+
+-- 1. Organizations (Multi-tenant root boundary)
+CREATE TABLE IF NOT EXISTS public.organizations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(255) NOT NULL,
   type organization_type DEFAULT 'Partner',
@@ -51,10 +115,10 @@ CREATE TABLE organizations (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Roles table (Section 15)
-CREATE TABLE roles (
+-- 2. System & Organization Roles
+CREATE TABLE IF NOT EXISTS public.roles (
   id VARCHAR(50) PRIMARY KEY, -- 'super_admin', 'staff_manager', 'staff_member', 'volunteer'
-  organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL,
   name VARCHAR(100) NOT NULL,
   description TEXT,
   is_system_role BOOLEAN DEFAULT TRUE,
@@ -62,8 +126,8 @@ CREATE TABLE roles (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Permissions table: RESOURCE + ACTION (Section 16)
-CREATE TABLE permissions (
+-- 3. Granular Permissions (Resource + Action)
+CREATE TABLE IF NOT EXISTS public.permissions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   resource VARCHAR(50) NOT NULL, -- e.g. 'people', 'programs', 'funding', 'users'
   action VARCHAR(50) NOT NULL,   -- e.g. 'view', 'create', 'edit', 'delete', 'manage'
@@ -71,19 +135,19 @@ CREATE TABLE permissions (
   CONSTRAINT uq_resource_action UNIQUE (resource, action)
 );
 
--- Role Permissions map (Section 17)
-CREATE TABLE role_permissions (
+-- 4. Role Permissions Mapping
+CREATE TABLE IF NOT EXISTS public.role_permissions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  role_id VARCHAR(50) REFERENCES roles(id) ON DELETE CASCADE,
-  permission_id UUID REFERENCES permissions(id) ON DELETE CASCADE,
+  role_id VARCHAR(50) REFERENCES public.roles(id) ON DELETE CASCADE,
+  permission_id UUID REFERENCES public.permissions(id) ON DELETE CASCADE,
   CONSTRAINT uq_role_permission UNIQUE (role_id, permission_id)
 );
 
--- Users table (Section 14)
-CREATE TABLE users (
+-- 5. Application Users (Linked to Supabase Auth via auth_user_id)
+CREATE TABLE IF NOT EXISTS public.users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  auth_user_id VARCHAR(100) UNIQUE, -- references authenticated Supabase Auth user
-  organization_id UUID REFERENCES organizations(id) ON DELETE RESTRICT,
+  auth_user_id VARCHAR(100) UNIQUE, -- references authenticated Supabase Auth user ID
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE RESTRICT,
   full_name VARCHAR(255) NOT NULL,
   email VARCHAR(255) NOT NULL UNIQUE,
   avatar_url TEXT,
@@ -91,33 +155,30 @@ CREATE TABLE users (
   title VARCHAR(150),
   status user_account_status DEFAULT 'pending',
   is_active BOOLEAN DEFAULT FALSE,
-  approved_by UUID REFERENCES users(id),
+  approved_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
   approved_at TIMESTAMPTZ,
   rejection_reason TEXT,
   requested_at TIMESTAMPTZ DEFAULT NOW(),
-  
-  -- Data Scope Configurations (Section 19)
   people_scope data_scope_type DEFAULT 'ASSIGNED',
   programs_scope data_scope_type DEFAULT 'ASSIGNED',
   events_scope data_scope_type DEFAULT 'ASSIGNED',
   funding_scope VARCHAR(20) DEFAULT 'NONE', -- 'ALL', 'VIEW', 'NONE'
-  
   last_login_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- User Roles table (Section 18)
-CREATE TABLE user_roles (
+-- 6. User Roles Mapping (Supports Primary and Secondary Role Assignments)
+CREATE TABLE IF NOT EXISTS public.user_roles (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  role_id VARCHAR(50) REFERENCES roles(id) ON DELETE RESTRICT,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  role_id VARCHAR(50) REFERENCES public.roles(id) ON DELETE RESTRICT,
   assigned_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT uq_user_role UNIQUE (user_id, role_id)
 );
 
--- Access Requests table (Section 7, 8)
-CREATE TABLE access_requests (
+-- 7. Self-Service Access Requests (Google OAuth & Staff Onboarding)
+CREATE TABLE IF NOT EXISTS public.access_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   auth_user_id VARCHAR(100) NOT NULL,
   email VARCHAR(255) NOT NULL,
@@ -127,41 +188,42 @@ CREATE TABLE access_requests (
   notes TEXT,
   rejection_reason TEXT,
   requested_at TIMESTAMPTZ DEFAULT NOW(),
-  reviewed_by UUID REFERENCES users(id),
+  reviewed_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
   reviewed_at TIMESTAMPTZ
 );
 
--- User Program Access (Section 20)
-CREATE TABLE user_program_access (
+-- 8. User Program Scoping Access (Data-level assignment)
+CREATE TABLE IF NOT EXISTS public.user_program_access (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   program_id UUID NOT NULL,
-  granted_by UUID REFERENCES users(id),
+  granted_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT uq_user_program UNIQUE (user_id, program_id)
 );
 
--- User Event Access (Section 21)
-CREATE TABLE user_event_access (
+-- 9. User Event Scoping Access (Data-level assignment)
+CREATE TABLE IF NOT EXISTS public.user_event_access (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   event_id UUID NOT NULL,
-  granted_by UUID REFERENCES users(id),
+  granted_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT uq_user_event UNIQUE (user_id, event_id)
 );
 
--- ------------------------------------------------------------------------------
--- 3. CRM DOMAIN: PEOPLE & ENTITIES
--- ------------------------------------------------------------------------------
+-- ==============================================================================
+-- 4. CORE CRM DOMAIN TABLES (Tables 10 - 16)
+-- ==============================================================================
 
-CREATE TABLE people (
+-- 10. People (Contacts Directory)
+CREATE TABLE IF NOT EXISTS public.people (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(255) NOT NULL,
   email VARCHAR(255) NOT NULL,
   phone VARCHAR(50),
   role_title VARCHAR(150),
-  organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL,
   relationship_types relationship_type[] DEFAULT ARRAY['Participant']::relationship_type[],
   city VARCHAR(100),
   province VARCHAR(100),
@@ -169,52 +231,50 @@ CREATE TABLE people (
   mailchimp_status VARCHAR(50) DEFAULT 'pending',
   last_interaction_date DATE,
   next_follow_up_date DATE,
-  created_by UUID REFERENCES users(id),
+  created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ------------------------------------------------------------------------------
--- 4. PROGRAMS & EVENTS DOMAIN
--- ------------------------------------------------------------------------------
-
-CREATE TABLE programs (
+-- 11. Programs & Community Cohorts
+CREATE TABLE IF NOT EXISTS public.programs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(255) NOT NULL,
   description TEXT,
   status program_status DEFAULT 'Active',
   start_date DATE,
   end_date DATE,
-  owner_id UUID REFERENCES users(id),
+  owner_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
   budget_cad NUMERIC(12, 2) DEFAULT 0.00,
   outcomes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Program Members (Staff & Volunteers assigned to program)
-CREATE TABLE program_members (
+-- 12. Program Members (Staff & Coordinator assignments to programs)
+CREATE TABLE IF NOT EXISTS public.program_members (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  program_id UUID REFERENCES programs(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  program_id UUID REFERENCES public.programs(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   role VARCHAR(50) DEFAULT 'Member',
   assigned_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT uq_program_user UNIQUE (program_id, user_id)
 );
 
--- Program Participants (People enrolled in program)
-CREATE TABLE program_participants (
+-- 13. Program Participants (People enrolled in programs/cohorts)
+CREATE TABLE IF NOT EXISTS public.program_participants (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  program_id UUID REFERENCES programs(id) ON DELETE CASCADE,
-  person_id UUID REFERENCES people(id) ON DELETE CASCADE,
+  program_id UUID REFERENCES public.programs(id) ON DELETE CASCADE,
+  person_id UUID REFERENCES public.people(id) ON DELETE CASCADE,
   status participant_status DEFAULT 'Registered',
   joined_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT uq_program_person UNIQUE (program_id, person_id)
 );
 
-CREATE TABLE events (
+-- 14. Events & Workshops
+CREATE TABLE IF NOT EXISTS public.events (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  program_id UUID REFERENCES programs(id) ON DELETE SET NULL,
+  program_id UUID REFERENCES public.programs(id) ON DELETE SET NULL,
   name VARCHAR(255) NOT NULL,
   event_type event_type DEFAULT 'Workshop',
   date DATE NOT NULL,
@@ -223,27 +283,27 @@ CREATE TABLE events (
   is_online BOOLEAN DEFAULT FALSE,
   meeting_link VARCHAR(255),
   capacity INT DEFAULT 50,
-  facilitator_id UUID REFERENCES users(id),
+  facilitator_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
   description TEXT,
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Event Staff Assignments
-CREATE TABLE event_staff (
+-- 15. Event Staff Assignments
+CREATE TABLE IF NOT EXISTS public.event_staff (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES public.events(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   role VARCHAR(50) DEFAULT 'Facilitator',
   CONSTRAINT uq_event_user UNIQUE (event_id, user_id)
 );
 
--- Event Participants & Attendance
-CREATE TABLE event_participants (
+-- 16. Event Participants & Attendance Records
+CREATE TABLE IF NOT EXISTS public.event_participants (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  event_id UUID REFERENCES events(id) ON DELETE CASCADE,
-  person_id UUID REFERENCES people(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES public.events(id) ON DELETE CASCADE,
+  person_id UUID REFERENCES public.people(id) ON DELETE CASCADE,
   registration_status participant_status DEFAULT 'Registered',
   attendance_status participant_status DEFAULT 'Registered',
   attended_at TIMESTAMPTZ,
@@ -251,19 +311,20 @@ CREATE TABLE event_participants (
   CONSTRAINT uq_event_person UNIQUE (event_id, person_id)
 );
 
--- ------------------------------------------------------------------------------
--- 5. WORK & COLLABORATION DOMAIN
--- ------------------------------------------------------------------------------
+-- ==============================================================================
+-- 5. WORK & OPERATIONS DOMAIN TABLES (Tables 17 - 18)
+-- ==============================================================================
 
-CREATE TABLE tasks (
+-- 17. Tasks & Milestone Tracking
+CREATE TABLE IF NOT EXISTS public.tasks (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   title VARCHAR(255) NOT NULL,
   description TEXT,
-  assigned_to UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_by UUID REFERENCES users(id),
-  related_person_id UUID REFERENCES people(id) ON DELETE SET NULL,
-  related_program_id UUID REFERENCES programs(id) ON DELETE SET NULL,
-  related_event_id UUID REFERENCES events(id) ON DELETE SET NULL,
+  assigned_to UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  related_person_id UUID REFERENCES public.people(id) ON DELETE SET NULL,
+  related_program_id UUID REFERENCES public.programs(id) ON DELETE SET NULL,
+  related_event_id UUID REFERENCES public.events(id) ON DELETE SET NULL,
   due_date DATE,
   priority task_priority DEFAULT 'Medium',
   status task_status DEFAULT 'To Do',
@@ -272,11 +333,12 @@ CREATE TABLE tasks (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE interactions (
+-- 18. Interactions & Touchpoint History
+CREATE TABLE IF NOT EXISTS public.interactions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  person_id UUID REFERENCES people(id) ON DELETE CASCADE,
-  organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
-  user_id UUID REFERENCES users(id),
+  person_id UUID REFERENCES public.people(id) ON DELETE CASCADE,
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL,
+  user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
   type interaction_type NOT NULL,
   summary VARCHAR(255) NOT NULL,
   details TEXT,
@@ -285,15 +347,16 @@ CREATE TABLE interactions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ------------------------------------------------------------------------------
--- 6. FUNDING DOMAIN
--- ------------------------------------------------------------------------------
+-- ==============================================================================
+-- 6. FUNDING & FIDUCIARY DOMAIN (Table 19)
+-- ==============================================================================
 
-CREATE TABLE funding_records (
+-- 19. Funding Records (Grants, Donations, Sponsorships)
+CREATE TABLE IF NOT EXISTS public.funding_records (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   donor_or_funder VARCHAR(255) NOT NULL,
-  organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
-  program_id UUID REFERENCES programs(id) ON DELETE SET NULL,
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL,
+  program_id UUID REFERENCES public.programs(id) ON DELETE SET NULL,
   amount_cad NUMERIC(12, 2) NOT NULL,
   date DATE NOT NULL,
   funding_type VARCHAR(100) NOT NULL,
@@ -302,16 +365,17 @@ CREATE TABLE funding_records (
   fiscal_year VARCHAR(20),
   grant_deliverable_note TEXT,
   notes TEXT,
-  created_by UUID REFERENCES users(id),
+  created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ------------------------------------------------------------------------------
--- 7. AUDIT LOGS & DOCUMENTS
--- ------------------------------------------------------------------------------
+-- ==============================================================================
+-- 7. DOCUMENTS & AUDIT TRAIL DOMAIN (Tables 20 - 21)
+-- ==============================================================================
 
-CREATE TABLE documents (
+-- 20. Documents & Cloud Attachments
+CREATE TABLE IF NOT EXISTS public.documents (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   title VARCHAR(255) NOT NULL,
   type VARCHAR(50) NOT NULL,
@@ -319,16 +383,36 @@ CREATE TABLE documents (
   related_type VARCHAR(50),
   related_id UUID,
   description TEXT,
-  added_by UUID REFERENCES users(id),
+  added_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  storage_path VARCHAR(500),
+  storage_bucket VARCHAR(100) DEFAULT 'tip-crm-private-documents',
+  file_size BIGINT,
+  mime_type VARCHAR(100),
+  is_confidential BOOLEAN DEFAULT FALSE,
+  access_tier VARCHAR(50) DEFAULT 'all', -- 'all', 'staff', 'management', 'super_admin'
+  checksum VARCHAR(64),
+  is_direct_upload BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE audit_logs (
+-- Ensure storage metadata columns exist if table was previously created
+ALTER TABLE public.documents
+  ADD COLUMN IF NOT EXISTS storage_path VARCHAR(500),
+  ADD COLUMN IF NOT EXISTS storage_bucket VARCHAR(100) DEFAULT 'tip-crm-private-documents',
+  ADD COLUMN IF NOT EXISTS file_size BIGINT,
+  ADD COLUMN IF NOT EXISTS mime_type VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS is_confidential BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS access_tier VARCHAR(50) DEFAULT 'all',
+  ADD COLUMN IF NOT EXISTS checksum VARCHAR(64),
+  ADD COLUMN IF NOT EXISTS is_direct_upload BOOLEAN DEFAULT FALSE;
+
+-- 21. Immutable Security Audit Trail
+CREATE TABLE IF NOT EXISTS public.audit_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   actor_id VARCHAR(100) NOT NULL,
   actor_name VARCHAR(255) NOT NULL,
   actor_role VARCHAR(100) NOT NULL,
-  action VARCHAR(100) NOT NULL, -- e.g. 'AUTH_ROLE_SWITCH', 'AUTH_PASSWORD_CHANGE', 'DATA_EXPORT_CSV', 'PERSON_DELETE'
+  action VARCHAR(100) NOT NULL,
   resource_type VARCHAR(100) NOT NULL,
   resource_id VARCHAR(100),
   entity_name VARCHAR(255),
@@ -340,28 +424,358 @@ CREATE TABLE audit_logs (
   timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Performance and Audit Search Indices (Check 12)
-CREATE INDEX idx_audit_logs_timestamp ON audit_logs(timestamp DESC);
-CREATE INDEX idx_audit_logs_actor_id ON audit_logs(actor_id);
-CREATE INDEX idx_audit_logs_action ON audit_logs(action);
-CREATE INDEX idx_audit_logs_resource_type ON audit_logs(resource_type);
-CREATE INDEX idx_audit_logs_outcome ON audit_logs(outcome);
-CREATE INDEX idx_audit_logs_correlation_id ON audit_logs(correlation_id);
+-- ==============================================================================
+-- 8. GROUNDED AI & CSV ANALYTICS DOMAIN (Tables 22 - 28)
+-- ==============================================================================
 
--- PostgreSQL Immutability Trigger: Strictly Forbid UPDATE and DELETE
-CREATE OR REPLACE FUNCTION prevent_audit_log_modification()
-RETURNS TRIGGER AS $$
+-- 22. Uploaded Analysis Files
+CREATE TABLE IF NOT EXISTS public.analysis_files (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  uploaded_by UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  filename VARCHAR(255) NOT NULL,
+  file_type VARCHAR(50) DEFAULT 'text/csv',
+  file_size BIGINT NOT NULL,
+  row_count INTEGER NOT NULL,
+  column_count INTEGER NOT NULL,
+  checksum VARCHAR(64) NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 23. Analytics Processing Jobs
+CREATE TABLE IF NOT EXISTS public.analysis_jobs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  file_id UUID NOT NULL REFERENCES public.analysis_files(id) ON DELETE CASCADE,
+  status analysis_job_status DEFAULT 'queued',
+  started_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 24. Deterministic Analysis Results
+CREATE TABLE IF NOT EXISTS public.analysis_results (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  analysis_job_id UUID NOT NULL REFERENCES public.analysis_jobs(id) ON DELETE CASCADE,
+  summary TEXT,
+  data_quality_summary JSONB NOT NULL,
+  calculation_version VARCHAR(50) DEFAULT 'tip-math-v1.0',
+  ai_model VARCHAR(100) DEFAULT 'gemini-2.5-flash',
+  ai_summary TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 25. Computed Analytical Metrics
+CREATE TABLE IF NOT EXISTS public.analysis_metrics (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  analysis_result_id UUID NOT NULL REFERENCES public.analysis_results(id) ON DELETE CASCADE,
+  metric_name VARCHAR(100) NOT NULL,
+  metric_value NUMERIC NOT NULL,
+  metric_type VARCHAR(50) NOT NULL,
+  dimensions JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 26. Grounded AI Insights (Observed / Interpretation / Action)
+CREATE TABLE IF NOT EXISTS public.analysis_insights (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  analysis_result_id UUID NOT NULL REFERENCES public.analysis_results(id) ON DELETE CASCADE,
+  insight_type analysis_insight_type NOT NULL,
+  category VARCHAR(50) DEFAULT 'observed',
+  title VARCHAR(255) NOT NULL,
+  description TEXT NOT NULL,
+  supporting_metrics JSONB,
+  recommendation TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 27. AI Request Telemetry & Token Accounting
+CREATE TABLE IF NOT EXISTS public.ai_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  feature VARCHAR(100) NOT NULL,
+  request_timestamp TIMESTAMPTZ DEFAULT NOW(),
+  model VARCHAR(100) DEFAULT 'gemini-2.5-flash',
+  input_token_estimate INTEGER DEFAULT 0,
+  output_token_estimate INTEGER DEFAULT 0,
+  latency_ms INTEGER DEFAULT 0,
+  status VARCHAR(50) DEFAULT 'success'
+);
+
+-- 28. Monthly AI Usage Aggregations
+CREATE TABLE IF NOT EXISTS public.ai_usage_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  period VARCHAR(7) NOT NULL, -- Format: YYYY-MM
+  total_requests INTEGER DEFAULT 0,
+  csv_analyses INTEGER DEFAULT 0,
+  data_questions INTEGER DEFAULT 0,
+  report_generations INTEGER DEFAULT 0,
+  token_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT uq_ai_usage_org_period UNIQUE (organization_id, period)
+);
+
+-- ==============================================================================
+-- 9. PERFORMANCE & FOREIGN KEY INDEXES (All Idempotent)
+-- ==============================================================================
+
+-- Identity & RBAC
+CREATE INDEX IF NOT EXISTS idx_users_organization_id ON public.users(organization_id);
+CREATE INDEX IF NOT EXISTS idx_users_auth_user_id ON public.users(auth_user_id);
+CREATE INDEX IF NOT EXISTS idx_users_status_active ON public.users(status, is_active);
+CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON public.user_roles(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_roles_role_id ON public.user_roles(role_id);
+CREATE INDEX IF NOT EXISTS idx_access_requests_auth_user_id ON public.access_requests(auth_user_id);
+CREATE INDEX IF NOT EXISTS idx_access_requests_email ON public.access_requests(email);
+CREATE INDEX IF NOT EXISTS idx_access_requests_status ON public.access_requests(status);
+CREATE INDEX IF NOT EXISTS idx_user_prog_access_user ON public.user_program_access(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_prog_access_prog ON public.user_program_access(program_id);
+CREATE INDEX IF NOT EXISTS idx_user_event_access_user ON public.user_event_access(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_event_access_event ON public.user_event_access(event_id);
+
+-- Core CRM
+CREATE INDEX IF NOT EXISTS idx_people_organization_id ON public.people(organization_id);
+CREATE INDEX IF NOT EXISTS idx_people_created_by ON public.people(created_by);
+CREATE INDEX IF NOT EXISTS idx_people_email ON public.people(email);
+CREATE INDEX IF NOT EXISTS idx_programs_owner_id ON public.programs(owner_id);
+CREATE INDEX IF NOT EXISTS idx_programs_status ON public.programs(status);
+CREATE INDEX IF NOT EXISTS idx_program_members_user ON public.program_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_program_participants_person ON public.program_participants(person_id);
+CREATE INDEX IF NOT EXISTS idx_events_program_id ON public.events(program_id);
+CREATE INDEX IF NOT EXISTS idx_events_facilitator_id ON public.events(facilitator_id);
+CREATE INDEX IF NOT EXISTS idx_events_date ON public.events(date);
+CREATE INDEX IF NOT EXISTS idx_event_staff_user ON public.event_staff(user_id);
+CREATE INDEX IF NOT EXISTS idx_event_participants_person ON public.event_participants(person_id);
+
+-- Operations & Tasks
+CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON public.tasks(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_tasks_created_by ON public.tasks(created_by);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_due ON public.tasks(status, due_date);
+CREATE INDEX IF NOT EXISTS idx_tasks_related_person ON public.tasks(related_person_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_related_program ON public.tasks(related_program_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_related_event ON public.tasks(related_event_id);
+CREATE INDEX IF NOT EXISTS idx_interactions_person_id ON public.interactions(person_id);
+CREATE INDEX IF NOT EXISTS idx_interactions_org_id ON public.interactions(organization_id);
+CREATE INDEX IF NOT EXISTS idx_interactions_user_id ON public.interactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_interactions_date ON public.interactions(interaction_date);
+
+-- Fiduciary & Funding
+CREATE INDEX IF NOT EXISTS idx_funding_organization_id ON public.funding_records(organization_id);
+CREATE INDEX IF NOT EXISTS idx_funding_program_id ON public.funding_records(program_id);
+CREATE INDEX IF NOT EXISTS idx_funding_created_by ON public.funding_records(created_by);
+CREATE INDEX IF NOT EXISTS idx_funding_date ON public.funding_records(date);
+CREATE INDEX IF NOT EXISTS idx_funding_status ON public.funding_records(status);
+
+-- Documents & Audit Logs
+CREATE INDEX IF NOT EXISTS idx_documents_added_by ON public.documents(added_by);
+CREATE INDEX IF NOT EXISTS idx_documents_related ON public.documents(related_type, related_id);
+CREATE INDEX IF NOT EXISTS idx_documents_storage_path ON public.documents(storage_path);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON public.audit_logs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_id ON public.audit_logs(actor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON public.audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_resource_type ON public.audit_logs(resource_type);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_outcome ON public.audit_logs(outcome);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_correlation_id ON public.audit_logs(correlation_id);
+
+-- AI Intelligence
+CREATE INDEX IF NOT EXISTS idx_analysis_files_org_user ON public.analysis_files(organization_id, uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_analysis_jobs_org_status ON public.analysis_jobs(organization_id, status);
+CREATE INDEX IF NOT EXISTS idx_analysis_results_job_id ON public.analysis_results(analysis_job_id);
+CREATE INDEX IF NOT EXISTS idx_analysis_metrics_result_id ON public.analysis_metrics(analysis_result_id);
+CREATE INDEX IF NOT EXISTS idx_analysis_insights_result_id ON public.analysis_insights(analysis_result_id);
+CREATE INDEX IF NOT EXISTS idx_ai_requests_org_user ON public.ai_requests(organization_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_logs_org_period ON public.ai_usage_logs(organization_id, period);
+
+-- ==============================================================================
+-- 10. DATABASE TRIGGERS & INTEGRITY ENFORCEMENT
+-- ==============================================================================
+
+-- Trigger 1: Audit Log Immutability (Strictly prevents UPDATE and DELETE)
+CREATE OR REPLACE FUNCTION public.prevent_audit_log_modification()
+RETURNS TRIGGER 
+LANGUAGE plpgsql 
+AS $$
 BEGIN
   RAISE EXCEPTION 'Audit logs are strictly immutable: UPDATE and DELETE operations are forbidden.';
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
+DROP TRIGGER IF EXISTS trg_audit_logs_immutable ON public.audit_logs;
 CREATE TRIGGER trg_audit_logs_immutable
-BEFORE UPDATE OR DELETE ON audit_logs
+BEFORE UPDATE OR DELETE ON public.audit_logs
 FOR EACH ROW
-EXECUTE FUNCTION prevent_audit_log_modification();
+EXECUTE FUNCTION public.prevent_audit_log_modification();
 
--- Controlled Retention Procedure (Executed only by Super Admin through verified maintenance)
+-- Trigger 2: Self-Elevation & Privilege Escalation Prevention on public.users
+CREATE OR REPLACE FUNCTION check_users_self_elevation()
+RETURNS TRIGGER 
+LANGUAGE plpgsql 
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  -- Super Admin or Supabase internal service_role can perform administrative updates
+  IF is_super_admin() OR auth.role() = 'service_role' THEN
+    RETURN NEW;
+  END IF;
+
+  -- Protect privileged authorization columns from modification by regular users
+  IF NEW.status IS DISTINCT FROM OLD.status OR
+     NEW.is_active IS DISTINCT FROM OLD.is_active OR
+     NEW.approved_by IS DISTINCT FROM OLD.approved_by OR
+     NEW.approved_at IS DISTINCT FROM OLD.approved_at OR
+     NEW.organization_id IS DISTINCT FROM OLD.organization_id OR
+     NEW.people_scope IS DISTINCT FROM OLD.people_scope OR
+     NEW.programs_scope IS DISTINCT FROM OLD.programs_scope OR
+     NEW.events_scope IS DISTINCT FROM OLD.events_scope OR
+     NEW.funding_scope IS DISTINCT FROM OLD.funding_scope OR
+     NEW.auth_user_id IS DISTINCT FROM OLD.auth_user_id THEN
+    RAISE EXCEPTION 'Security violation: Users cannot modify their own status, active state, data scopes, or organization.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+-- ==============================================================================
+-- 11. TRUSTED SECURITY DEFINER HELPER FUNCTIONS (Optimized Subqueries & Fixed search_path)
+-- ==============================================================================
+
+-- Helper 1: Verify authenticated active approved user status
+CREATE OR REPLACE FUNCTION user_has_crm_access() 
+RETURNS BOOLEAN 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.users 
+    WHERE auth_user_id = (SELECT auth.uid())::text 
+      AND status = 'approved' 
+      AND is_active = TRUE
+  );
+$$;
+
+-- Helper 2: Extract current CRM user's primary internal UUID
+CREATE OR REPLACE FUNCTION current_user_id() 
+RETURNS UUID 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT id FROM public.users 
+  WHERE auth_user_id = (SELECT auth.uid())::text 
+    AND status = 'approved' 
+    AND is_active = TRUE 
+  LIMIT 1;
+$$;
+
+-- Helper 3: Extract current CRM user's organization UUID
+CREATE OR REPLACE FUNCTION current_user_org_id() 
+RETURNS UUID 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT organization_id FROM public.users 
+  WHERE auth_user_id = (SELECT auth.uid())::text 
+    AND status = 'approved' 
+    AND is_active = TRUE 
+  LIMIT 1;
+$$;
+
+-- Helper 4: Super Admin Gate (Database-Verified)
+CREATE OR REPLACE FUNCTION is_super_admin() 
+RETURNS BOOLEAN 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.users u
+    JOIN public.user_roles ur ON ur.user_id = u.id
+    WHERE u.auth_user_id = (SELECT auth.uid())::text 
+      AND ur.role_id = 'super_admin'
+      AND u.status = 'approved' 
+      AND u.is_active = TRUE
+  );
+$$;
+
+-- Helper 5: Staff Manager or Higher Gate (Levels 1 & 2)
+CREATE OR REPLACE FUNCTION is_staff_manager_or_higher() 
+RETURNS BOOLEAN 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.users u
+    JOIN public.user_roles ur ON ur.user_id = u.id
+    WHERE u.auth_user_id = (SELECT auth.uid())::text 
+      AND ur.role_id IN ('super_admin', 'staff_manager')
+      AND u.status = 'approved' 
+      AND u.is_active = TRUE
+  );
+$$;
+
+-- Helper 6: Staff Member or Higher Gate (Levels 1, 2, & 3 - Excludes Volunteers)
+CREATE OR REPLACE FUNCTION is_staff_member_or_higher() 
+RETURNS BOOLEAN 
+LANGUAGE sql 
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.users u
+    JOIN public.user_roles ur ON ur.user_id = u.id
+    WHERE u.auth_user_id = (SELECT auth.uid())::text 
+      AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
+      AND u.status = 'approved' 
+      AND u.is_active = TRUE
+  );
+$$;
+
+-- Helper 7: User identity helper for application contexts
+CREATE OR REPLACE FUNCTION get_current_app_user() 
+RETURNS TABLE (
+  user_id UUID,
+  role_id VARCHAR,
+  org_id UUID,
+  is_approved BOOLEAN,
+  is_active_user BOOLEAN
+) 
+LANGUAGE sql 
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT 
+    id AS user_id, 
+    (SELECT role_id FROM public.user_roles WHERE user_id = users.id LIMIT 1) AS role_id,
+    organization_id AS org_id,
+    (status = 'approved') AS is_approved,
+    is_active AS is_active_user
+  FROM public.users 
+  WHERE auth_user_id = (SELECT auth.uid())::text;
+$$;
+
+-- Attach Anti-Elevation Trigger now that is_super_admin() is compiled
+DROP TRIGGER IF EXISTS trg_prevent_self_elevation_users ON users;
+CREATE TRIGGER trg_prevent_self_elevation_users
+BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE FUNCTION check_users_self_elevation();
+
+-- Controlled Retention Procedure for Audit Logs (Super Admin ONLY)
 CREATE OR REPLACE FUNCTION purge_audit_logs_older_than(days_to_keep INTEGER)
 RETURNS INTEGER 
 LANGUAGE plpgsql 
@@ -387,11 +801,10 @@ BEGIN
 END;
 $$;
 
--- ------------------------------------------------------------------------------
--- 8. ROW LEVEL SECURITY (RLS) POLICIES & FUNCTIONS (Security Check 14)
--- ------------------------------------------------------------------------------
+-- ==============================================================================
+-- 12. ENABLE ROW LEVEL SECURITY ACROSS ALL CRM & STORAGE TABLES (28 TABLES + STORAGE)
+-- ==============================================================================
 
--- Step 1: Enable RLS on ALL CRM tables (Default Deny for all unauthorized access)
 ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE permissions ENABLE ROW LEVEL SECURITY;
@@ -413,172 +826,20 @@ ALTER TABLE interactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE funding_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE analysis_files ENABLE ROW LEVEL SECURITY;
+ALTER TABLE analysis_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE analysis_results ENABLE ROW LEVEL SECURITY;
+ALTER TABLE analysis_metrics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE analysis_insights ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 
--- Step 2: Trusted Helper Functions (SECURITY DEFINER with fixed search_path to prevent hijacking)
+-- ==============================================================================
+-- 13. GRANULAR, LEAST-PRIVILEGE ROW LEVEL SECURITY POLICIES
+-- ==============================================================================
 
--- Helper: Master Access Gate (Verify active approved user status)
-CREATE OR REPLACE FUNCTION user_has_crm_access() 
-RETURNS BOOLEAN 
-LANGUAGE sql 
-STABLE
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM users 
-    WHERE auth_user_id = auth.uid()::text 
-      AND status = 'approved' 
-      AND is_active = TRUE
-  );
-$$;
-
--- Helper: Extract current authenticated CRM user's primary UUID
-CREATE OR REPLACE FUNCTION current_user_id() 
-RETURNS UUID 
-LANGUAGE sql 
-STABLE
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-  SELECT id FROM users 
-  WHERE auth_user_id = auth.uid()::text 
-    AND status = 'approved' 
-    AND is_active = TRUE 
-  LIMIT 1;
-$$;
-
--- Helper: Extract current user's organization UUID
-CREATE OR REPLACE FUNCTION current_user_org_id() 
-RETURNS UUID 
-LANGUAGE sql 
-STABLE
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-  SELECT organization_id FROM users 
-  WHERE auth_user_id = auth.uid()::text 
-    AND status = 'approved' 
-    AND is_active = TRUE 
-  LIMIT 1;
-$$;
-
--- Helper: Super Admin Authorization Gate (Database-Verified, Never Client-Supplied)
-CREATE OR REPLACE FUNCTION is_super_admin() 
-RETURNS BOOLEAN 
-LANGUAGE sql 
-STABLE
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM users u
-    JOIN user_roles ur ON ur.user_id = u.id
-    WHERE u.auth_user_id = auth.uid()::text 
-      AND ur.role_id = 'super_admin'
-      AND u.status = 'approved' 
-      AND u.is_active = TRUE
-  );
-$$;
-
--- Helper: Staff Manager or Higher Gate (Levels 1 & 2)
-CREATE OR REPLACE FUNCTION is_staff_manager_or_higher() 
-RETURNS BOOLEAN 
-LANGUAGE sql 
-STABLE
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM users u
-    JOIN user_roles ur ON ur.user_id = u.id
-    WHERE u.auth_user_id = auth.uid()::text 
-      AND ur.role_id IN ('super_admin', 'staff_manager')
-      AND u.status = 'approved' 
-      AND u.is_active = TRUE
-  );
-$$;
-
--- Helper: Staff Member or Higher Gate (Levels 1, 2, & 3 - Excludes Volunteers)
-CREATE OR REPLACE FUNCTION is_staff_member_or_higher() 
-RETURNS BOOLEAN 
-LANGUAGE sql 
-STABLE
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM users u
-    JOIN user_roles ur ON ur.user_id = u.id
-    WHERE u.auth_user_id = auth.uid()::text 
-      AND ur.role_id IN ('super_admin', 'staff_manager', 'staff_member')
-      AND u.status = 'approved' 
-      AND u.is_active = TRUE
-  );
-$$;
-
--- Helper: Full application user identity extraction
-CREATE OR REPLACE FUNCTION get_current_app_user() 
-RETURNS TABLE (
-  user_id UUID,
-  role_id VARCHAR,
-  org_id UUID,
-  is_approved BOOLEAN,
-  is_active_user BOOLEAN
-) 
-LANGUAGE sql 
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-  SELECT 
-    id AS user_id, 
-    (SELECT role_id FROM user_roles WHERE user_id = users.id LIMIT 1) AS role_id,
-    organization_id AS org_id,
-    (status = 'approved') AS is_approved,
-    is_active AS is_active_user
-  FROM users 
-  WHERE auth_user_id = auth.uid()::text;
-$$;
-
--- Step 3: Trigger to prevent user self-elevation or unauthorized field modification
-CREATE OR REPLACE FUNCTION check_users_self_elevation()
-RETURNS TRIGGER 
-LANGUAGE plpgsql 
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-BEGIN
-  -- If Super Admin or service role, allow authorized administrative changes
-  IF is_super_admin() OR auth.role() = 'service_role' THEN
-    RETURN NEW;
-  END IF;
-
-  -- Protect privileged authorization columns from modification by regular users
-  IF NEW.status IS DISTINCT FROM OLD.status OR
-     NEW.is_active IS DISTINCT FROM OLD.is_active OR
-     NEW.approved_by IS DISTINCT FROM OLD.approved_by OR
-     NEW.approved_at IS DISTINCT FROM OLD.approved_at OR
-     NEW.organization_id IS DISTINCT FROM OLD.organization_id OR
-     NEW.people_scope IS DISTINCT FROM OLD.people_scope OR
-     NEW.programs_scope IS DISTINCT FROM OLD.programs_scope OR
-     NEW.events_scope IS DISTINCT FROM OLD.events_scope OR
-     NEW.funding_scope IS DISTINCT FROM OLD.funding_scope OR
-     NEW.auth_user_id IS DISTINCT FROM OLD.auth_user_id THEN
-    RAISE EXCEPTION 'Security violation: Users cannot modify their own status, active state, data scopes, or organization.';
-  END IF;
-
-  RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS trg_prevent_self_elevation_users ON users;
-CREATE TRIGGER trg_prevent_self_elevation_users
-BEFORE UPDATE ON users
-FOR EACH ROW
-EXECUTE FUNCTION check_users_self_elevation();
-
--- Step 4: Granular, Least-Privilege RLS Policies
-
--- --- 1. ROLES, PERMISSIONS, ROLE_PERMISSIONS ---
+-- --- 13.1 ROLES, PERMISSIONS, ROLE_PERMISSIONS ---
 DROP POLICY IF EXISTS roles_read_crm ON roles;
 CREATE POLICY roles_read_crm ON roles FOR SELECT USING (user_has_crm_access());
 DROP POLICY IF EXISTS roles_write_super_admin ON roles;
@@ -594,19 +855,23 @@ CREATE POLICY role_permissions_read_crm ON role_permissions FOR SELECT USING (us
 DROP POLICY IF EXISTS role_permissions_write_super_admin ON role_permissions;
 CREATE POLICY role_permissions_write_super_admin ON role_permissions FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 
--- --- 2. USER ROLES (Strictly blocks self-promotion) ---
+-- --- 13.2 USER ROLES (Blocks self-promotion) ---
 DROP POLICY IF EXISTS user_roles_read_authorized ON user_roles;
 CREATE POLICY user_roles_read_authorized ON user_roles FOR SELECT USING (
-  is_super_admin() OR user_id = current_user_id() OR (user_has_crm_access() AND user_id IN (SELECT id FROM users WHERE organization_id = current_user_org_id()))
+  is_super_admin() OR 
+  user_id = current_user_id() OR 
+  (user_has_crm_access() AND user_id IN (SELECT id FROM users WHERE organization_id = current_user_org_id()))
 );
 DROP POLICY IF EXISTS user_roles_write_super_admin ON user_roles;
 CREATE POLICY user_roles_write_super_admin ON user_roles FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 
--- --- 3. USERS ---
+-- --- 13.3 USERS ---
 DROP POLICY IF EXISTS super_admin_all_users ON users;
 CREATE POLICY super_admin_all_users ON users FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS org_users_view ON users;
-CREATE POLICY org_users_view ON users FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
+CREATE POLICY org_users_view ON users FOR SELECT USING (
+  user_has_crm_access() AND organization_id = current_user_org_id()
+);
 DROP POLICY IF EXISTS users_self_update ON users;
 CREATE POLICY users_self_update ON users FOR UPDATE USING (
   auth_user_id = auth.uid()::text AND user_has_crm_access()
@@ -614,7 +879,7 @@ CREATE POLICY users_self_update ON users FOR UPDATE USING (
   auth_user_id = auth.uid()::text
 );
 
--- --- 4. ACCESS REQUESTS ---
+-- --- 13.4 ACCESS REQUESTS ---
 DROP POLICY IF EXISTS super_admin_access_requests ON access_requests;
 CREATE POLICY super_admin_access_requests ON access_requests FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS own_access_request ON access_requests;
@@ -622,7 +887,7 @@ CREATE POLICY own_access_request ON access_requests FOR SELECT USING (auth_user_
 DROP POLICY IF EXISTS insert_access_request ON access_requests;
 CREATE POLICY insert_access_request ON access_requests FOR INSERT WITH CHECK (auth_user_id = auth.uid()::text);
 
--- --- 5. ORGANIZATIONS ---
+-- --- 13.5 ORGANIZATIONS ---
 DROP POLICY IF EXISTS organizations_super_admin ON organizations;
 CREATE POLICY organizations_super_admin ON organizations FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS organizations_read_crm ON organizations;
@@ -634,7 +899,7 @@ CREATE POLICY organizations_update_manager ON organizations FOR UPDATE USING (
   id = current_user_org_id()
 );
 
--- --- 6. PEOPLE (Contacts Directory) ---
+-- --- 13.6 PEOPLE (Contacts Directory) ---
 DROP POLICY IF EXISTS super_admin_all_people ON people;
 CREATE POLICY super_admin_all_people ON people FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS people_read_scoped ON people;
@@ -666,7 +931,7 @@ CREATE POLICY people_delete_manager ON people FOR DELETE USING (
   is_staff_manager_or_higher() AND (organization_id IS NULL OR organization_id = current_user_org_id())
 );
 
--- --- 7. PROGRAMS & PROGRAM MEMBERS/PARTICIPANTS ---
+-- --- 13.7 PROGRAMS & PROGRAM MEMBERS/PARTICIPANTS ---
 DROP POLICY IF EXISTS super_admin_all_programs ON programs;
 CREATE POLICY super_admin_all_programs ON programs FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS programs_scoped_view ON programs;
@@ -699,7 +964,7 @@ CREATE POLICY program_participants_read ON program_participants FOR SELECT USING
 DROP POLICY IF EXISTS program_participants_write_staff ON program_participants;
 CREATE POLICY program_participants_write_staff ON program_participants FOR ALL USING (is_staff_member_or_higher()) WITH CHECK (is_staff_member_or_higher());
 
--- --- 8. EVENTS, EVENT STAFF & PARTICIPANTS ---
+-- --- 13.8 EVENTS, EVENT STAFF & PARTICIPANTS ---
 DROP POLICY IF EXISTS super_admin_all_events ON events;
 CREATE POLICY super_admin_all_events ON events FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS events_read_scoped ON events;
@@ -732,7 +997,7 @@ CREATE POLICY event_participants_read ON event_participants FOR SELECT USING (us
 DROP POLICY IF EXISTS event_participants_write_staff ON event_participants;
 CREATE POLICY event_participants_write_staff ON event_participants FOR ALL USING (is_staff_member_or_higher()) WITH CHECK (is_staff_member_or_higher());
 
--- --- 9. TASKS ---
+-- --- 13.9 TASKS ---
 DROP POLICY IF EXISTS tasks_super_admin ON tasks;
 CREATE POLICY tasks_super_admin ON tasks FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS tasks_read_scoped ON tasks;
@@ -756,7 +1021,7 @@ CREATE POLICY tasks_delete_manager ON tasks FOR DELETE USING (
   is_staff_manager_or_higher() OR created_by = current_user_id()
 );
 
--- --- 10. INTERACTIONS ---
+-- --- 13.10 INTERACTIONS ---
 DROP POLICY IF EXISTS interactions_super_admin ON interactions;
 CREATE POLICY interactions_super_admin ON interactions FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS interactions_read_staff ON interactions;
@@ -776,7 +1041,7 @@ CREATE POLICY interactions_update_author ON interactions FOR UPDATE USING (
 DROP POLICY IF EXISTS interactions_delete_super_admin ON interactions;
 CREATE POLICY interactions_delete_super_admin ON interactions FOR DELETE USING (is_super_admin());
 
--- --- 11. FUNDING RECORDS (Hidden from Volunteers & Unscoped Staff) ---
+-- --- 13.11 FUNDING RECORDS (Zero Volunteer Access; Scoped to Management and Finance) ---
 DROP POLICY IF EXISTS super_admin_all_funding ON funding_records;
 CREATE POLICY super_admin_all_funding ON funding_records FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS funding_authorized_view ON funding_records;
@@ -802,25 +1067,43 @@ CREATE POLICY funding_update_manager ON funding_records FOR UPDATE USING (
 DROP POLICY IF EXISTS funding_delete_super_admin ON funding_records;
 CREATE POLICY funding_delete_super_admin ON funding_records FOR DELETE USING (is_super_admin());
 
--- --- 12. DOCUMENTS ---
-DROP POLICY IF EXISTS documents_super_admin ON documents;
-CREATE POLICY documents_super_admin ON documents FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
-DROP POLICY IF EXISTS documents_read_staff ON documents;
-CREATE POLICY documents_read_staff ON documents FOR SELECT USING (
+-- --- 13.12 DOCUMENTS (Tiered Confidentiality Access) ---
+DROP POLICY IF EXISTS super_admin_all_documents ON documents;
+CREATE POLICY super_admin_all_documents ON documents FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
+
+DROP POLICY IF EXISTS documents_role_governed_view ON documents;
+CREATE POLICY documents_role_governed_view ON documents FOR SELECT USING (
+  user_has_crm_access() AND (
+    is_staff_manager_or_higher() OR
+    (is_staff_member_or_higher() AND (is_confidential = FALSE OR access_tier IN ('all', 'staff'))) OR
+    (is_confidential = FALSE AND access_tier = 'all')
+  )
+);
+
+DROP POLICY IF EXISTS documents_staff_insert ON documents;
+CREATE POLICY documents_staff_insert ON documents FOR INSERT WITH CHECK (
   user_has_crm_access() AND is_staff_member_or_higher()
 );
-DROP POLICY IF EXISTS documents_insert_staff ON documents;
-CREATE POLICY documents_insert_staff ON documents FOR INSERT WITH CHECK (is_staff_member_or_higher());
-DROP POLICY IF EXISTS documents_update_author ON documents;
-CREATE POLICY documents_update_author ON documents FOR UPDATE USING (
-  is_staff_manager_or_higher() OR added_by = current_user_id()
-) WITH CHECK (
-  is_staff_manager_or_higher() OR added_by = current_user_id()
-);
-DROP POLICY IF EXISTS documents_delete_manager ON documents;
-CREATE POLICY documents_delete_manager ON documents FOR DELETE USING (is_staff_manager_or_higher());
 
--- --- 13. USER PROGRAM & EVENT SCOPING ACCESS TABLES ---
+DROP POLICY IF EXISTS documents_owner_or_manager_modify ON documents;
+CREATE POLICY documents_owner_or_manager_modify ON documents FOR UPDATE USING (
+  user_has_crm_access() AND (
+    is_staff_manager_or_higher() OR added_by = current_user_id()
+  )
+) WITH CHECK (
+  user_has_crm_access() AND (
+    is_staff_manager_or_higher() OR added_by = current_user_id()
+  )
+);
+
+DROP POLICY IF EXISTS documents_owner_or_manager_delete ON documents;
+CREATE POLICY documents_owner_or_manager_delete ON documents FOR DELETE USING (
+  user_has_crm_access() AND (
+    is_staff_manager_or_higher() OR added_by = current_user_id()
+  )
+);
+
+-- --- 13.13 USER SCOPING ACCESS TABLES ---
 DROP POLICY IF EXISTS user_program_access_read ON user_program_access;
 CREATE POLICY user_program_access_read ON user_program_access FOR SELECT USING (
   is_staff_manager_or_higher() OR user_id = current_user_id()
@@ -835,7 +1118,7 @@ CREATE POLICY user_event_access_read ON user_event_access FOR SELECT USING (
 DROP POLICY IF EXISTS user_event_access_write ON user_event_access;
 CREATE POLICY user_event_access_write ON user_event_access FOR ALL USING (is_staff_manager_or_higher()) WITH CHECK (is_staff_manager_or_higher());
 
--- --- 14. AUDIT LOGS (Check 12: Strictly Immutable & Append-Only) ---
+-- --- 13.14 AUDIT LOGS (Immutable & Append-Only) ---
 DROP POLICY IF EXISTS audit_logs_read_authorized ON audit_logs;
 CREATE POLICY audit_logs_read_authorized ON audit_logs FOR SELECT USING (
   is_super_admin() OR is_staff_manager_or_higher()
@@ -846,135 +1129,33 @@ CREATE POLICY audit_logs_insert_append ON audit_logs FOR INSERT WITH CHECK (
 );
 -- Note: Zero UPDATE or DELETE policies exist for audit_logs.
 
--- Step 5: Revoke default public execution privileges on administrative procedures
-REVOKE EXECUTE ON FUNCTION purge_audit_logs_older_than(INTEGER) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION purge_audit_logs_older_than(INTEGER) TO authenticated;
-
--- ==============================================================================
--- 9. AI INTELLIGENCE & CSV ANALYTICS TABLES (Sections 48-55)
--- ==============================================================================
-
-CREATE TYPE analysis_job_status AS ENUM ('queued', 'processing', 'completed', 'failed');
-CREATE TYPE analysis_insight_type AS ENUM ('finding', 'trend', 'anomaly', 'opportunity', 'risk', 'recommendation', 'caveat');
-
--- Files uploaded for CSV analysis and profiling
-CREATE TABLE analysis_files (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  uploaded_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  filename VARCHAR(255) NOT NULL,
-  file_type VARCHAR(50) DEFAULT 'text/csv',
-  file_size BIGINT NOT NULL,
-  row_count INTEGER NOT NULL,
-  column_count INTEGER NOT NULL,
-  checksum VARCHAR(64) NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Analysis processing jobs
-CREATE TABLE analysis_jobs (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  file_id UUID NOT NULL REFERENCES analysis_files(id) ON DELETE CASCADE,
-  status analysis_job_status DEFAULT 'queued',
-  started_at TIMESTAMPTZ DEFAULT NOW(),
-  completed_at TIMESTAMPTZ,
-  error_message TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- High-level analysis results
-CREATE TABLE analysis_results (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  analysis_job_id UUID NOT NULL REFERENCES analysis_jobs(id) ON DELETE CASCADE,
-  summary TEXT,
-  data_quality_summary JSONB NOT NULL,
-  calculation_version VARCHAR(50) DEFAULT 'tip-math-v1.0',
-  ai_model VARCHAR(100) DEFAULT 'gemini-2.5-flash',
-  ai_summary TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Deterministic calculated metrics
-CREATE TABLE analysis_metrics (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  analysis_result_id UUID NOT NULL REFERENCES analysis_results(id) ON DELETE CASCADE,
-  metric_name VARCHAR(100) NOT NULL,
-  metric_value NUMERIC NOT NULL,
-  metric_type VARCHAR(50) NOT NULL, -- 'count', 'sum', 'average', 'median', 'percentage', 'rate', 'ratio'
-  dimensions JSONB,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Grounded AI insights (Observed / Interpretation / Action)
-CREATE TABLE analysis_insights (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  analysis_result_id UUID NOT NULL REFERENCES analysis_results(id) ON DELETE CASCADE,
-  insight_type analysis_insight_type NOT NULL,
-  category VARCHAR(50) DEFAULT 'observed', -- 'observed', 'interpretation', 'action'
-  title VARCHAR(255) NOT NULL,
-  description TEXT NOT NULL,
-  supporting_metrics JSONB,
-  recommendation TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- AI telemetry and request logs (Section 54)
-CREATE TABLE ai_requests (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  feature VARCHAR(100) NOT NULL, -- 'csv_analysis', 'natural_language_query', 'program_summary', etc.
-  request_timestamp TIMESTAMPTZ DEFAULT NOW(),
-  model VARCHAR(100) DEFAULT 'gemini-2.5-flash',
-  input_token_estimate INTEGER DEFAULT 0,
-  output_token_estimate INTEGER DEFAULT 0,
-  latency_ms INTEGER DEFAULT 0,
-  status VARCHAR(50) DEFAULT 'success' -- 'success', 'fallback_deterministic', 'error'
-);
-
--- Organization monthly AI usage logs (Section 55)
-CREATE TABLE ai_usage_logs (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  period VARCHAR(7) NOT NULL, -- '2026-09'
-  total_requests INTEGER DEFAULT 0,
-  csv_analyses INTEGER DEFAULT 0,
-  data_questions INTEGER DEFAULT 0,
-  report_generations INTEGER DEFAULT 0,
-  token_count INTEGER DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE (organization_id, period)
-);
-
--- RLS: Enable RLS on intelligence tables
-ALTER TABLE analysis_files ENABLE ROW LEVEL SECURITY;
-ALTER TABLE analysis_jobs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE analysis_results ENABLE ROW LEVEL SECURITY;
-ALTER TABLE analysis_metrics ENABLE ROW LEVEL SECURITY;
-ALTER TABLE analysis_insights ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ai_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
-
--- Policies for analysis_files
+-- --- 13.15 GROUNDED AI & CSV ANALYTICS ---
 DROP POLICY IF EXISTS analysis_files_super_admin ON analysis_files;
 CREATE POLICY analysis_files_super_admin ON analysis_files FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS analysis_files_read ON analysis_files;
+CREATE POLICY analysis_files_read ON analysis_files FOR SELECT USING (
+  user_has_crm_access() AND organization_id = current_user_org_id()
+);
 DROP POLICY IF EXISTS analysis_files_insert ON analysis_files;
-CREATE POLICY analysis_files_insert ON analysis_files FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+CREATE POLICY analysis_files_insert ON analysis_files FOR INSERT WITH CHECK (
+  is_staff_member_or_higher() AND organization_id = current_user_org_id()
+);
 DROP POLICY IF EXISTS analysis_files_delete ON analysis_files;
-CREATE POLICY analysis_files_delete ON analysis_files FOR DELETE USING (is_staff_manager_or_higher() AND organization_id = current_user_org_id());
+CREATE POLICY analysis_files_delete ON analysis_files FOR DELETE USING (
+  is_staff_manager_or_higher() AND organization_id = current_user_org_id()
+);
 
--- Policies for analysis_jobs
 DROP POLICY IF EXISTS super_admin_all_intelligence ON analysis_jobs;
 CREATE POLICY super_admin_all_intelligence ON analysis_jobs FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS staff_intelligence_access ON analysis_jobs;
-CREATE POLICY staff_intelligence_access ON analysis_jobs FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
+CREATE POLICY staff_intelligence_access ON analysis_jobs FOR SELECT USING (
+  user_has_crm_access() AND organization_id = current_user_org_id()
+);
 DROP POLICY IF EXISTS staff_intelligence_insert ON analysis_jobs;
-CREATE POLICY staff_intelligence_insert ON analysis_jobs FOR INSERT WITH CHECK (is_staff_member_or_higher() AND organization_id = current_user_org_id());
+CREATE POLICY staff_intelligence_insert ON analysis_jobs FOR INSERT WITH CHECK (
+  is_staff_member_or_higher() AND organization_id = current_user_org_id()
+);
 
--- Policies for analysis_results
 DROP POLICY IF EXISTS analysis_results_super_admin ON analysis_results;
 CREATE POLICY analysis_results_super_admin ON analysis_results FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS analysis_results_read ON analysis_results;
@@ -982,81 +1163,101 @@ CREATE POLICY analysis_results_read ON analysis_results FOR SELECT USING (
   user_has_crm_access() AND analysis_job_id IN (SELECT id FROM analysis_jobs WHERE organization_id = current_user_org_id())
 );
 
--- Policies for analysis_metrics
 DROP POLICY IF EXISTS analysis_metrics_super_admin ON analysis_metrics;
 CREATE POLICY analysis_metrics_super_admin ON analysis_metrics FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS analysis_metrics_read ON analysis_metrics;
 CREATE POLICY analysis_metrics_read ON analysis_metrics FOR SELECT USING (user_has_crm_access());
 
--- Policies for analysis_insights
 DROP POLICY IF EXISTS analysis_insights_super_admin ON analysis_insights;
 CREATE POLICY analysis_insights_super_admin ON analysis_insights FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS analysis_insights_read ON analysis_insights;
 CREATE POLICY analysis_insights_read ON analysis_insights FOR SELECT USING (user_has_crm_access());
 
--- Policies for ai_requests
 DROP POLICY IF EXISTS super_admin_ai_logs ON ai_requests;
 CREATE POLICY super_admin_ai_logs ON ai_requests FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS ai_requests_staff_insert ON ai_requests;
-CREATE POLICY ai_requests_staff_insert ON ai_requests FOR INSERT WITH CHECK (user_has_crm_access() AND user_id = current_user_id());
+CREATE POLICY ai_requests_staff_insert ON ai_requests FOR INSERT WITH CHECK (
+  user_has_crm_access() AND user_id = current_user_id()
+);
 
--- Policies for ai_usage_logs
 DROP POLICY IF EXISTS super_admin_ai_usage ON ai_usage_logs;
 CREATE POLICY super_admin_ai_usage ON ai_usage_logs FOR ALL USING (is_super_admin()) WITH CHECK (is_super_admin());
 DROP POLICY IF EXISTS staff_ai_usage_read ON ai_usage_logs;
-CREATE POLICY staff_ai_usage_read ON ai_usage_logs FOR SELECT USING (user_has_crm_access() AND organization_id = current_user_org_id());
+CREATE POLICY staff_ai_usage_read ON ai_usage_logs FOR SELECT USING (
+  user_has_crm_access() AND organization_id = current_user_org_id()
+);
 
 -- ==============================================================================
--- 10. SUPABASE STORAGE BUCKETS & ACCESS POLICIES (Security Check 13)
+-- 14. SUPABASE STORAGE BUCKETS & STORAGE OBJECT RLS POLICIES
 -- ==============================================================================
 
--- 1. Register Private Storage Buckets
--- Buckets: crm_documents, crm_attachments, crm_backups (Strictly public = false)
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES 
-  (
-    'crm_documents', 
-    'crm_documents', 
-    false, 
-    10485760, -- 10MB limit
-    ARRAY[
-      'application/pdf',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/csv',
-      'text/plain',
-      'image/png',
-      'image/jpeg',
-      'image/webp'
-    ]
-  ),
-  (
-    'crm_attachments', 
-    'crm_attachments', 
-    false, 
-    10485760, -- 10MB limit
-    ARRAY[
-      'application/pdf',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/csv',
-      'text/plain',
-      'image/png',
-      'image/jpeg',
-      'image/webp'
-    ]
-  ),
-  (
-    'crm_backups', 
-    'crm_backups', 
-    false, 
-    26214400, -- 25MB limit
-    ARRAY['application/json']
-  )
-ON CONFLICT (id) DO UPDATE SET
-  public = false,
-  file_size_limit = EXCLUDED.file_size_limit,
-  allowed_mime_types = EXCLUDED.allowed_mime_types;
+-- 1. Register All Four Private Storage Buckets (Strictly public = false)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'storage' AND table_name = 'buckets') THEN
+    INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    VALUES 
+      (
+        'tip-crm-private-documents', 
+        'tip-crm-private-documents', 
+        false, 
+        10485760, -- 10MB limit
+        ARRAY[
+          'application/pdf',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'text/csv',
+          'text/plain',
+          'image/png',
+          'image/jpeg',
+          'image/webp'
+        ]
+      ),
+      (
+        'crm_documents', 
+        'crm_documents', 
+        false, 
+        10485760,
+        ARRAY[
+          'application/pdf',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'text/csv',
+          'text/plain',
+          'image/png',
+          'image/jpeg',
+          'image/webp'
+        ]
+      ),
+      (
+        'crm_attachments', 
+        'crm_attachments', 
+        false, 
+        10485760,
+        ARRAY[
+          'application/pdf',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'text/csv',
+          'text/plain',
+          'image/png',
+          'image/jpeg',
+          'image/webp'
+        ]
+      ),
+      (
+        'crm_backups', 
+        'crm_backups', 
+        false, 
+        26214400, -- 25MB limit
+        ARRAY['application/json']
+      )
+    ON CONFLICT (id) DO UPDATE SET
+      public = false,
+      file_size_limit = EXCLUDED.file_size_limit,
+      allowed_mime_types = EXCLUDED.allowed_mime_types;
+  END IF;
+END $$;
 
 -- 2. Storage Row Level Security (RLS) Policies on storage.objects
 DO $$
@@ -1107,6 +1308,95 @@ CREATE POLICY storage_backups_super_admin ON storage.objects
     bucket_id = 'crm_backups' AND is_super_admin()
   );
 
--- NOTE: Public and anonymous access to storage objects is unconditionally DENIED.
+-- ==============================================================================
+-- 15. BASELINE SYSTEM SEED DATA (Zero Personal Data / Safe Defaults)
+-- ==============================================================================
 
+-- 1. Default Tenant Organization (The Inclusion Project)
+INSERT INTO public.organizations (id, name, type, sector, website, email, city, province)
+VALUES (
+  '00000000-0000-0000-0000-000000000001',
+  'The Inclusion Project (TIP)',
+  'Partner',
+  'Civil Society & Equity Research',
+  'https://theinclusionproject.com',
+  'info@theinclusionproject.com',
+  'Vancouver',
+  'British Columbia'
+) ON CONFLICT (id) DO NOTHING;
 
+-- 2. System Baseline Roles
+INSERT INTO public.roles (id, name, description, is_system_role)
+VALUES
+  ('super_admin', 'Super Administrator', 'Full administrative authority across all modules, users, security policies, and system settings.', TRUE),
+  ('staff_manager', 'Staff Manager', 'Management oversight for programs, events, contacts, documents, and operational reports.', TRUE),
+  ('staff_member', 'Staff Member', 'Operational access to assigned programs, events, tasks, contacts, and non-confidential documents.', TRUE),
+  ('volunteer', 'Volunteer', 'Assigned participation in specific workshops and public community initiatives. Zero financial access.', TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- 3. Core Permissions (Resource + Action)
+INSERT INTO public.permissions (resource, action, description)
+VALUES
+  ('users', 'manage', 'Create, approve, deactivate, and manage CRM user accounts'),
+  ('users', 'view', 'View team member directory and profile metadata'),
+  ('people', 'manage', 'Create, update, export, and delete contacts'),
+  ('people', 'view', 'View contact directory entries within user data scope'),
+  ('programs', 'manage', 'Create, edit, budget, and archive initiatives and cohorts'),
+  ('programs', 'view', 'View programs and cohorts assigned or organization-wide'),
+  ('events', 'manage', 'Schedule, edit, and record attendance for workshops and forums'),
+  ('events', 'view', 'View scheduled events and session rosters'),
+  ('tasks', 'manage', 'Assign, update status, and prioritize work milestones'),
+  ('tasks', 'view', 'View tasks assigned to user or team'),
+  ('funding', 'manage', 'Create, edit, reconcile, and delete fiduciary records and grants'),
+  ('funding', 'view', 'View confidential grant and donor allocations'),
+  ('documents', 'manage', 'Upload, classify, and delete storage files and cloud assets'),
+  ('documents', 'view', 'Access documents according to role confidentiality tier'),
+  ('audit_logs', 'view', 'Inspect security audit trail records'),
+  ('intelligence', 'manage', 'Upload datasets for grounded CSV profiling and AI analytics'),
+  ('intelligence', 'view', 'Read generated metrics and analytical breakdowns')
+ON CONFLICT (resource, action) DO NOTHING;
+
+-- 4. Role-to-Permission Baseline Mappings
+INSERT INTO public.role_permissions (role_id, permission_id)
+SELECT 'super_admin', id FROM public.permissions
+ON CONFLICT (role_id, permission_id) DO NOTHING;
+
+INSERT INTO public.role_permissions (role_id, permission_id)
+SELECT 'staff_manager', id FROM public.permissions 
+WHERE resource NOT IN ('audit_logs') OR (resource = 'audit_logs' AND action = 'view')
+ON CONFLICT (role_id, permission_id) DO NOTHING;
+
+INSERT INTO public.role_permissions (role_id, permission_id)
+SELECT 'staff_member', id FROM public.permissions 
+WHERE resource NOT IN ('funding', 'audit_logs') AND action IN ('view', 'manage')
+ON CONFLICT (role_id, permission_id) DO NOTHING;
+
+INSERT INTO public.role_permissions (role_id, permission_id)
+SELECT 'volunteer', id FROM public.permissions 
+WHERE resource IN ('events', 'tasks') AND action = 'view'
+ON CONFLICT (role_id, permission_id) DO NOTHING;
+
+-- ==============================================================================
+-- 16. PRIVILEGE HARDENING & ANONYMOUS ACCESS RESTRICTION
+-- ==============================================================================
+
+-- Revoke default public execution privileges on sensitive procedures
+REVOKE EXECUTE ON FUNCTION purge_audit_logs_older_than(INTEGER) FROM PUBLIC;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'purge_audit_logs_older_than') THEN
+    REVOKE EXECUTE ON FUNCTION purge_audit_logs_older_than(INTEGER) FROM anon;
+    GRANT EXECUTE ON FUNCTION purge_audit_logs_older_than(INTEGER) TO authenticated;
+  END IF;
+END $$;
+
+-- Prevent anonymous role from executing arbitrary mutations on public schema
+REVOKE CREATE ON SCHEMA public FROM anon;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+
+COMMIT;
+
+-- ==============================================================================
+-- END OF SCHEMA DEFINITION
+-- ==============================================================================

@@ -333,7 +333,17 @@ interface CrmContextType {
 
 const CrmContext = createContext<CrmContextType | undefined>(undefined);
 
-const STORAGE_KEY_PREFIX = 'tip_crm_v1_';
+const STORAGE_KEY_PREFIX = 'tip_crm_v2_';
+
+// Automatically purge stale v1 demo data from client localStorage
+if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+  try {
+    const legacyKeys = Object.keys(localStorage).filter(k => k.startsWith('tip_crm_v1_'));
+    if (legacyKeys.length > 0) {
+      legacyKeys.forEach(k => localStorage.removeItem(k));
+    }
+  } catch (_) {}
+}
 
 function loadFromStorage<T>(key: string, fallback: T): T {
   try {
@@ -558,13 +568,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadFromStorage('funding', INITIAL_FUNDING)
   );
   
-  const [interactions, setInteractions] = useState<InteractionItem[]>(() => {
-    const loaded = loadFromStorage<InteractionItem[]>('interactions', INITIAL_INTERACTIONS);
-    if (!Array.isArray(loaded) || loaded.length < INITIAL_INTERACTIONS.length) {
-      return INITIAL_INTERACTIONS;
-    }
-    return loaded;
-  });
+  const [interactions, setInteractions] = useState<InteractionItem[]>(() => 
+    loadFromStorage('interactions', INITIAL_INTERACTIONS)
+  );
   
   const [documents, setDocuments] = useState<DocumentItem[]>(() => 
     loadFromStorage('documents', INITIAL_DOCUMENTS)

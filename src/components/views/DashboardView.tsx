@@ -770,20 +770,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
 
               <div className="space-y-3">
-                {myWork.recentActivity.map(act => (
-                  <div key={act.id} className="flex items-start gap-3">
-                    <div className="p-1.5 rounded-lg bg-zinc-100 text-zinc-600 shrink-0 mt-0.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold text-zinc-900">{act.title}</p>
-                        <span className="text-[10px] text-zinc-400 shrink-0">{act.timestamp}</span>
+                {myWork.recentActivity.length === 0 ? (
+                  <p className="text-xs text-zinc-400 py-3 text-center">No recent operational activity recorded.</p>
+                ) : (
+                  myWork.recentActivity.map(act => (
+                    <div key={act.id} className="flex items-start gap-3">
+                      <div className="p-1.5 rounded-lg bg-zinc-100 text-zinc-600 shrink-0 mt-0.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
                       </div>
-                      <p className="text-[11px] text-zinc-500 mt-0.5">{act.description}</p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold text-zinc-900">{act.title}</p>
+                          <span className="text-[10px] text-zinc-400 shrink-0">{act.timestamp}</span>
+                        </div>
+                        <p className="text-[11px] text-zinc-500 mt-0.5">{act.description}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           </div>

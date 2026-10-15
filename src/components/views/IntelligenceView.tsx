@@ -475,50 +475,52 @@ export const IntelligenceView: React.FC = () => {
               </div>
 
               {/* 1-Click Realistic TIP Demo Datasets (Section 11 & 59) */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h2 className="text-sm font-semibold text-zinc-900 flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-[#ea0543]" />
-                      <span>One-Click Realistic TIP Datasets</span>
-                    </h2>
-                    <p className="text-xs text-zinc-500 mt-0.5">
-                      Explore the full deterministic calculation & Gemini insight flow without uploading your own file:
-                    </p>
+              {DEMO_DATASETS.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-zinc-900 flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4 text-[#ea0543]" />
+                        <span>One-Click Realistic TIP Datasets</span>
+                      </h2>
+                      <p className="text-xs text-zinc-500 mt-0.5">
+                        Explore the full deterministic calculation & Gemini insight flow without uploading your own file:
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {DEMO_DATASETS.map(demo => (
-                    <div
-                      key={demo.id}
-                      onClick={() => handleLoadDemoDataset(demo)}
-                      className="p-4 rounded-xl border border-zinc-200/80 bg-white hover:border-[#140a8e]/60 hover:shadow-sm transition-all cursor-pointer group flex flex-col justify-between"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-semibold text-zinc-900 group-hover:text-[#140a8e] transition-colors line-clamp-1">
-                            {demo.name}
-                          </span>
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-700 font-medium">
-                            {demo.badge}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {DEMO_DATASETS.map(demo => (
+                      <div
+                        key={demo.id}
+                        onClick={() => handleLoadDemoDataset(demo)}
+                        className="p-4 rounded-xl border border-zinc-200/80 bg-white hover:border-[#140a8e]/60 hover:shadow-sm transition-all cursor-pointer group flex flex-col justify-between"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-semibold text-zinc-900 group-hover:text-[#140a8e] transition-colors line-clamp-1">
+                              {demo.name}
+                            </span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-700 font-medium">
+                              {demo.badge}
+                            </span>
+                          </div>
+                          <p className="text-xs text-zinc-500 line-clamp-2 leading-relaxed mb-3">
+                            {demo.description}
+                          </p>
+                        </div>
+
+                        <div className="pt-2 border-t border-zinc-100 flex items-center justify-between text-xs text-[#140a8e] font-medium">
+                          <span className="text-[11px] text-zinc-400 font-mono truncate max-w-[150px]">{demo.filename}</span>
+                          <span className="inline-flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
+                            Inspect & Analyze →
                           </span>
                         </div>
-                        <p className="text-xs text-zinc-500 line-clamp-2 leading-relaxed mb-3">
-                          {demo.description}
-                        </p>
                       </div>
-
-                      <div className="pt-2 border-t border-zinc-100 flex items-center justify-between text-xs text-[#140a8e] font-medium">
-                        <span className="text-[11px] text-zinc-400 font-mono truncate max-w-[150px]">{demo.filename}</span>
-                        <span className="inline-flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
-                          Inspect & Analyze →
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 

@@ -262,33 +262,8 @@ export function calculateMyWork(params: CalculateMyWorkParams): MyWorkFeed {
     });
   }
 
-  // 6. Recent Activity Feed
-  const recentActivity: MyWorkFeed['recentActivity'] = [
-    {
-      id: 'act-1',
-      timestamp: 'Today at 09:15',
-      title: 'Task Rule Triggered',
-      description: 'Post-event follow-up tasks generated for Community Accessibility Workshop.',
-      icon: 'Zap',
-      type: 'rule'
-    },
-    {
-      id: 'act-2',
-      timestamp: 'Yesterday at 16:30',
-      title: 'Participant Check-in Recorded',
-      description: 'Jordan Patel logged 14 participant check-ins at Welcome Desk.',
-      icon: 'CheckCircle',
-      type: 'task'
-    },
-    {
-      id: 'act-3',
-      timestamp: 'Sep 21 at 14:00',
-      title: 'Task Template Applied',
-      description: 'New cohort onboarding workflow assigned to Program Coordinator post.',
-      icon: 'Briefcase',
-      type: 'rule'
-    }
-  ];
+  // 6. Recent Activity Feed (Clean state: populated dynamically from live events)
+  const recentActivity: MyWorkFeed['recentActivity'] = [];
 
   // 7. Contextual AI Note / Briefing
   const openCount = overdueTasks.length + todayTasks.length + upcomingTasks.length;

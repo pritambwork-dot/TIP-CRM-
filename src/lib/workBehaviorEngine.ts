@@ -320,13 +320,13 @@ export function detectWorkPatterns(params: {
         actionPreview: {
           id: 'act-assign-all',
           title: 'Assign Unassigned Tasks to Program Coordinator',
-          description: `Route ${unassignedTasks.length} unassigned tasks to Program Coordinator (Sarah Thompson).`,
+          description: `Route ${unassignedTasks.length} unassigned task(s) to Program Coordinator post.`,
           actionType: 'assign_task',
           targetRecordType: 'Task',
           payload: {
             taskIds: unassignedTasks.map(t => t.id),
-            assigneeId: 'u-3',
-            assigneeName: 'Sarah Thompson'
+            assigneeId: currentUser.id,
+            assigneeName: currentUser.name || 'Program Coordinator'
           },
           requiresConfirmation: true
         },

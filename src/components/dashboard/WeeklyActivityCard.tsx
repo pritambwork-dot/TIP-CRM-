@@ -56,12 +56,12 @@ export const WeeklyActivityCard: React.FC<WeeklyActivityCardProps> = ({
   // Form state for quick interaction log
   const [quickPersonId, setQuickPersonId] = useState(people[0]?.id || '');
   const [quickType, setQuickType] = useState<InteractionType>('Meeting');
-  const [quickDate, setQuickDate] = useState('2026-09-18');
+  const [quickDate, setQuickDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [quickSummary, setQuickSummary] = useState('');
   const [quickDetails, setQuickDetails] = useState('');
 
-  // Fixed reference date matching TIP CRM demo timeline
-  const todayStr = '2026-09-18';
+  // Live calendar date for activity tracking
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   const todayDate = useMemo(() => new Date(todayStr + 'T12:00:00'), [todayStr]);
 
   // Generate the last 6 calendar-aligned weeks leading up to today
