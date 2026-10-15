@@ -91,7 +91,7 @@ import {
   DEFAULT_CACHE_TTL_MS
 } from '../lib/offlineStorage.ts';
 import { syncEngine } from '../lib/syncEngine.ts';
-import { SupabaseAuthEngine } from '../lib/supabase.ts';
+import { SupabaseAuthEngine, sanitizeRedirectPath } from '../lib/supabase.ts';
 import { INITIAL_USERS } from '../data/mockData.ts';
 import {
   DatabaseHealthService,
@@ -2444,7 +2444,7 @@ async function runTests() {
   const evalCrmApproval = (googleEmail: string) => {
     const cleanEmail = googleEmail.toLowerCase().trim();
     let matchedUser = INITIAL_USERS.find(u => u.email.toLowerCase().trim() === cleanEmail);
-    if (!matchedUser && (cleanEmail === 'pritamb2k06@gmail.com' || cleanEmail === 'pritam@gmail.com' || cleanEmail.includes('pritam'))) {
+    if (!matchedUser && (cleanEmail === 'pritamb2k06@gmail.com' || cleanEmail === 'pritam@gmail.com')) {
       matchedUser = INITIAL_USERS.find(u => u.id === 'u-1') || INITIAL_USERS[0];
     }
     if (!matchedUser) {
@@ -2498,6 +2498,20 @@ async function runTests() {
   const checkRejected = evalCrmApproval('david.kalu@gmail.com');
   assert(checkRejected.allowed === false, 'Rejected Google account is denied CRM access');
   assert(Boolean(checkRejected.error?.includes('was not approved')), 'Rejected account receives non-approval notice');
+
+  // 4h. Rejection of unauthorized attacker with "pritam" substring (Anti-elevation test)
+  const checkFuzzyAttacker = evalCrmApproval('pritam.attacker@external.com');
+  assert(checkFuzzyAttacker.allowed === false, 'Stranger with substring in email is strictly denied CRM access (Anti-elevation)');
+  assert(checkFuzzyAttacker.user === undefined, 'No role or user identity is assigned to unapproved fuzzy email');
+
+  // 4i. Open Redirect Defense: sanitizeRedirectPath validation
+  assert(sanitizeRedirectPath('https://evil-phishing.com/steal') === '/', 'sanitizeRedirectPath strips absolute external domain');
+  assert(sanitizeRedirectPath('//malicious.com/landing') === '/', 'sanitizeRedirectPath strips protocol-relative URL');
+  assert(sanitizeRedirectPath('/\\malicious.com') === '/', 'sanitizeRedirectPath strips backslash URL');
+  assert(sanitizeRedirectPath('javascript:alert(1)') === '/', 'sanitizeRedirectPath strips javascript scheme');
+  assert(sanitizeRedirectPath('/tasks') === '/tasks', 'sanitizeRedirectPath preserves safe internal task route');
+  assert(sanitizeRedirectPath('/funding?filter=grant') === '/funding?filter=grant', 'sanitizeRedirectPath preserves safe query parameters');
+  assert(sanitizeRedirectPath(null) === '/', 'sanitizeRedirectPath defaults null to root');
 
   // 5. Server-Side Enforcement: POST /api/auth/login with provider: 'google'
   // 5a. Approved Super Admin Google login
@@ -2621,6 +2635,32 @@ async function runTests() {
   assert(sessionAfterSignOut === null, 'SupabaseAuthEngine.signOut purges stored session');
   const userAfterSignOut = await SupabaseAuthEngine.getActiveSupabaseUser();
   assert(userAfterSignOut === null, 'getActiveSupabaseUser returns null after sign out');
+
+  // 9. Single-Flight OAuth Callback Handler & Cancellation Handling
+  const originalWindow = (globalThis as any).window;
+  try {
+    (globalThis as any).window = {
+      location: {
+        search: '?error=access_denied&error_description=User+cancelled+authorization',
+        hash: '',
+        pathname: '/'
+      },
+      history: {
+        replaceState: () => {}
+      }
+    };
+    SupabaseAuthEngine.resetCallbackState();
+    const cbCancelled = await SupabaseAuthEngine.handleOAuthCallback();
+    assert(cbCancelled.oauthCancelled === true, 'handleOAuthCallback flags access_denied as cancellation');
+    assert(Boolean(cbCancelled.error?.includes('cancelled')), 'handleOAuthCallback formats user-friendly cancellation notice');
+
+    // Single-flight verification: second invocation returns cached state without repeat processing
+    const cbSecond = await SupabaseAuthEngine.handleOAuthCallback();
+    assert(cbSecond.session === null, 'handleOAuthCallback respects single-flight execution guard');
+  } finally {
+    (globalThis as any).window = originalWindow;
+    SupabaseAuthEngine.resetCallbackState();
+  }
 
   // --------------------------------------------------------------------------
   // Test Suite 26: Supabase Database Integration, Typed Services & Offline Queue

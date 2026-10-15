@@ -21,6 +21,23 @@ if (typeof window === 'undefined' && typeof globalThis !== 'undefined' && !globa
   };
 }
 
+/**
+ * Strictly sanitizes internal redirect target paths to prevent Open Redirect attacks.
+ * Rejects external URLs, protocol-relative paths (//), backslash paths (/\), and dangerous schemes.
+ */
+export function sanitizeRedirectPath(path?: string | null): string {
+  if (!path) return '/';
+  const clean = path.trim().replace(/[\x00-\x1F\x7F]/g, '');
+  if (!clean.startsWith('/') || clean.startsWith('//') || clean.startsWith('/\\')) {
+    return '/';
+  }
+  const lower = clean.toLowerCase();
+  if (lower.includes('://') || lower.includes('javascript:') || lower.includes('data:') || lower.includes('vbscript:')) {
+    return '/';
+  }
+  return clean;
+}
+
 // If credentials exist, initialize real Supabase client
 export const supabase: SupabaseClient | null = 
   SUPABASE_URL && SUPABASE_ANON_KEY 
@@ -28,7 +45,7 @@ export const supabase: SupabaseClient | null =
         auth: {
           persistSession: true,
           autoRefreshToken: true,
-          detectSessionInUrl: true,
+          detectSessionInUrl: false,
           flowType: 'pkce'
         }
       }) 
@@ -44,6 +61,14 @@ const AUTH_STORAGE_KEY = 'tip_crm_supabase_auth_session';
 export class SupabaseAuthEngine {
   private static listeners: Array<(session: AuthSession | null) => void> = [];
   private static memorySession: AuthSession | null = null;
+  private static callbackHandled = false;
+
+  /**
+   * Resets the callback handled state (primarily for test harness isolation)
+   */
+  static resetCallbackState() {
+    this.callbackHandled = false;
+  }
 
   static getStoredSession(): AuthSession | null {
     try {
@@ -86,16 +111,124 @@ export class SupabaseAuthEngine {
   }
 
   /**
+   * Authoritative OAuth Callback Handler
+   * Handles Google OAuth response parameters, extracts errors/cancellations,
+   * performs PKCE code exchange exactly once, and stores verified session.
+   */
+  static async handleOAuthCallback(): Promise<{
+    session: AuthSession | null;
+    error: string | null;
+    oauthCancelled: boolean;
+  }> {
+    if (typeof window === 'undefined') {
+      return { session: null, error: null, oauthCancelled: false };
+    }
+
+    if (this.callbackHandled) {
+      return { session: this.getStoredSession(), error: null, oauthCancelled: false };
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(
+      window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash
+    );
+
+    // 1. Detect OAuth error or cancellation from query or hash fragment
+    const rawError = 
+      hashParams.get('error_description') || 
+      searchParams.get('error_description') ||
+      hashParams.get('error') || 
+      searchParams.get('error');
+
+    if (rawError) {
+      this.callbackHandled = true;
+      const readableError = decodeURIComponent(rawError.replace(/\+/g, ' '));
+      const isCancelled = rawError.toLowerCase().includes('access_denied') || rawError.toLowerCase().includes('cancel');
+      // Clean sensitive parameters from browser history
+      try {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch {}
+      return {
+        session: null,
+        error: isCancelled 
+          ? 'Google sign-in was cancelled.' 
+          : `Google authentication failed: ${readableError}`,
+        oauthCancelled: isCancelled
+      };
+    }
+
+    // 2. Detect PKCE authorization code in URL query parameters
+    const code = searchParams.get('code');
+    if (code && supabase) {
+      this.callbackHandled = true;
+      try {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        try {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } catch {}
+
+        if (error) {
+          clientSafeLogger.warn('Supabase OAuth PKCE exchange error:', mapToSafeErrorMessage(error));
+          return {
+            session: null,
+            error: `Failed to complete Google authentication: ${error.message}`,
+            oauthCancelled: false
+          };
+        }
+
+        if (data?.session?.user && data.session.user.email) {
+          const user = data.session.user;
+          const email = user.email.toLowerCase().trim();
+          const fullName = user.user_metadata?.full_name || 
+                           user.user_metadata?.name || 
+                           email.split('@')[0];
+          const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture;
+
+          const authSession: AuthSession = {
+            user: {
+              id: user.id,
+              email,
+              fullName,
+              avatarUrl,
+              provider: 'google',
+              emailVerified: Boolean(user.email_confirmed_at || user.confirmed_at || true)
+            },
+            accessToken: data.session.access_token,
+            expiresAt: data.session.expires_at ? data.session.expires_at * 1000 : Date.now() + 3600 * 24 * 7 * 1000
+          };
+
+          this.saveSession(authSession);
+          return { session: authSession, error: null, oauthCancelled: false };
+        }
+      } catch (err: any) {
+        try {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } catch {}
+        clientSafeLogger.error('OAuth code exchange exception:', mapToSafeErrorMessage(err));
+        return {
+          session: null,
+          error: err?.message || 'Unexpected error during Google code exchange.',
+          oauthCancelled: false
+        };
+      }
+    }
+
+    return { session: null, error: null, oauthCancelled: false };
+  }
+
+  /**
    * Google OAuth Flow
    * Initiates real Supabase Google OAuth redirect with minimum required profile and email scopes.
    * If customEmail is provided (dev/testing), generates a verified local identity session.
    */
-  static async signInWithGoogle(customEmail?: string, customName?: string): Promise<{
+  static async signInWithGoogle(customEmail?: string, customName?: string, returnTo?: string): Promise<{
     session?: AuthSession;
     error?: string;
     url?: string;
   }> {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+    const safeReturn = sanitizeRedirectPath(returnTo);
+    const redirectUrl = safeReturn === '/' ? `${origin}/` : `${origin}${safeReturn}`;
 
     // If real Supabase is configured and no custom email override is passed:
     if (supabase && !customEmail) {
@@ -103,7 +236,7 @@ export class SupabaseAuthEngine {
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
-            redirectTo: `${origin}/`,
+            redirectTo: redirectUrl,
             scopes: 'openid email profile',
             queryParams: {
               access_type: 'offline',
@@ -130,7 +263,7 @@ export class SupabaseAuthEngine {
 
     // Authenticate verified Google Identity (for testing or when customEmail is provided)
     const email = customEmail?.trim().toLowerCase() || 'pritamb2k06@gmail.com';
-    const name = customName || (email.includes('pritam') ? 'Pritam Biswas' : email.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase()));
+    const name = customName || ((email === 'pritam@gmail.com' || email === 'pritamb2k06@gmail.com') ? 'Pritam Biswas' : email.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase()));
     const authUserId = `auth-google-${btoa(email).replace(/=/g, '').slice(0, 16)}`;
 
     const session: AuthSession = {

@@ -62,36 +62,30 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     localStorage.removeItem('tip_crm_auth_user_id');
 
     const verifyAuthOnMount = async () => {
-      // 1. Check for OAuth callback error parameters in URL query or hash
-      if (typeof window !== 'undefined') {
-        const searchParams = new URLSearchParams(window.location.search);
-        const hashParams = new URLSearchParams(
-          window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash
-        );
-        const oauthError = 
-          hashParams.get('error_description') || 
-          searchParams.get('error_description') ||
-          hashParams.get('error') || 
-          searchParams.get('error');
-
-        if (oauthError) {
-          const readableError = decodeURIComponent(oauthError.replace(/\+/g, ' '));
-          setAuthError(`Google authentication cancelled or failed: ${readableError}`);
-          window.history.replaceState({}, document.title, window.location.pathname);
-          setInitialCheckDone(true);
-          return;
-        }
+      // 1. Process OAuth callback if arriving from Google redirect (PKCE code or OAuth error)
+      const callbackResult = await SupabaseAuthEngine.handleOAuthCallback();
+      if (callbackResult.error) {
+        setAuthError(callbackResult.error);
+        setIsAuthenticated(false);
+        setInitialCheckDone(true);
+        return;
       }
 
-      // 2. Check for active Supabase Google OAuth session (callback or persisted)
+      // 2. Resolve active Supabase user identity (from newly exchanged callback session or existing session)
+      let supabaseUser: { id: string; email: string; fullName: string; avatarUrl?: string } | null = null;
+      if (callbackResult.session?.user) {
+        supabaseUser = callbackResult.session.user;
+      } else {
+        supabaseUser = await SupabaseAuthEngine.getActiveSupabaseUser();
+      }
+
       try {
-        const supabaseUser = await SupabaseAuthEngine.getActiveSupabaseUser();
         if (supabaseUser?.email) {
           const targetEmail = supabaseUser.email.toLowerCase().trim();
           let matchedUser = users.find(u => u.email.toLowerCase().trim() === targetEmail);
 
-          // Explicitly bind Google login for Pritam to Super Admin u-1
-          if (!matchedUser && (targetEmail === 'pritamb2k06@gmail.com' || targetEmail === 'pritam@gmail.com' || targetEmail.includes('pritam'))) {
+          // Explicitly bind Google login for authorized administrator Pritam to Super Admin u-1
+          if (!matchedUser && (targetEmail === 'pritamb2k06@gmail.com' || targetEmail === 'pritam@gmail.com')) {
             matchedUser = users.find(u => u.id === 'u-1') || users[0];
           }
 
@@ -103,9 +97,6 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
             setAuthError(`Your Google account (${targetEmail}) was authenticated, but no approved TIP CRM profile was found. Please contact your administrator to request access.`);
             setIsAuthenticated(false);
             setInitialCheckDone(true);
-            if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
-              window.history.replaceState({}, document.title, window.location.pathname);
-            }
             return;
           }
 
@@ -116,9 +107,6 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
             setAuthError('This account request was not approved. Please contact your CRM Administrator.');
             setIsAuthenticated(false);
             setInitialCheckDone(true);
-            if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
-              window.history.replaceState({}, document.title, window.location.pathname);
-            }
             return;
           }
 
@@ -129,9 +117,6 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
             setAuthError('Your account has been deactivated. Please contact your CRM Administrator.');
             setIsAuthenticated(false);
             setInitialCheckDone(true);
-            if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
-              window.history.replaceState({}, document.title, window.location.pathname);
-            }
             return;
           }
 
@@ -142,9 +127,6 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
             setAuthError('Your account is pending activation by an Administrator. Please check back later.');
             setIsAuthenticated(false);
             setInitialCheckDone(true);
-            if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
-              window.history.replaceState({}, document.title, window.location.pathname);
-            }
             return;
           }
 
@@ -156,9 +138,6 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
           localStorage.setItem(AUTH_USER_KEY, matchedUser.id);
           setIsAuthenticated(true);
           setInitialCheckDone(true);
-          if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
-            window.history.replaceState({}, document.title, window.location.pathname);
-          }
           return;
         }
       } catch {
@@ -208,8 +187,8 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
       const normalizedEmail = email.toLowerCase().trim();
       let matchedUser = users.find(u => u.email.toLowerCase().trim() === normalizedEmail);
 
-      // Explicitly bind pritam@gmail.com and pritamb2k06@gmail.com to Super Admin u-1
-      if (!matchedUser && (normalizedEmail === 'pritam@gmail.com' || normalizedEmail === 'pritamb2k06@gmail.com' || normalizedEmail.includes('pritam'))) {
+      // Explicitly bind authorized administrator emails to Super Admin u-1
+      if (!matchedUser && (normalizedEmail === 'pritam@gmail.com' || normalizedEmail === 'pritamb2k06@gmail.com')) {
         matchedUser = users.find(u => u.id === 'u-1') || users[0];
       }
 
@@ -294,8 +273,8 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
         const targetEmail = sessionUser.email.toLowerCase().trim();
         let matchedUser = users.find(u => u.email.toLowerCase().trim() === targetEmail);
 
-        // Explicitly bind Google login for Pritam to Super Admin u-1
-        if (!matchedUser && (targetEmail === 'pritamb2k06@gmail.com' || targetEmail === 'pritam@gmail.com' || targetEmail.includes('pritam'))) {
+        // Explicitly bind authorized administrator emails to Super Admin u-1
+        if (!matchedUser && (targetEmail === 'pritamb2k06@gmail.com' || targetEmail === 'pritam@gmail.com')) {
           matchedUser = users.find(u => u.id === 'u-1') || users[0];
         }
 
