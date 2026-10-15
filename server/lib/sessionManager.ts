@@ -53,10 +53,10 @@ const revokedSessionIds = new Set<string>();
 activeSessions.set('session_abc123', {
   sessionId: 'session_abc123',
   user: {
-    id: 'u-1',
-    email: 'pritam@gmail.com',
+    id: 'u-admin-090',
+    email: 'tipcrm090@theinclusionproject.ca',
     role: 'super_admin',
-    name: 'Pritam Biswas',
+    name: 'TIP Administrator',
     organizationId: 'org-tip',
     assignedRoleIds: ['super_admin']
   },

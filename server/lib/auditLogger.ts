@@ -66,8 +66,8 @@ function initializeBaselineAuditLogs(): void {
     {
       id: 'aud-sys-001',
       timestamp: '2026-09-22T08:00:00.000Z',
-      actorId: 'u-1',
-      actorName: 'Pritam Biswas',
+      actorId: 'u-admin-090',
+      actorName: 'TIP Administrator',
       actorRole: 'super_admin',
       action: 'SYSTEM_INITIALIZATION',
       resourceType: 'System',
@@ -81,8 +81,8 @@ function initializeBaselineAuditLogs(): void {
     {
       id: 'aud-sys-002',
       timestamp: '2026-09-22T08:05:00.000Z',
-      actorId: 'u-1',
-      actorName: 'Pritam Biswas',
+      actorId: 'u-admin-090',
+      actorName: 'TIP Administrator',
       actorRole: 'super_admin',
       action: 'USER_PROVISION',
       resourceType: 'User',
@@ -96,8 +96,8 @@ function initializeBaselineAuditLogs(): void {
     {
       id: 'aud-sys-003',
       timestamp: '2026-09-22T08:15:00.000Z',
-      actorId: 'u-1',
-      actorName: 'Pritam Biswas',
+      actorId: 'u-admin-090',
+      actorName: 'TIP Administrator',
       actorRole: 'super_admin',
       action: 'SETTINGS_BUDGET_UPDATE',
       resourceType: 'AiBudget',

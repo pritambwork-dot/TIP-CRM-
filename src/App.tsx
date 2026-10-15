@@ -84,9 +84,9 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
           const targetEmail = supabaseUser.email.toLowerCase().trim();
           let matchedUser = users.find(u => u.email.toLowerCase().trim() === targetEmail);
 
-          // Explicitly bind Google login for authorized administrator Pritam to Super Admin u-1
-          if (!matchedUser && (targetEmail === 'pritamb2k06@gmail.com' || targetEmail === 'pritam@gmail.com')) {
-            matchedUser = users.find(u => u.id === 'u-1') || users[0];
+          // Explicitly bind Google login for authorized administrator to Super Admin
+          if (!matchedUser && (targetEmail === 'tipcrm090@theinclusionproject.ca' || targetEmail === 'admin@theinclusionproject.ca')) {
+            matchedUser = users.find(u => u.id === 'u-admin-090' || u.id === 'u-1') || users[0];
           }
 
           if (!matchedUser) {
@@ -178,22 +178,29 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   }, [users, currentUser?.id, switchUser]);
 
 
-  const handleEmailSignIn = useCallback((email: string, password: string) => {
+  const handleEmailSignIn = useCallback((input: string, password: string) => {
     setAuthLoading(true);
     setAuthError(null);
 
     // Simulate async auth check
     setTimeout(() => {
-      const normalizedEmail = email.toLowerCase().trim();
-      let matchedUser = users.find(u => u.email.toLowerCase().trim() === normalizedEmail);
+      const normalizedInput = input.toLowerCase().trim();
+      const isAdminLogin = normalizedInput === 'tipcrm090' ||
+                           normalizedInput === 'tipcrm090@theinclusionproject.ca' ||
+                           normalizedInput === 'admin@theinclusionproject.ca';
 
-      // Explicitly bind authorized administrator emails to Super Admin u-1
-      if (!matchedUser && (normalizedEmail === 'pritam@gmail.com' || normalizedEmail === 'pritamb2k06@gmail.com')) {
-        matchedUser = users.find(u => u.id === 'u-1') || users[0];
+      let matchedUser = users.find(u => 
+        u.email.toLowerCase().trim() === normalizedInput || 
+        u.id.toLowerCase() === normalizedInput
+      );
+
+      // Explicitly bind authorized administrator credentials to Super Admin
+      if (isAdminLogin) {
+        matchedUser = users.find(u => u.id === 'u-admin-090' || u.id === 'u-1' || u.email === 'tipcrm090@theinclusionproject.ca') || users[0];
       }
 
       if (!matchedUser) {
-        setAuthError('No account found with that email. Please check your email or contact your administrator.');
+        setAuthError('No account found with that email or ID. Please check your credentials or contact your administrator.');
         setAuthLoading(false);
         return;
       }
@@ -217,16 +224,16 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
         return;
       }
 
-      // Exact password check for pritam@gmail.com
-      if ((normalizedEmail === 'pritam@gmail.com' || normalizedEmail === 'pritamb2k06@gmail.com') && password !== '1234') {
-        const isProd = (import.meta as any).env?.PROD;
-        setAuthError(isProd ? 'Invalid email or password.' : 'Incorrect password. For Pritam Biswas, please enter password: 1234');
-        setAuthLoading(false);
-        return;
-      }
-
-      // Check temporary password for admin-provisioned users
-      if (matchedUser.mustChangePassword && matchedUser.tempPassword) {
+      // Exact password check for TIPCRM090 / primary admin
+      if (isAdminLogin) {
+        if (password !== 'CRM090') {
+          const isProd = (import.meta as any).env?.PROD;
+          setAuthError(isProd ? 'Invalid email or password.' : 'Incorrect password. For TIPCRM090, please enter password: CRM090');
+          setAuthLoading(false);
+          return;
+        }
+      } else if (matchedUser.mustChangePassword && matchedUser.tempPassword) {
+        // Check temporary password for admin-provisioned users
         if (password !== matchedUser.tempPassword) {
           setAuthError('Incorrect temporary password. Please enter the temporary password provided by your admin.');
           setAuthLoading(false);
@@ -273,9 +280,9 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
         const targetEmail = sessionUser.email.toLowerCase().trim();
         let matchedUser = users.find(u => u.email.toLowerCase().trim() === targetEmail);
 
-        // Explicitly bind authorized administrator emails to Super Admin u-1
-        if (!matchedUser && (targetEmail === 'pritamb2k06@gmail.com' || targetEmail === 'pritam@gmail.com')) {
-          matchedUser = users.find(u => u.id === 'u-1') || users[0];
+        // Explicitly bind authorized administrator emails to Super Admin
+        if (!matchedUser && (targetEmail === 'tipcrm090@theinclusionproject.ca' || targetEmail === 'admin@theinclusionproject.ca')) {
+          matchedUser = users.find(u => u.id === 'u-admin-090' || u.id === 'u-1') || users[0];
         }
 
         if (!matchedUser) {

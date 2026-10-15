@@ -360,46 +360,48 @@ function normalizeUser(rawUser: any): UserProfile {
     return { ...INITIAL_USERS[0] };
   }
 
-  // Check if this profile belongs to Pritam Biswas
-  const isPritam = rawUser.id === 'u-1' || 
-                   rawUser.name === 'Pritam Biswas' || 
-                   (typeof rawUser.name === 'string' && rawUser.name.toLowerCase().includes('pritam')) ||
-                   rawUser.email === 'pritam@gmail.com' || 
-                   rawUser.email === 'pritamb2k06@gmail.com';
+  // Check if this profile belongs to TIP Administrator (TIPCRM090)
+  const isAdmin = rawUser.id === 'u-admin-090' || 
+                  rawUser.id === 'u-1' || 
+                  rawUser.name === 'TIP Administrator' || 
+                  (typeof rawUser.name === 'string' && rawUser.name.toLowerCase().includes('tip administrator')) ||
+                  rawUser.email === 'tipcrm090@theinclusionproject.ca' || 
+                  rawUser.email === 'admin@theinclusionproject.ca' ||
+                  rawUser.email === 'tipcrm090';
 
-  // Determine roleId with backward compatibility - Pritam is ALWAYS Super Admin!
-  const baseRoleId: RoleId = isPritam ? 'super_admin' : (rawUser.roleId || (rawUser.role === 'volunteer' ? 'volunteer' : 'staff_member'));
-  const assignedRoleIds: RoleId[] = isPritam 
+  // Determine roleId with backward compatibility - Administrator is ALWAYS Super Admin!
+  const baseRoleId: RoleId = isAdmin ? 'super_admin' : (rawUser.roleId || (rawUser.role === 'volunteer' ? 'volunteer' : 'staff_member'));
+  const assignedRoleIds: RoleId[] = isAdmin 
     ? ['super_admin'] 
     : (Array.isArray(rawUser.assignedRoleIds) && rawUser.assignedRoleIds.length > 0 ? rawUser.assignedRoleIds : [baseRoleId]);
-  const activeRoleId: RoleId = isPritam 
+  const activeRoleId: RoleId = isAdmin 
     ? 'super_admin' 
     : ((rawUser.activeRoleId && assignedRoleIds.includes(rawUser.activeRoleId)) ? rawUser.activeRoleId : (assignedRoleIds[0] || baseRoleId));
   const roleDef = ROLE_DEFINITIONS[activeRoleId] || ROLE_DEFINITIONS.super_admin;
 
   return {
-    id: isPritam ? 'u-1' : (rawUser.id || 'u-' + Date.now()),
+    id: isAdmin ? 'u-admin-090' : (rawUser.id || 'u-' + Date.now()),
     authUserId: rawUser.authUserId,
     organizationId: rawUser.organizationId || 'org-tip',
-    name: isPritam ? 'Pritam Biswas' : (rawUser.name || 'Staff User'),
-    email: isPritam ? (rawUser.email || 'pritam@gmail.com') : (rawUser.email || 'user@theinclusionproject.ca'),
+    name: isAdmin ? 'TIP Administrator' : (rawUser.name || 'Staff User'),
+    email: isAdmin ? (rawUser.email || 'tipcrm090@theinclusionproject.ca') : (rawUser.email || 'user@theinclusionproject.ca'),
     phone: rawUser.phone,
-    role: isPritam ? 'staff' : (activeRoleId === 'volunteer' ? 'volunteer' : 'staff'),
+    role: isAdmin ? 'staff' : (activeRoleId === 'volunteer' ? 'volunteer' : 'staff'),
     roleId: activeRoleId,
     assignedRoleIds,
     activeRoleId,
-    title: isPritam ? 'Executive Director & Super Admin' : (rawUser.title || roleDef.name),
-    avatarInitials: isPritam ? 'PB' : (rawUser.avatarInitials || (rawUser.name ? rawUser.name.slice(0, 2).toUpperCase() : 'SU')),
-    status: isPritam ? 'approved' : (rawUser.status || 'approved'),
-    isActive: isPritam ? true : (rawUser.isActive !== undefined ? rawUser.isActive : true),
-    emailVerified: isPritam ? true : (rawUser.emailVerified !== undefined ? rawUser.emailVerified : true),
-    adminApproved: isPritam ? true : (rawUser.adminApproved !== undefined ? rawUser.adminApproved : (rawUser.status === 'approved')),
-    mustChangePassword: isPritam ? false : Boolean(rawUser.mustChangePassword),
+    title: isAdmin ? 'Executive Director & Super Admin' : (rawUser.title || roleDef.name),
+    avatarInitials: isAdmin ? 'TA' : (rawUser.avatarInitials || (rawUser.name ? rawUser.name.slice(0, 2).toUpperCase() : 'SU')),
+    status: isAdmin ? 'approved' : (rawUser.status || 'approved'),
+    isActive: isAdmin ? true : (rawUser.isActive !== undefined ? rawUser.isActive : true),
+    emailVerified: isAdmin ? true : (rawUser.emailVerified !== undefined ? rawUser.emailVerified : true),
+    adminApproved: isAdmin ? true : (rawUser.adminApproved !== undefined ? rawUser.adminApproved : (rawUser.status === 'approved')),
+    mustChangePassword: isAdmin ? false : Boolean(rawUser.mustChangePassword),
     passwordChangedAt: rawUser.passwordChangedAt,
-    onboardingCompleted: isPritam ? true : (rawUser.onboardingCompleted !== undefined ? Boolean(rawUser.onboardingCompleted) : true),
+    onboardingCompleted: isAdmin ? true : (rawUser.onboardingCompleted !== undefined ? Boolean(rawUser.onboardingCompleted) : true),
     tempPassword: rawUser.tempPassword,
     passwordHash: rawUser.passwordHash,
-    dataScope: isPritam ? {
+    dataScope: isAdmin ? {
       people: 'GLOBAL',
       programs: 'ALL',
       events: 'ALL',
@@ -410,11 +412,11 @@ function normalizeUser(rawUser: any): UserProfile {
       events: rawUser.dataScope?.events || roleDef.defaultDataScope.events,
       funding: rawUser.dataScope?.funding || roleDef.defaultDataScope.funding,
     },
-    assignedProgramIds: isPritam ? ['prog-1', 'prog-2', 'prog-3'] : (Array.isArray(rawUser.assignedProgramIds) ? rawUser.assignedProgramIds : []),
-    assignedEventIds: isPritam ? ['evt-1', 'evt-2', 'evt-3', 'evt-4'] : (Array.isArray(rawUser.assignedEventIds) ? rawUser.assignedEventIds : []),
-    postId: isPritam ? 'post-ed' : rawUser.postId,
-    postTitle: isPritam ? 'Executive Director' : rawUser.postTitle,
-    responsibilities: isPritam ? [
+    assignedProgramIds: isAdmin ? ['prog-1', 'prog-2', 'prog-3'] : (Array.isArray(rawUser.assignedProgramIds) ? rawUser.assignedProgramIds : []),
+    assignedEventIds: isAdmin ? ['evt-1', 'evt-2', 'evt-3', 'evt-4'] : (Array.isArray(rawUser.assignedEventIds) ? rawUser.assignedEventIds : []),
+    postId: isAdmin ? 'post-ed' : rawUser.postId,
+    postTitle: isAdmin ? 'Executive Director' : rawUser.postTitle,
+    responsibilities: isAdmin ? [
       'Strategic leadership & organizational vision',
       'Board governance and fiduciary oversight',
       'High-impact philanthropic partnerships',
@@ -494,19 +496,20 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    // Guarantee that u-1 / Pritam Biswas is always present as Super Admin
-    const pritamIndex = list.findIndex(u => u.id === 'u-1' || u.name === 'Pritam Biswas' || u.email === 'pritam@gmail.com');
-    if (pritamIndex >= 0) {
-      list[pritamIndex] = {
-        ...list[pritamIndex],
-        id: 'u-1',
-        name: 'Pritam Biswas',
-        email: 'pritam@gmail.com',
+    // Guarantee that u-admin-090 / TIP Administrator is always present as Super Admin
+    const adminIndex = list.findIndex(u => u.id === 'u-admin-090' || u.id === 'u-1' || u.name === 'TIP Administrator' || u.email === 'tipcrm090@theinclusionproject.ca');
+    if (adminIndex >= 0) {
+      list[adminIndex] = {
+        ...list[adminIndex],
+        id: 'u-admin-090',
+        name: 'TIP Administrator',
+        email: 'tipcrm090@theinclusionproject.ca',
         roleId: 'super_admin',
         role: 'staff',
         assignedRoleIds: ['super_admin'],
         activeRoleId: 'super_admin',
         title: 'Executive Director & Super Admin',
+        avatarInitials: 'TA',
         postId: 'post-ed',
         postTitle: 'Executive Director',
         dataScope: { people: 'GLOBAL', programs: 'ALL', events: 'ALL', funding: 'ALL' },
@@ -527,12 +530,16 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const loaded = loadFromStorage<any>('current_user', null);
     if (!loaded) return INITIAL_USERS[0];
     const user = normalizeUser(loaded);
-    // If the saved user is Pritam, ensure roleId is super_admin
-    if (user.id === 'u-1' || user.name === 'Pritam Biswas') {
+    // If the saved user is the Administrator, ensure roleId is super_admin
+    if (user.id === 'u-admin-090' || user.id === 'u-1' || user.name === 'TIP Administrator' || user.email === 'tipcrm090@theinclusionproject.ca') {
       return {
         ...user,
+        id: 'u-admin-090',
+        name: 'TIP Administrator',
+        email: 'tipcrm090@theinclusionproject.ca',
         roleId: 'super_admin',
         role: 'staff',
+        avatarInitials: 'TA',
         title: 'Executive Director & Super Admin',
         dataScope: { people: 'GLOBAL', programs: 'ALL', events: 'ALL', funding: 'ALL' }
       };

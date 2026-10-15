@@ -150,7 +150,7 @@ All 29 tables across `public` and `storage` schemas have **Row-Level Security EN
 2. **Option B: Via Supabase Web Dashboard SQL Editor**
    - Log into the Supabase Dashboard.
    - Navigate to **SQL Editor** -> **New Query**.
-   - Copy the contents of [`src/db/migrations/20261014_security_check_14_rls.sql`](file:///Users/divyanshaa/Downloads/auntygravity/TIP%20CRM%20/src/db/migrations/20261014_security_check_14_rls.sql).
+   - Copy the contents of [`src/db/migrations/20261014_security_check_14_rls.sql`](file:///src/db/migrations/20261014_security_check_14_rls.sql).
    - Click **Run**. All policies, triggers, and functions will be created idempotently within a single transaction block (`BEGIN ... COMMIT`).
 
 ### 5.2 Verification Queries
@@ -192,4 +192,4 @@ WHERE tgname = 'trg_prevent_self_elevation_users';
 
 ## 6. Rollback Procedures
 
-If any policy conflicts with existing workflows, the migration can be safely reverted without dropping tables or losing data using the rollback script included at the bottom of [`src/db/migrations/20261014_security_check_14_rls.sql`](file:///Users/divyanshaa/Downloads/auntygravity/TIP%20CRM%20/src/db/migrations/20261014_security_check_14_rls.sql).
+If any policy conflicts with existing workflows, the migration can be safely reverted without dropping tables or losing data using the rollback script included at the bottom of [`src/db/migrations/20261014_security_check_14_rls.sql`](file:///src/db/migrations/20261014_security_check_14_rls.sql).

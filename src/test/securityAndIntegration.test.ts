@@ -453,7 +453,7 @@ async function runTests() {
   {
     const rows = [
       ['Name', 'Notes', 'Amount'],
-      ['Pritam "Lead" Biswas', 'Grant for equity & inclusion: $50,000', 50000],
+      ['Admin "Lead" User', 'Grant for equity & inclusion: $50,000', 50000],
       [null, undefined, 0]
     ];
 
@@ -462,7 +462,7 @@ async function runTests() {
       .map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
       .join('\r\n');
 
-    assert(csvBody.includes('"Pritam ""Lead"" Biswas"'), 'Escapes internal double quotes properly ("" instead of broken CSV syntax)');
+    assert(csvBody.includes('"Admin ""Lead"" User"'), 'Escapes internal double quotes properly ("" instead of broken CSV syntax)');
     assert(csvBody.includes('""'), 'Null and undefined cells are converted to empty safe strings');
   }
 
@@ -472,8 +472,8 @@ async function runTests() {
   console.log('\nTest Suite 8: Authoritative Server Audit Logging & Immutability');
   {
     const record = recordAuditEvent({
-      actorId: 'u-1',
-      actorName: 'Pritam Biswas',
+      actorId: 'u-admin-090',
+      actorName: 'TIP Administrator',
       actorRole: 'super_admin',
       action: 'DATA_EXPORT_CSV',
       resourceType: 'People',
@@ -488,7 +488,7 @@ async function runTests() {
     assert(Boolean(record.id && record.id.startsWith('aud-')), 'recordAuditEvent generates structured unique record ID');
     assert(Boolean(record.timestamp && new Date(record.timestamp).toISOString() === record.timestamp), 'Generates valid ISO 8601 UTC timestamp');
     assert(record.outcome === 'SUCCESS', 'Records SUCCESS outcome correctly');
-    assert(record.actorName === 'Pritam Biswas', 'Captures verified actor name');
+    assert(record.actorName === 'TIP Administrator', 'Captures verified actor name');
     assert(record.actorRole === 'super_admin', 'Captures verified actor role');
     assert(Boolean(record.correlationId && record.correlationId.startsWith('tip-srv-')), 'Auto-assigns server correlation ID for forensic tracking');
 
@@ -592,11 +592,11 @@ async function runTests() {
     const adminRes = createMockRes();
     const adminReq = createMockReq({
       method: 'GET',
-      url: '/api/audit/logs?userRole=super_admin&userId=u-1',
+      url: '/api/audit/logs?userRole=super_admin&userId=u-admin-090',
       headers: {
         'x-user-role': 'super_admin',
-        'x-user-id': 'u-1',
-        'x-user-name': 'Pritam Biswas'
+        'x-user-id': 'u-admin-090',
+        'x-user-name': 'TIP Administrator'
       }
     });
     await aiMiddlewareHandler(adminReq, adminRes.res);
@@ -638,9 +638,9 @@ async function runTests() {
       method: 'POST',
       url: '/api/ai/budget',
       headers: {
-        'x-user-id': 'u-1',
+        'x-user-id': 'u-admin-090',
         'x-user-role': 'super_admin',
-        'x-user-name': 'Pritam Biswas'
+        'x-user-name': 'TIP Administrator'
       },
       body: {
         dailyRequestLimit: 75,
@@ -659,9 +659,9 @@ async function runTests() {
       method: 'POST',
       url: '/api/ai/intelligence/action',
       headers: {
-        'x-user-id': 'u-1',
+        'x-user-id': 'u-admin-090',
         'x-user-role': 'super_admin',
-        'x-user-name': 'Pritam Biswas'
+        'x-user-name': 'TIP Administrator'
       },
       body: {
         actionPreview: {
@@ -671,7 +671,7 @@ async function runTests() {
           targetRecordType: 'Task',
           targetRecordId: 'task-new-99'
         },
-        user: { id: 'u-1', name: 'Pritam Biswas', roleId: 'super_admin' }
+        user: { id: 'u-admin-090', name: 'TIP Administrator', roleId: 'super_admin' }
       }
     });
     await aiMiddlewareHandler(actionReq, actionRes.res);
@@ -881,8 +881,8 @@ async function runTests() {
     assert(normalNumber === '"45000"', 'Standard numbers exported without formula modification');
 
     // 7. Internal double quotes correctly escaped
-    const quotesCell = sanitizeCsvCell('Pritam "Lead" Biswas');
-    assert(quotesCell === '"Pritam ""Lead"" Biswas"', 'Internal double quotes doubled for RFC 4180 compliance');
+    const quotesCell = sanitizeCsvCell('Admin "Lead" User');
+    assert(quotesCell === '"Admin ""Lead"" User"', 'Internal double quotes doubled for RFC 4180 compliance');
   }
 
   // ==========================================================================
@@ -1110,9 +1110,9 @@ async function runTests() {
       method: 'POST',
       url: '/api/storage/signed-url',
       headers: {
-        'x-user-id': 'u-1',
+        'x-user-id': 'u-admin-090',
         'x-user-role': 'super_admin',
-        'x-user-name': 'Pritam Biswas'
+        'x-user-name': 'TIP Administrator'
       },
       body: {
         storageKey: 'crm_backups/org-tip/db_backup.json',
@@ -1589,9 +1589,9 @@ async function runTests() {
       cookie: 'tip_session=session_abc123',
       'x-csrf-token': validCsrf,
       'content-type': 'application/json',
-      'x-user-id': 'u-1',
+      'x-user-id': 'u-admin-090',
       'x-user-role': 'super_admin',
-      'x-user-name': 'Pritam Biswas'
+      'x-user-name': 'TIP Administrator'
     },
     body: { dailyLimit: 85, privacyMode: 'minimal' }
   });
@@ -1604,14 +1604,14 @@ async function runTests() {
     method: 'GET',
     url: '/api/auth/csrf-token',
     headers: {
-      'x-user-id': 'u-1'
+      'x-user-id': 'u-admin-090'
     }
   });
   await aiMiddlewareHandler(csrfTokenReq, csrfTokenRes.res);
   assert(csrfTokenRes.getStatusCode() === 200, 'GET /api/auth/csrf-token returns 200 OK');
   const tokenData = csrfTokenRes.getData();
   assert(Boolean(tokenData.csrfToken), 'GET /api/auth/csrf-token returns valid csrfToken');
-  assert(verifyCsrfToken(tokenData.csrfToken, 'u-1'), 'Returned CSRF token verifies against user identity');
+  assert(verifyCsrfToken(tokenData.csrfToken, 'u-admin-090'), 'Returned CSRF token verifies against user identity');
 
   // 14. HTML Form URL-encoded Submission Defense
   const formSubmitRes = createMockRes();
@@ -1656,7 +1656,7 @@ async function runTests() {
     method: 'POST',
     url: '/api/auth/login',
     headers: { 'content-type': 'application/json' },
-    body: { email: 'pritam@gmail.com', password: 'WrongPassword999!' }
+    body: { email: 'tipcrm090@theinclusionproject.ca', password: 'WrongPassword999!' }
   });
   await aiMiddlewareHandler(enumFailReq2, enumFailRes2.res);
   assert(enumFailRes2.getStatusCode() === 401, 'Login with existing email and wrong password returns 401 Unauthorized');
@@ -1668,13 +1668,13 @@ async function runTests() {
     method: 'POST',
     url: '/api/auth/login',
     headers: { 'content-type': 'application/json' },
-    body: { email: 'pritam@gmail.com', password: '1234' }
+    body: { email: 'tipcrm090', password: 'CRM090' }
   });
   await aiMiddlewareHandler(validLoginReq, validLoginRes.res);
   assert(validLoginRes.getStatusCode() === 200, 'POST /api/auth/login with valid credentials returns 200 OK');
   const loginData = validLoginRes.getData();
   assert(Boolean(loginData.sessionToken), 'Login response contains sessionToken');
-  assert(loginData.user.id === 'u-1', 'Session user corresponds to authenticated user ID');
+  assert(loginData.user.id === 'u-admin-090', 'Session user corresponds to authenticated user ID');
   const setCookieHeader = validLoginRes.res.getHeader('Set-Cookie') as string;
   assert(Boolean(setCookieHeader), 'Login response sets Set-Cookie header');
   assert(setCookieHeader.includes('tip_session='), 'Set-Cookie contains tip_session cookie');
@@ -1915,11 +1915,11 @@ async function runTests() {
     method: 'POST',
     url: '/api/auth/login',
     headers: { 'content-type': 'application/json' },
-    body: { provider: 'google', email: 'pritamb2k06@gmail.com', name: 'Pritam Biswas' }
+    body: { provider: 'google', email: 'tipcrm090@theinclusionproject.ca', name: 'TIP Administrator' }
   });
   await aiMiddlewareHandler(googleLoginReq, googleLoginRes.res);
   assert(googleLoginRes.getStatusCode() === 200, 'Google OAuth login returns 200 OK');
-  assert(googleLoginRes.getData().user.role === 'super_admin', 'Google login for Pritam assigns super_admin role');
+  assert(googleLoginRes.getData().user.role === 'super_admin', 'Google login for TIP Administrator assigns super_admin role');
   assert(Boolean(googleLoginRes.getData().sessionToken), 'Google login returns valid session token');
 
   // ==========================================================================
@@ -2432,14 +2432,14 @@ async function runTests() {
   assert(supabaseSource.includes("prompt: 'select_account'"), 'Google OAuth enforces account selection prompt');
 
   // 2. Local verified Google Identity generation for testing
-  const simSuperAdmin = await SupabaseAuthEngine.signInWithGoogle('pritam@gmail.com', 'Pritam Biswas');
+  const simSuperAdmin = await SupabaseAuthEngine.signInWithGoogle('tipcrm090@theinclusionproject.ca', 'TIP Administrator');
   assert(simSuperAdmin.session !== undefined, 'signInWithGoogle returns valid session for test identity');
-  assert(simSuperAdmin.session?.user.email === 'pritam@gmail.com', 'Session email matches authenticated Google identity');
+  assert(simSuperAdmin.session?.user.email === 'tipcrm090@theinclusionproject.ca', 'Session email matches authenticated Google identity');
   assert(simSuperAdmin.session?.user.provider === 'google', 'Session provider recorded as google');
 
   // 3. getActiveSupabaseUser persistence verification
   const activeUser = await SupabaseAuthEngine.getActiveSupabaseUser();
-  assert(activeUser !== null && activeUser.email === 'pritam@gmail.com', 'getActiveSupabaseUser returns active authenticated Google user');
+  assert(activeUser !== null && activeUser.email === 'tipcrm090@theinclusionproject.ca', 'getActiveSupabaseUser returns active authenticated Google user');
 
   // 4. Client-side RBAC Approval Evaluation Logic
   const testUsersPool = [
@@ -2453,8 +2453,8 @@ async function runTests() {
   const evalCrmApproval = (googleEmail: string) => {
     const cleanEmail = googleEmail.toLowerCase().trim();
     let matchedUser = testUsersPool.find(u => u.email.toLowerCase().trim() === cleanEmail);
-    if (!matchedUser && (cleanEmail === 'pritamb2k06@gmail.com' || cleanEmail === 'pritam@gmail.com')) {
-      matchedUser = INITIAL_USERS.find(u => u.id === 'u-1') || INITIAL_USERS[0];
+    if (!matchedUser && (cleanEmail === 'tipcrm090@theinclusionproject.ca' || cleanEmail === 'admin@theinclusionproject.ca')) {
+      matchedUser = INITIAL_USERS.find(u => u.id === 'u-admin-090') || INITIAL_USERS[0];
     }
     if (!matchedUser) {
       return { allowed: false, status: 403, error: `Your Google account (${cleanEmail}) was authenticated, but no approved TIP CRM profile was found. Please contact your administrator to request access.` };
@@ -2472,7 +2472,7 @@ async function runTests() {
   };
 
   // 4a. Approved Super Admin access
-  const checkAdmin = evalCrmApproval('pritam@gmail.com');
+  const checkAdmin = evalCrmApproval('tipcrm090@theinclusionproject.ca');
   assert(checkAdmin.allowed === true, 'Approved Super Admin is granted access via Google email');
   assert(checkAdmin.user?.roleId === 'super_admin', 'Super Admin preserves super_admin role');
 
@@ -2508,8 +2508,8 @@ async function runTests() {
   assert(checkRejected.allowed === false, 'Rejected Google account is denied CRM access');
   assert(Boolean(checkRejected.error?.includes('was not approved')), 'Rejected account receives non-approval notice');
 
-  // 4h. Rejection of unauthorized attacker with "pritam" substring (Anti-elevation test)
-  const checkFuzzyAttacker = evalCrmApproval('pritam.attacker@external.com');
+  // 4h. Rejection of unauthorized attacker with "tipcrm090" substring (Anti-elevation test)
+  const checkFuzzyAttacker = evalCrmApproval('tipcrm090.attacker@external.com');
   assert(checkFuzzyAttacker.allowed === false, 'Stranger with substring in email is strictly denied CRM access (Anti-elevation)');
   assert(checkFuzzyAttacker.user === undefined, 'No role or user identity is assigned to unapproved fuzzy email');
 
@@ -2529,7 +2529,7 @@ async function runTests() {
     method: 'POST',
     url: '/api/auth/login',
     headers: { 'content-type': 'application/json' },
-    body: { provider: 'google', email: 'pritam@gmail.com', name: 'Pritam Biswas' }
+    body: { provider: 'google', email: 'tipcrm090@theinclusionproject.ca', name: 'TIP Administrator' }
   });
   await aiMiddlewareHandler(srvAdminReq, srvAdminRes.res);
   assert(srvAdminRes.getStatusCode() === 200, 'Server returns 200 OK for approved Super Admin Google login');

@@ -355,20 +355,20 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
         }
 
         const CRM_GOOGLE_ACCOUNTS: Record<string, CrmDirectoryAccount> = {
-          'pritam@gmail.com': {
-            id: 'u-1',
-            email: 'pritam@gmail.com',
-            name: 'Pritam Biswas',
+          'tipcrm090@theinclusionproject.ca': {
+            id: 'u-admin-090',
+            email: 'tipcrm090@theinclusionproject.ca',
+            name: 'TIP Administrator',
             role: 'super_admin',
             assignedRoleIds: ['super_admin'],
             status: 'approved',
             adminApproved: true,
             isActive: true
           },
-          'pritamb2k06@gmail.com': {
-            id: 'u-1',
-            email: 'pritamb2k06@gmail.com',
-            name: 'Pritam Biswas',
+          'admin@theinclusionproject.ca': {
+            id: 'u-admin-090',
+            email: 'admin@theinclusionproject.ca',
+            name: 'TIP Administrator',
             role: 'super_admin',
             assignedRoleIds: ['super_admin'],
             status: 'approved',
@@ -421,16 +421,6 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
             name: 'Jordan Lee',
             role: 'volunteer',
             assignedRoleIds: ['volunteer'],
-            status: 'approved',
-            adminApproved: true,
-            isActive: true
-          },
-          'divyanshaa@theinclusionproject.ca': {
-            id: 'u-divyanshaa',
-            email: 'divyanshaa@theinclusionproject.ca',
-            name: 'Divyanshaa',
-            role: 'super_admin',
-            assignedRoleIds: ['super_admin'],
             status: 'approved',
             adminApproved: true,
             isActive: true
@@ -611,24 +601,23 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
         return true;
       }
 
-      const isPritam = cleanEmail === 'pritam@gmail.com' || cleanEmail === 'pritamb2k06@gmail.com';
+      const isTipAdmin = cleanEmail === 'tipcrm090' || cleanEmail === 'tipcrm090@theinclusionproject.ca' || cleanEmail === 'admin@theinclusionproject.ca';
       const isSarah = cleanEmail === 'sarah@theinclusionproject.ca';
       const isMarcus = cleanEmail === 'marcus@theinclusionproject.ca';
       const isElena = cleanEmail === 'elena@theinclusionproject.ca';
-      const isDivyanshaa = cleanEmail === 'divyanshaa@theinclusionproject.ca';
 
       let matchedUser: SessionUser | null = null;
       let validPassword = false;
 
-      if (isPritam) {
+      if (isTipAdmin) {
         matchedUser = {
-          id: 'u-1',
-          email: cleanEmail,
-          name: 'Pritam Biswas',
+          id: 'u-admin-090',
+          email: 'tipcrm090@theinclusionproject.ca',
+          name: 'TIP Administrator',
           role: 'super_admin',
           assignedRoleIds: ['super_admin']
         };
-        validPassword = (password === '1234' || password === 'rkumar07');
+        validPassword = (password === 'CRM090');
       } else if (isSarah) {
         matchedUser = {
           id: 'u-2',
@@ -656,15 +645,6 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
           assignedRoleIds: ['volunteer']
         };
         validPassword = (password === 'rkumar07' || password.length >= 6);
-      } else if (isDivyanshaa) {
-        matchedUser = {
-          id: 'u-divyanshaa',
-          email: cleanEmail,
-          name: 'Divyanshaa',
-          role: 'super_admin',
-          assignedRoleIds: ['super_admin']
-        };
-        validPassword = (password === 'rkumar07');
       } else if (body.syntheticUser && password === 'ValidPassword123!') {
         if (isProduction()) {
           sendSafeError(

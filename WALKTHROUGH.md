@@ -149,7 +149,7 @@ Admin creates account → Admin assigns approved roles → User logs in → Mand
 8. **Live Demo Persona Ready for Testing**:
    - `chloe.vance@inclusionproject.ca` / `TempPassword123!` (Admin-provisioned, triggers First Login Password Change & Welcome Onboarding).
    - `sarah.thompson@inclusionproject.ca` (Assigned roles: `Program Coordinator` & `Event Coordinator`, triggers multi-role switcher).
-   - `pritam@gmail.com` / `1234` (Super Admin with full access & user provisioning).
+   - `TIPCRM090` / `CRM090` (Super Admin with full access & user provisioning).
 
 ---
 

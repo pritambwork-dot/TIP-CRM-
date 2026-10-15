@@ -252,12 +252,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                      Email address
+                      {authMode === 'signup' ? 'Email address' : 'Email or Admin ID'}
                     </label>
                     <input
-                      type="email"
+                      type={authMode === 'signup' ? 'email' : 'text'}
                       required
-                      placeholder="name@inclusionproject.ca"
+                      placeholder={authMode === 'signup' ? 'name@inclusionproject.ca' : 'Email or Admin ID (e.g. TIPCRM090)'}
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
@@ -290,21 +290,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     <span>{authMode === 'signup' ? 'Submit CRM Registration' : 'Sign in'}</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
-
-                  {/* 1-Click Quick Admin Login (Development/Demo Only) */}
-                  {authMode === 'signin' && !(import.meta as any).env?.PROD && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEmail('pritam@gmail.com');
-                        setPassword('1234');
-                        onEmailSignIn('pritam@gmail.com', '1234');
-                      }}
-                      className="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100/70 text-[#140a8e] text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer mt-2"
-                    >
-                      <span>⚡ Quick Sign In as Admin (Pritam Biswas)</span>
-                    </button>
-                  )}
                 </form>
 
                 {/* Footer Switch */}

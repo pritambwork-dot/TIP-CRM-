@@ -27,11 +27,11 @@ import {
 
 export const INITIAL_USERS: UserProfile[] = [
   {
-    id: 'u-1',
-    authUserId: 'auth-pritam-001',
+    id: 'u-admin-090',
+    authUserId: 'auth-tipcrm090',
     organizationId: 'org-tip',
-    name: 'Pritam Biswas',
-    email: 'pritam@gmail.com',
+    name: 'TIP Administrator',
+    email: 'tipcrm090@theinclusionproject.ca',
     phone: '+1 (604) 555-0100',
     roleId: 'super_admin',
     role: 'staff',
@@ -46,14 +46,14 @@ export const INITIAL_USERS: UserProfile[] = [
       'High-impact philanthropic partnerships',
       'Team post, rule & AI orchestration configuration'
     ],
-    avatarInitials: 'PB',
+    avatarInitials: 'TA',
     status: 'approved',
     isActive: true,
     emailVerified: true,
     adminApproved: true,
     mustChangePassword: false,
     onboardingCompleted: true,
-    provider: 'google',
+    provider: 'email',
     approvedBy: 'System Seed',
     approvedAt: '2025-01-01T00:00:00Z',
     assignedProgramIds: [],
@@ -226,7 +226,7 @@ export const INITIAL_TASK_ASSIGNMENT_RULES: TaskAssignmentRule[] = [
     postName: 'Program Coordinator',
     assignmentMode: 'Suggested',
     isActive: true,
-    createdBy: 'Pritam Biswas',
+    createdBy: 'TIP Administrator',
     createdAt: '2025-01-15'
   },
   {
@@ -241,7 +241,7 @@ export const INITIAL_TASK_ASSIGNMENT_RULES: TaskAssignmentRule[] = [
     postName: 'Program Coordinator',
     assignmentMode: 'Suggested',
     isActive: true,
-    createdBy: 'Pritam Biswas',
+    createdBy: 'TIP Administrator',
     createdAt: '2025-01-15'
   },
   {
@@ -255,7 +255,7 @@ export const INITIAL_TASK_ASSIGNMENT_RULES: TaskAssignmentRule[] = [
     postName: 'Program Manager',
     assignmentMode: 'Suggested',
     isActive: true,
-    createdBy: 'Pritam Biswas',
+    createdBy: 'TIP Administrator',
     createdAt: '2025-01-15'
   }
 ];
