@@ -93,6 +93,11 @@ import {
 import { syncEngine } from '../lib/syncEngine.ts';
 import { SupabaseAuthEngine, sanitizeRedirectPath } from '../lib/supabase.ts';
 import { INITIAL_USERS } from '../data/mockData.ts';
+import { 
+  parseRawContactsCsv, 
+  GOOGLE_DRIVE_PRESETS, 
+  SAMPLE_CSV_CONTENT 
+} from '../lib/contactsImporter.ts';
 import { ROLE_DEFINITIONS } from '../lib/permissions.ts';
 import {
   DatabaseHealthService,
@@ -2969,6 +2974,70 @@ async function runTests() {
   assert(!deploySql.includes('sbp_'), 'deploy_all.sql contains zero personal access tokens');
   assert(!deploySql.includes('eyJh'), 'deploy_all.sql contains zero JWT tokens');
   assert(!deploySql.includes('service_role_key'), 'deploy_all.sql contains zero service role secrets');
+
+  // ==========================================================================
+  // Test Suite 26: Contacts Import Engine (CSV File & Google Folder Parsing)
+  // ==========================================================================
+  console.log('\nTest Suite 26: Contacts Import Engine (CSV File & Google Folder Parsing)');
+  {
+    // 1. Standard CSV with First/Last Name, Email, Organization, Role, and Type
+    const testCsv = `First Name,Last Name,Email,Organization,Role,Phone,Relationship Type,City,Notes
+Kiran,Sharma,kiran.s@calgarycivic.org,Calgary Civic Action,Youth Liaison,+1 (403) 555-0321,Participant,Calgary,Youth delegate
+Amara,Okafor,amara.okafor@vanequity.ca,Vancouver Equity Alliance,Policy Director,+1 (604) 555-0782,Partner,Vancouver,Municipal advocate`;
+
+    const parsed = parseRawContactsCsv(testCsv);
+    assert(parsed.length === 2, 'parseRawContactsCsv extracts exactly 2 records');
+    assert(parsed[0].name === 'Kiran Sharma', 'Combines First Name and Last Name');
+    assert(parsed[0].email === 'kiran.s@calgarycivic.org', 'Normalizes email address');
+    assert(parsed[0].org === 'Calgary Civic Action', 'Extracts organization');
+    assert(parsed[0].type === 'Participant', 'Preserves relationship type Participant');
+    assert(parsed[1].type === 'Partner', 'Preserves relationship type Partner');
+
+    // 2. Google Folder Presets Validation
+    assert(GOOGLE_DRIVE_PRESETS.length >= 3, 'Provides at least 3 curated Google Drive presets');
+    const partnersPreset = GOOGLE_DRIVE_PRESETS.find(p => p.id === 'gdrive-folder-partners');
+    assert(Boolean(partnersPreset), 'TIP Community Partners Google Drive folder preset exists');
+    const parsedGoogleFolder = parseRawContactsCsv(partnersPreset!.csvData);
+    assert(parsedGoogleFolder.length === partnersPreset!.contactsCount, 'Google Drive folder CSV parses expected contact count');
+    assert(parsedGoogleFolder.some(c => c.name.includes('Tariq Mansoor')), 'Parses community partner contact from Google Folder');
+
+    // 3. Alternative Header Matching (Full Name, Contact Email, Job Title)
+    const altHeadersCsv = `Full Name,Contact Email,Company,Job Title,Mobile,Category
+Zainab Al-Mansoor,zainab.m@youthcouncil.ca,National Youth Leadership Council,Youth Delegate,+1 (613) 555-0919,Youth Member`;
+    const parsedAlt = parseRawContactsCsv(altHeadersCsv);
+    assert(parsedAlt.length === 1, 'Parses CSV with alternative header names');
+    assert(parsedAlt[0].name === 'Zainab Al-Mansoor', 'Extracts name from Full Name header');
+    assert(parsedAlt[0].email === 'zainab.m@youthcouncil.ca', 'Extracts email from Contact Email header');
+    assert(parsedAlt[0].org === 'National Youth Leadership Council', 'Extracts org from Company header');
+    assert(parsedAlt[0].type === 'Participant', 'Maps Youth Member category to Participant');
+
+    // 4. Graceful handling of empty or invalid CSV
+    const emptyResult = parseRawContactsCsv('');
+    assert(emptyResult.length === 0, 'Empty string returns empty contact array without throwing');
+    const headersOnly = parseRawContactsCsv('Name,Email,Organization\n');
+    assert(headersOnly.length === 0, 'Header-only CSV returns 0 records');
+    const blankRows = parseRawContactsCsv('Name,Email\n\n  ,  \n   \n');
+    assert(blankRows.length === 0, 'Blank lines are skipped cleanly');
+
+    // 5. Duplicate detection logic
+    const mockExistingContacts = [
+      { id: 'p-1', name: 'Maya Lin', email: 'maya.lin@innovateyouth.org' },
+      { id: 'p-2', name: 'Existing Funder', email: 'funder@tip.ca' }
+    ];
+    const incomingCsv = `Name,Email,Org
+Maya Lin,maya.lin@innovateyouth.org,Youth Innovation Lab
+Brand New Contact,new@inclusionproject.ca,New Partner Org`;
+    const incomingParsed = parseRawContactsCsv(incomingCsv);
+    const duplicates = incomingParsed.filter(row => 
+      mockExistingContacts.some(existing => existing.email.toLowerCase() === row.email.toLowerCase())
+    );
+    const fresh = incomingParsed.filter(row => 
+      !mockExistingContacts.some(existing => existing.email.toLowerCase() === row.email.toLowerCase())
+    );
+    assert(duplicates.length === 1, 'Correctly flags 1 duplicate contact by email');
+    assert(duplicates[0].email === 'maya.lin@innovateyouth.org', 'Identifies exact duplicate email');
+    assert(fresh.length === 1, 'Identifies 1 fresh non-duplicate contact');
+  }
 
   // --------------------------------------------------------------------------
   // Summary

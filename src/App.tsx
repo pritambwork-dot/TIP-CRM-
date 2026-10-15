@@ -584,6 +584,7 @@ const MainLayout: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                       selectedPersonId={selectedPersonId}
                       onSelectPerson={setSelectedPersonId}
                       onNavigateToProgram={(id) => handleNavigate('programs', id)}
+                      onOpenImport={() => setImportOpen(true)}
                     />
                   )}
 

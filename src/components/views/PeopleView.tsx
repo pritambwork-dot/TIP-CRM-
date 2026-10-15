@@ -12,7 +12,8 @@ import {
   AlertCircle,
   MoreHorizontal,
   Lock,
-  X
+  X,
+  Upload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Person, RelationshipType } from '../../types';
@@ -41,12 +42,14 @@ interface PeopleViewProps {
   selectedPersonId?: string | null;
   onSelectPerson: (id: string | null) => void;
   onNavigateToProgram?: (programId: string) => void;
+  onOpenImport?: () => void;
 }
 
 export const PeopleView: React.FC<PeopleViewProps> = ({
   selectedPersonId,
   onSelectPerson,
-  onNavigateToProgram
+  onNavigateToProgram,
+  onOpenImport
 }) => {
   const { scopedPeople, people, addPerson, currentUser, hasPermission, Permissions } = useCrm();
   const [searchQuery, setSearchQuery] = useState('');
@@ -145,15 +148,29 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
         </div>
 
         <ProtectedAction resource="people" action="create">
-          <Button
-            onClick={() => setShowAddModal(true)}
-            id="btn-add-person"
-            variant="crimson"
-            className="shadow-sm active:scale-98 shrink-0"
-          >
-            <UserPlus className="w-4 h-4 mr-2" />
-            <span>Add person</span>
-          </Button>
+          <div className="flex items-center gap-2.5">
+            {onOpenImport && (
+              <Button
+                onClick={onOpenImport}
+                id="btn-import-contacts-people"
+                variant="outline"
+                className="shadow-xs active:scale-98 shrink-0 hover:bg-muted"
+              >
+                <Upload className="w-4 h-4 mr-2 text-muted-foreground" />
+                <span>Import contacts</span>
+              </Button>
+            )}
+
+            <Button
+              onClick={() => setShowAddModal(true)}
+              id="btn-add-person"
+              variant="crimson"
+              className="shadow-sm active:scale-98 shrink-0"
+            >
+              <UserPlus className="w-4 h-4 mr-2" />
+              <span>Add person</span>
+            </Button>
+          </div>
         </ProtectedAction>
       </div>
 
