@@ -1,0 +1,2 @@
+-- TIP CRM Seed Data
+-- Initial Super Admin and configuration is managed idempotently via schema migrations.
