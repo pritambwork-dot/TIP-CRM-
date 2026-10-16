@@ -116,16 +116,7 @@ export const IntelligenceView: React.FC = () => {
   // "Ask Your Data" Natural Language state
   const [userQuery, setUserQuery] = useState('');
   const [queryLoading, setQueryLoading] = useState(false);
-  const [queryHistory, setQueryHistory] = useState<AiQueryResponse[]>([
-    {
-      question: 'Which program had the highest attendance rate this quarter?',
-      interpretedIntent: 'Compare attendance rates across active program cohorts',
-      authorized: true,
-      calculationFact: 'Youth Leadership Initiative achieved 82.4% average attendance across 4 sessions.',
-      aiExplanation: 'The data indicates consistent cohort retention and strong engagement in youth-focused workshops.',
-      suggestedAction: 'Consider sharing best practices from the Youth Leadership facilitator team with upcoming workshops.'
-    }
-  ]);
+  const [queryHistory, setQueryHistory] = useState<AiQueryResponse[]>([]);
 
   // Saved Analysis History state
   const [savedAnalyses, setSavedAnalyses] = useState<Array<{
@@ -135,24 +126,7 @@ export const IntelligenceView: React.FC = () => {
     rowCount: number;
     quality: string;
     summary: string;
-  }>>([
-    {
-      id: 'hist-1',
-      name: 'Youth Leadership Program Attendance 2026.csv',
-      date: '2026-09-21',
-      rowCount: 1240,
-      quality: 'Good (98.4%)',
-      summary: '1,240 records analyzed across 42 sessions with 76.5% attendance.'
-    },
-    {
-      id: 'hist-2',
-      name: '2026 Donor & Grant Allocations.csv',
-      date: '2026-09-18',
-      rowCount: 6,
-      quality: 'Excellent (100%)',
-      summary: '$184,000 CAD total funding recorded across 6 grant agreements.'
-    }
-  ]);
+  }>>([]);
 
   const canView = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'view');
   const canCreate = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'create');

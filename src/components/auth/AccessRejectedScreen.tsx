@@ -57,7 +57,7 @@ export const AccessRejectedScreen: React.FC<AccessRejectedScreenProps> = ({
             )}
 
             <p className="text-xs text-zinc-400 mb-8 leading-relaxed">
-              Please contact your TIP administrator if you believe this is incorrect.
+              Please contact your TIP Super Admin if you believe this is incorrect.
             </p>
 
             <button

@@ -372,7 +372,7 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
           'tipcrm090@theinclusionproject.ca': {
             id: 'u-admin-090',
             email: 'tipcrm090@theinclusionproject.ca',
-            name: 'TIP Administrator',
+            name: 'TIP Super Admin',
             role: 'super_admin',
             assignedRoleIds: ['super_admin'],
             status: 'approved',
@@ -382,7 +382,7 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
           'admin@theinclusionproject.ca': {
             id: 'u-admin-090',
             email: 'admin@theinclusionproject.ca',
-            name: 'TIP Administrator',
+            name: 'TIP Super Admin',
             role: 'super_admin',
             assignedRoleIds: ['super_admin'],
             status: 'approved',
@@ -634,7 +634,7 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
         matchedUser = {
           id: 'u-admin-090',
           email: 'tipcrm090@theinclusionproject.ca',
-          name: 'TIP Administrator',
+          name: 'TIP Super Admin',
           role: 'super_admin',
           assignedRoleIds: ['super_admin']
         };

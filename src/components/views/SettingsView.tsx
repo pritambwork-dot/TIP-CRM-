@@ -340,7 +340,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onOpenImport, defaul
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
               <div className="p-3 rounded-xl bg-white border border-zinc-200 shadow-2xs">
                 <span className="font-bold text-indigo-700 block text-[11px] uppercase">1. User Identity</span>
-                <p className="text-[11px] text-zinc-600 mt-1">Authenticated person (e.g. Sarah Thompson)</p>
+                <p className="text-[11px] text-zinc-600 mt-1">Authenticated staff member (e.g. Jane Doe)</p>
               </div>
               <div className="p-3 rounded-xl bg-white border border-zinc-200 shadow-2xs">
                 <span className="font-bold text-indigo-700 block text-[11px] uppercase">2. Post / Designation</span>

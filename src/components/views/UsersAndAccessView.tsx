@@ -70,7 +70,7 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   } = useCrm();
 
   const canManageUsers = isSuperAdmin || hasPermission('users', 'manage');
-  const isAdministrator = currentUser.roleId === 'super_admin' || currentUser.roleId === 'staff_manager' || isSuperAdmin;
+  const isAdministrator = isSuperAdmin || currentUser.roleId === 'super_admin';
 
   const [selectedUserId, setSelectedUserId] = useState<string | null>(currentUser.id);
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
@@ -121,7 +121,7 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // Check 12: Authoritative Server-Side Audit Trail State
-  const canViewAuditLogs = isSuperAdmin || hasPermission('audit_logs', 'view') || currentUser.roleId === 'staff_manager';
+  const canViewAuditLogs = isSuperAdmin || hasPermission('audit_logs', 'view');
   const [serverAuditLogs, setServerAuditLogs] = useState<any[]>([]);
   const [auditTotal, setAuditTotal] = useState<number>(0);
   const [auditPage, setAuditPage] = useState<number>(1);
@@ -780,7 +780,7 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                 <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2.5 text-xs text-amber-900 font-medium">
                   <Lock className="w-4 h-4 text-amber-600 shrink-0" />
                   <span>
-                    <strong>Administrative Authority Required:</strong> Only Super Admins and Staff Managers are authorized to configure which data users can see, modify roles, or assign data scopes.
+                    <strong>Administrative Authority Required:</strong> Only Super Admins are authorized to configure which data users can see, modify roles, or assign data scopes.
                   </span>
                 </div>
               )}
@@ -1988,7 +1988,7 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
               <Lock className="w-8 h-8 text-rose-500 mx-auto mb-2" />
               <h5 className="text-sm font-bold text-rose-900">Access Restricted</h5>
               <p className="text-xs text-rose-700 mt-1 max-w-md mx-auto">
-                Viewing the security audit trail requires the <code>audit_logs.view</code> permission. Only Super Administrators and Staff Managers may inspect audit records.
+                Viewing the security audit trail requires the <code>audit_logs.view</code> permission. Only Super Administrators may inspect audit records.
               </p>
             </div>
           ) : (
@@ -2031,7 +2031,7 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                     <option value="AUTH_ROLE_SWITCH">Role Switch</option>
                     <option value="AUTH_ROLE_ELEVATION_DENIED">Elevation Denied</option>
                     <option value="AUTH_PASSWORD_CHANGE">Password Change</option>
-                    <option value="AUTH_PASSWORD_RESET_ADMIN">Password Reset (Admin)</option>
+                    <option value="AUTH_PASSWORD_RESET_ADMIN">Password Reset (Super Admin)</option>
                     <option value="SETTINGS_BUDGET_UPDATE">AI Budget Update</option>
                     <option value="AI_ACTION_CONFIRMED">AI Action Confirmed</option>
                     <option value="DATA_EXPORT_CSV">Data Export (CSV)</option>

@@ -54,7 +54,7 @@ export const AccessPendingScreen: React.FC<AccessPendingScreenProps> = ({
             </p>
 
             <p className="text-sm text-zinc-500 mb-6 leading-relaxed max-w-sm mx-auto">
-              A TIP administrator needs to approve your access before you can use the CRM.
+              A TIP Super Admin needs to approve your access before you can use the CRM.
             </p>
 
             <div className="p-3 rounded-xl bg-zinc-50 border border-zinc-100 text-xs font-mono text-zinc-600 mb-6 truncate">

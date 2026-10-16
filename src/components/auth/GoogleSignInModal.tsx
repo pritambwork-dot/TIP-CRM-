@@ -44,7 +44,7 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
   users = []
 }) => {
   const [selectedEmail, setSelectedEmail] = useState<string>('tipcrm090@theinclusionproject.ca');
-  const [selectedName, setSelectedName] = useState<string>('TIP Administrator');
+  const [selectedName, setSelectedName] = useState<string>('TIP Super Admin');
   const [password, setPassword] = useState<string>('');
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customEmail, setCustomEmail] = useState('');
@@ -67,7 +67,7 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
   // Primary Super Admin Profile
   const adminUser = users.find(u => u.id === 'u-admin-090' || u.roleId === 'super_admin' || u.email === 'tipcrm090@theinclusionproject.ca');
   const adminEmail = adminUser?.email || 'tipcrm090@theinclusionproject.ca';
-  const adminName = adminUser?.name || 'TIP Administrator';
+  const adminName = adminUser?.name || 'TIP Super Admin';
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,29 +86,29 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
       return;
     }
 
-    // Verify Password against primary administrator or provisioned user profile
+    // Verify Password against primary super admin or provisioned user profile
     const isAdmin = targetEmail === 'tipcrm090' || 
                          targetEmail === 'tipcrm090@theinclusionproject.ca' || 
                          targetEmail === 'admin@theinclusionproject.ca';
 
     if (isAdmin) {
       if (password !== 'CRM090') {
-        setLocalError('Incorrect password for TIP Administrator.');
+        setLocalError('Incorrect password for TIP Super Admin.');
         return;
       }
     } else {
       const user = users.find(u => u.email.toLowerCase() === targetEmail || u.id === targetEmail);
       if (!user) {
-        setLocalError(`No approved account found for ${targetEmail}. Please check your credentials or contact your administrator.`);
+        setLocalError(`No approved account found for ${targetEmail}. Please check your credentials or contact your Super Admin.`);
         return;
       }
       if (user.status === 'disabled' || user.isActive === false) {
-        setLocalError('Your account has been deactivated. Please contact your CRM Administrator.');
+        setLocalError('Your account has been deactivated. Please contact your CRM Super Admin.');
         return;
       }
       if (user.mustChangePassword && user.tempPassword) {
         if (password !== user.tempPassword) {
-          setLocalError('Incorrect temporary password. Please enter the temporary password provided by your admin.');
+          setLocalError('Incorrect temporary password. Please enter the temporary password provided by your Super Admin.');
           return;
         }
       } else if (user.passwordHash || user.password) {
@@ -118,7 +118,7 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
           return;
         }
       } else {
-        setLocalError('Invalid email or password. Please contact your CRM Administrator.');
+        setLocalError('Invalid email or password. Please contact your CRM Super Admin.');
         return;
       }
     }
@@ -180,12 +180,12 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
             {!showCustomInput ? (
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Authorized Administrator Account
+                  Authorized Super Admin Account
                 </label>
                 <div className="p-3 rounded-xl border border-zinc-200 bg-zinc-50 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full bg-zinc-900 text-amber-400 font-medium text-xs flex items-center justify-center shrink-0 shadow-2xs">
-                      TA
+                      SA
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
@@ -273,7 +273,7 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
                   }}
                   className="text-xs text-zinc-500 hover:text-zinc-900 font-medium underline cursor-pointer"
                 >
-                  {showCustomInput ? '← Use Primary Administrator' : 'Use another Google account'}
+                  {showCustomInput ? '← Use Primary Super Admin' : 'Use another Google account'}
                 </button>
 
                 {onDirectOAuth && (

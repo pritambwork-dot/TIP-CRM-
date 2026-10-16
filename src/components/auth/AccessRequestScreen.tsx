@@ -78,7 +78,7 @@ export const AccessRequestScreen: React.FC<AccessRequestScreenProps> = ({
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="e.g. Sarah Thompson"
+                  placeholder="e.g. Jane Doe"
                   className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
                 />
               </div>

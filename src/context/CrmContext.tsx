@@ -408,15 +408,15 @@ function normalizeUser(rawUser: any): UserProfile {
     id: isAdmin ? 'u-admin-090' : (rawUser.id || 'u-' + Date.now()),
     authUserId: rawUser.authUserId,
     organizationId: rawUser.organizationId || 'org-tip',
-    name: isAdmin ? 'TIP Administrator' : (rawUser.name || 'Staff User'),
+    name: isAdmin ? 'TIP Super Admin' : (rawUser.name || 'Staff User'),
     email: isAdmin ? (rawUser.email || 'tipcrm090@theinclusionproject.ca') : (rawUser.email || 'user@theinclusionproject.ca'),
     phone: rawUser.phone,
     role: isAdmin ? 'staff' : (activeRoleId === 'volunteer' ? 'volunteer' : 'staff'),
     roleId: activeRoleId,
     assignedRoleIds,
     activeRoleId,
-    title: isAdmin ? 'Executive Director & Super Admin' : (rawUser.title || roleDef.name),
-    avatarInitials: isAdmin ? 'TA' : (rawUser.avatarInitials || (rawUser.name ? rawUser.name.slice(0, 2).toUpperCase() : 'SU')),
+    title: isAdmin ? 'Super Administrator' : (rawUser.title || roleDef.name),
+    avatarInitials: isAdmin ? 'SA' : (rawUser.avatarInitials || (rawUser.name ? rawUser.name.slice(0, 2).toUpperCase() : 'SU')),
     status: isAdmin ? 'approved' : (rawUser.status || 'approved'),
     isActive: isAdmin ? true : (rawUser.isActive !== undefined ? rawUser.isActive : true),
     emailVerified: isAdmin ? true : (rawUser.emailVerified !== undefined ? rawUser.emailVerified : true),
@@ -539,22 +539,22 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    // Guarantee that u-admin-090 / TIP Administrator is always present as Super Admin
-    const adminIndex = list.findIndex(u => u.id === 'u-admin-090' || u.id === 'u-1' || u.name === 'TIP Administrator' || u.email === 'tipcrm090@theinclusionproject.ca');
+    // Guarantee that u-admin-090 / TIP Super Admin is always present as Super Admin
+    const adminIndex = list.findIndex(u => u.id === 'u-admin-090' || u.id === 'u-1' || u.name === 'TIP Super Admin' || u.name === 'TIP Administrator' || u.email === 'tipcrm090@theinclusionproject.ca');
     if (adminIndex >= 0) {
       list[adminIndex] = {
         ...list[adminIndex],
         id: 'u-admin-090',
-        name: 'TIP Administrator',
+        name: 'TIP Super Admin',
         email: 'tipcrm090@theinclusionproject.ca',
         roleId: 'super_admin',
         role: 'staff',
         assignedRoleIds: ['super_admin'],
         activeRoleId: 'super_admin',
-        title: 'Executive Director & Super Admin',
-        avatarInitials: 'TA',
+        title: 'Super Administrator',
+        avatarInitials: 'SA',
         postId: 'post-ed',
-        postTitle: 'Executive Director',
+        postTitle: 'Super Administrator',
         dataScope: { people: 'GLOBAL', programs: 'ALL', events: 'ALL', funding: 'ALL' },
         status: 'approved',
         isActive: true,
@@ -573,21 +573,21 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const loaded = loadFromStorage<any>('current_user', null);
     if (!loaded) return INITIAL_USERS[0];
     const user = normalizeUser(loaded);
-    // If saved user was a purged demo account, reset to admin
+    // If saved user was a purged demo account, reset to Super Admin
     if (DEMO_EMAILS_TO_PURGE.has(user.email?.toLowerCase().trim())) {
       return INITIAL_USERS[0];
     }
-    // If the saved user is the Administrator, ensure roleId is super_admin
-    if (user.id === 'u-admin-090' || user.id === 'u-1' || user.name === 'TIP Administrator' || user.email === 'tipcrm090@theinclusionproject.ca') {
+    // If the saved user is the Super Admin / Administrator, ensure roleId is super_admin
+    if (user.id === 'u-admin-090' || user.id === 'u-1' || user.name === 'TIP Super Admin' || user.name === 'TIP Administrator' || user.email === 'tipcrm090@theinclusionproject.ca') {
       return {
         ...user,
         id: 'u-admin-090',
-        name: 'TIP Administrator',
+        name: 'TIP Super Admin',
         email: 'tipcrm090@theinclusionproject.ca',
         roleId: 'super_admin',
         role: 'staff',
-        avatarInitials: 'TA',
-        title: 'Executive Director & Super Admin',
+        avatarInitials: 'SA',
+        title: 'Super Administrator',
         dataScope: { people: 'GLOBAL', programs: 'ALL', events: 'ALL', funding: 'ALL' }
       };
     }

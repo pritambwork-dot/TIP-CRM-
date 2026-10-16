@@ -208,29 +208,31 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
         })}
       </div>
 
-      {/* Embedded Program AI Summary (Section 31) */}
-      <div className="bg-gradient-to-r from-[#140a8e]/5 via-zinc-50 to-white rounded-2xl border border-zinc-200/80 p-4 sm:p-5 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-[#140a8e]/10 text-[#140a8e] flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-[#ea0543]" />
-              <span>Program Intelligence</span>
-            </span>
-            <span className="text-xs text-zinc-400 font-mono">Cohort Engagement Analysis</span>
+      {/* Embedded Program AI Summary */}
+      {filteredPrograms.length > 0 && (
+        <div className="bg-gradient-to-r from-[#140a8e]/5 via-zinc-50 to-white rounded-2xl border border-zinc-200/80 p-4 sm:p-5 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-[#140a8e]/10 text-[#140a8e] flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-[#ea0543]" />
+                <span>Program Intelligence</span>
+              </span>
+              <span className="text-xs text-zinc-400 font-mono">Cohort Engagement Analysis</span>
+            </div>
+            <h4 className="text-sm font-semibold text-zinc-900 font-serif">
+              {filteredPrograms[0].name} · Active Cohort
+            </h4>
+            <p className="text-xs text-zinc-600 max-w-2xl leading-relaxed">
+              {filteredPrograms[0].description || 'Ongoing community cohort delivery and engagement.'}
+            </p>
           </div>
-          <h4 className="text-sm font-semibold text-zinc-900 font-serif">
-            Youth Leadership Initiative · 18 Active Participants · 82% Avg Attendance
-          </h4>
-          <p className="text-xs text-zinc-600 max-w-2xl leading-relaxed">
-            AI Observation: Participation has remained stable over the last 3 sessions. 2 participants have attended every session. Consider reviewing engagement patterns before the next session.
-          </p>
+          <div className="flex items-center gap-2 shrink-0">
+            <Badge variant="outline" className="bg-white text-zinc-700 text-xs py-1 px-2.5">
+              {events.filter(e => e.programId === filteredPrograms[0].id).length} events linked
+            </Badge>
+          </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Badge variant="outline" className="bg-white text-zinc-700 text-xs py-1 px-2.5">
-            4 events completed
-          </Badge>
-        </div>
-      </div>
+      )}
 
       {/* Programs Bento Grid with animated stagger & shadcn cards */}
       <motion.div 

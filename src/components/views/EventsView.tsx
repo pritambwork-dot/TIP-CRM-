@@ -180,29 +180,31 @@ export const EventsView: React.FC<EventsViewProps> = ({
         })}
       </div>
 
-      {/* Embedded Event AI Insights (Section 32) */}
-      <div className="bg-gradient-to-r from-[#ea0543]/5 via-zinc-50 to-white rounded-2xl border border-zinc-200/80 p-4 sm:p-5 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-[#ea0543]/10 text-[#ea0543] flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-[#ea0543]" />
-              <span>Event Attendance Insights</span>
-            </span>
-            <span className="text-xs text-zinc-400 font-mono">Benchmark: 78.4% Program Avg</span>
+      {/* Embedded Event AI Insights */}
+      {filteredEvents.length > 0 && (
+        <div className="bg-gradient-to-r from-[#ea0543]/5 via-zinc-50 to-white rounded-2xl border border-zinc-200/80 p-4 sm:p-5 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-[#ea0543]/10 text-[#ea0543] flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-[#ea0543]" />
+                <span>Event Attendance Insights</span>
+              </span>
+              <span className="text-xs text-zinc-400 font-mono">Date: {filteredEvents[0].date}</span>
+            </div>
+            <h4 className="text-sm font-semibold text-zinc-900 font-serif">
+              {filteredEvents[0].name} · {filteredEvents[0].location || 'Community Location'}
+            </h4>
+            <p className="text-xs text-zinc-600 max-w-2xl leading-relaxed">
+              {filteredEvents[0].description || 'Community gathering and workshop engagement session.'}
+            </p>
           </div>
-          <h4 className="text-sm font-semibold text-zinc-900 font-serif">
-            Youth Leadership Lab — Civic Engagement · 42 Registered · 34 Attended (81% Rate)
-          </h4>
-          <p className="text-xs text-zinc-600 max-w-2xl leading-relaxed">
-            AI Observation: Attendance was 6 percentage points above the program average. Suggested follow-up: Review the 8 registered-but-absent participants in Tasks for potential reminder outreach.
-          </p>
+          <div className="flex items-center gap-2 shrink-0">
+            <Badge variant="outline" className="bg-white text-zinc-700 text-xs py-1 px-2.5">
+              {filteredEvents[0].participants?.length || 0} Registered
+            </Badge>
+          </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Badge variant="outline" className="bg-white text-zinc-700 text-xs py-1 px-2.5">
-            +6% vs baseline
-          </Badge>
-        </div>
-      </div>
+      )}
 
       {/* Events Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">

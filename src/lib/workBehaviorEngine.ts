@@ -414,7 +414,7 @@ export function detectWorkPatterns(params: {
       actionPreview: {
         id: 'act-stale-partners',
         title: `Schedule Check-in with ${stalePartners[0].name}`,
-        description: `Create a follow-up outreach task assigned to Marcus Chen for ${stalePartners[0].name}.`,
+        description: `Create a follow-up outreach task for ${stalePartners[0].name}.`,
         actionType: 'create_tasks',
         targetRecordType: 'Organization',
         targetRecordId: stalePartners[0].id,
@@ -423,8 +423,8 @@ export function detectWorkPatterns(params: {
           tasks: [
             {
               title: `Quarterly relationship check-in with ${stalePartners[0].name}`,
-              assignedToId: 'u-2',
-              owner: 'Marcus Chen',
+              assignedToId: 'u-admin-090',
+              owner: 'TIP Super Admin',
               dueDate: '2026-09-28',
               priority: 'Medium',
               status: 'To Do'

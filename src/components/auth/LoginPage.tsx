@@ -146,7 +146,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       <input
                         type="text"
                         required
-                        placeholder="Sarah Thompson"
+                        placeholder="Jane Doe"
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
                         className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
@@ -156,12 +156,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                      {authMode === 'signup' ? 'Email address' : 'Email or Admin ID'}
+                      {authMode === 'signup' ? 'Email address' : 'Email or Super Admin ID'}
                     </label>
                     <input
                       type={authMode === 'signup' ? 'email' : 'text'}
                       required
-                      placeholder={authMode === 'signup' ? 'name@inclusionproject.ca' : 'Email or Admin ID (e.g. TIPCRM090)'}
+                      placeholder={authMode === 'signup' ? 'name@inclusionproject.ca' : 'Email or Super Admin ID (e.g. TIPCRM090)'}
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"

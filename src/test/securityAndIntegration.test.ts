@@ -93,7 +93,13 @@ import {
 } from '../lib/offlineStorage.ts';
 import { syncEngine } from '../lib/syncEngine.ts';
 import { SupabaseAuthEngine, sanitizeRedirectPath } from '../lib/supabase.ts';
-import { INITIAL_USERS } from '../data/mockData.ts';
+import { 
+  INITIAL_USERS,
+  INITIAL_POSTS,
+  INITIAL_TASK_TEMPLATES,
+  INITIAL_TASK_ASSIGNMENT_RULES,
+  INITIAL_POST_RESPONSIBILITIES
+} from '../data/mockData.ts';
 import { 
   parseRawContactsCsv, 
   GOOGLE_DRIVE_PRESETS, 
@@ -3571,8 +3577,8 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     assert(!mockInitialEvent.instructionLogs.some(l => l.id === 'log-003'), 'Deleted entry is no longer present');
 
     // D. Administrative Authority Check: isAdministrator definition
-    const checkIsAdmin = (user: { roleId?: string; isSuperAdmin?: boolean }) => {
-      return user.roleId === 'super_admin' || user.roleId === 'staff_manager' || !!user.isSuperAdmin;
+    const checkIsSuperAdmin = (user: { roleId?: string; isSuperAdmin?: boolean }) => {
+      return user.roleId === 'super_admin' || !!user.isSuperAdmin;
     };
 
     const superAdminUser = { id: 'u-1', roleId: 'super_admin', isSuperAdmin: true };
@@ -3580,18 +3586,18 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     const staffMemberUser = { id: 'u-3', roleId: 'staff_member', isSuperAdmin: false };
     const volunteerUser = { id: 'u-4', roleId: 'volunteer', isSuperAdmin: false };
 
-    assert(checkIsAdmin(superAdminUser) === true, 'Super Admin has administrative authority');
-    assert(checkIsAdmin(staffManagerUser) === true, 'Staff Manager has administrative authority');
-    assert(checkIsAdmin(staffMemberUser) === false, 'Staff Member does not have administrative authority');
-    assert(checkIsAdmin(volunteerUser) === false, 'Volunteer does not have administrative authority');
+    assert(checkIsSuperAdmin(superAdminUser) === true, 'Super Admin has administrative authority');
+    assert(checkIsSuperAdmin(staffManagerUser) === false, 'Staff Manager does not have super admin authority (Admin option removed)');
+    assert(checkIsSuperAdmin(staffMemberUser) === false, 'Staff Member does not have administrative authority');
+    assert(checkIsSuperAdmin(volunteerUser) === false, 'Volunteer does not have administrative authority');
 
-    // E. Only Admin Can Configure User Access and Data Scopes (Server & Engine Guard)
+    // E. Only Super Admin Can Configure User Access and Data Scopes (Server & Engine Guard)
     const canConfigureUserAccess = (actor: { roleId?: string; isSuperAdmin?: boolean }) => {
-      return checkIsAdmin(actor);
+      return checkIsSuperAdmin(actor);
     };
 
     assert(canConfigureUserAccess(superAdminUser) === true, 'Super Admin can configure user access and data scopes');
-    assert(canConfigureUserAccess(staffManagerUser) === true, 'Staff Manager can configure user access and data scopes');
+    assert(canConfigureUserAccess(staffManagerUser) === false, 'Staff Manager is strictly blocked from configuring access');
     assert(canConfigureUserAccess(staffMemberUser) === false, 'Staff Member is strictly blocked from configuring access');
     assert(canConfigureUserAccess(volunteerUser) === false, 'Volunteer is strictly blocked from configuring access');
 
@@ -4157,7 +4163,8 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     const googleModalContent = fs.readFileSync(googleModalPath, 'utf-8');
     assert(googleModalContent.includes('export const GoogleSignInModal'), 'GoogleSignInModal component exported');
     assert(googleModalContent.includes('export const GoogleLogoSvg'), 'GoogleLogoSvg component exported');
-    assert(googleModalContent.includes('tipcrm090@theinclusionproject.ca'), 'Google modal includes TIP Administrator preset');
+    assert(googleModalContent.includes('tipcrm090@theinclusionproject.ca'), 'Google modal includes TIP Super Admin preset');
+    assert(googleModalContent.includes('TIP Super Admin'), 'Google modal displays TIP Super Admin account label');
     assert(!googleModalContent.includes('sarah.t@theinclusionproject.ca'), 'Demo account Sarah Thompson removed from Google modal');
     assert(!googleModalContent.includes('marcus.c@theinclusionproject.ca'), 'Demo account Marcus Chen removed from Google modal');
     assert(googleModalContent.includes('Use another Google account'), 'Google modal includes custom account option');
@@ -4176,6 +4183,7 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     assert(loginContent.includes('GoogleSignInModal'), 'LoginPage integrates GoogleSignInModal');
     assert(loginContent.includes('setShowGoogleModal(true)'), 'LoginPage btn-google-login opens Google modal');
     assert(!loginContent.includes('Quick Admin Sign-In:'), '1-click Quick Admin Sign-In bypass removed from LoginPage');
+    assert(loginContent.includes('Email or Super Admin ID'), 'LoginPage references Super Admin ID');
 
     // H. Verify App.tsx AuthGate Google Modal Integration & Strict Password Enforcement
     const appPath = path.resolve(process.cwd(), 'src/App.tsx');
@@ -4252,6 +4260,14 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     assert(!aiMiddlewareContent.includes('isMarcus'), 'isMarcus demo bypass removed from aiMiddleware.ts');
     assert(!aiMiddlewareContent.includes('isElena'), 'isElena demo bypass removed from aiMiddleware.ts');
     assert(!aiMiddlewareContent.includes('password.length >= 6'), 'Wildcard password.length >= 6 bypass removed from aiMiddleware.ts');
+
+    // D. Purged Demo Data Collections & Super Admin Exclusivity Verification
+    assert(INITIAL_TASK_TEMPLATES.length === 0, 'INITIAL_TASK_TEMPLATES is empty array with zero demo templates');
+    assert(INITIAL_TASK_ASSIGNMENT_RULES.length === 0, 'INITIAL_TASK_ASSIGNMENT_RULES is empty array with zero demo rules');
+    assert(INITIAL_POST_RESPONSIBILITIES.length === 0, 'INITIAL_POST_RESPONSIBILITIES is empty array with zero demo items');
+    assert(INITIAL_POSTS.length === 1 && INITIAL_POSTS[0].name === 'Super Administrator', 'INITIAL_POSTS contains only Super Administrator');
+    assert(INITIAL_USERS[0].name === 'TIP Super Admin', 'Initial primary user is named TIP Super Admin');
+    assert(INITIAL_USERS[0].roleId === 'super_admin', 'Initial primary user role is strictly super_admin');
   }
 
   // --------------------------------------------------------------------------

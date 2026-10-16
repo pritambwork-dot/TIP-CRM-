@@ -50,7 +50,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     {
       step: 3,
       title: 'Explore your active programs',
-      description: 'Review the Youth Leadership Initiative, Civic Accessibility Lab, and Research programs with connected participants.',
+      description: 'Review and manage your community programs with connected participants, events, and milestones.',
       actionText: 'View Programs',
       onAction: () => {
         onClose();

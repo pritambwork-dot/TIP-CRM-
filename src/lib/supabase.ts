@@ -268,7 +268,7 @@ export class SupabaseAuthEngine {
 
     // Authenticate verified Google Identity (for testing or when customEmail is provided)
     const email = customEmail?.trim().toLowerCase() || 'tipcrm090@theinclusionproject.ca';
-    const name = customName || ((email === 'tipcrm090@theinclusionproject.ca' || email === 'admin@theinclusionproject.ca') ? 'TIP Administrator' : email.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase()));
+    const name = customName || ((email === 'tipcrm090@theinclusionproject.ca' || email === 'admin@theinclusionproject.ca') ? 'TIP Super Admin' : email.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase()));
     const authUserId = `auth-google-${btoa(email).replace(/=/g, '').slice(0, 16)}`;
 
     const session: AuthSession = {
