@@ -1343,35 +1343,29 @@ VALUES (
 ) ON CONFLICT (id) DO NOTHING;
 
 -- 2. System Baseline Roles
-INSERT INTO public.roles (id, name, description, is_system_role)
-VALUES
-  ('super_admin', 'Super Administrator', 'Full administrative authority across all modules, users, security policies, and system settings.', TRUE),
-  ('staff_manager', 'Staff Manager', 'Management oversight for programs, events, contacts, documents, and operational reports.', TRUE),
-  ('staff_member', 'Staff Member', 'Operational access to assigned programs, events, tasks, contacts, and non-confidential documents.', TRUE),
-  ('volunteer', 'Volunteer', 'Assigned participation in specific workshops and public community initiatives. Zero financial access.', TRUE)
-ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.roles (id, name, description, is_system_role) VALUES ('super_admin', 'Super Administrator', 'Full administrative authority across all modules, users, security policies, and system settings.', TRUE) ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.roles (id, name, description, is_system_role) VALUES ('staff_manager', 'Staff Manager', 'Management oversight for programs, events, contacts, documents, and operational reports.', TRUE) ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.roles (id, name, description, is_system_role) VALUES ('staff_member', 'Staff Member', 'Operational access to assigned programs, events, tasks, contacts, and non-confidential documents.', TRUE) ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.roles (id, name, description, is_system_role) VALUES ('volunteer', 'Volunteer', 'Assigned participation in specific workshops and public community initiatives. Zero financial access.', TRUE) ON CONFLICT (id) DO NOTHING;
 
 -- 3. Core Permissions (Resource + Action)
-INSERT INTO public.permissions (resource, action, description)
-VALUES
-  ('users', 'manage', 'Create, approve, deactivate, and manage CRM user accounts'),
-  ('users', 'view', 'View team member directory and profile metadata'),
-  ('people', 'manage', 'Create, update, export, and delete contacts'),
-  ('people', 'view', 'View contact directory entries within user data scope'),
-  ('programs', 'manage', 'Create, edit, budget, and archive initiatives and cohorts'),
-  ('programs', 'view', 'View programs and cohorts assigned or organization-wide'),
-  ('events', 'manage', 'Schedule, edit, and record attendance for workshops and forums'),
-  ('events', 'view', 'View scheduled events and session rosters'),
-  ('tasks', 'manage', 'Assign, update status, and prioritize work milestones'),
-  ('tasks', 'view', 'View tasks assigned to user or team'),
-  ('funding', 'manage', 'Create, edit, reconcile, and delete fiduciary records and grants'),
-  ('funding', 'view', 'View confidential grant and donor allocations'),
-  ('documents', 'manage', 'Upload, classify, and delete storage files and cloud assets'),
-  ('documents', 'view', 'Access documents according to role confidentiality tier'),
-  ('audit_logs', 'view', 'Inspect security audit trail records'),
-  ('intelligence', 'manage', 'Upload datasets for grounded CSV profiling and AI analytics'),
-  ('intelligence', 'view', 'Read generated metrics and analytical breakdowns')
-ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('users', 'manage', 'Create, approve, deactivate, and manage CRM user accounts') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('users', 'view', 'View team member directory and profile metadata') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('people', 'manage', 'Create, update, export, and delete contacts') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('people', 'view', 'View contact directory entries within user data scope') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('programs', 'manage', 'Create, edit, budget, and archive initiatives and cohorts') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('programs', 'view', 'View programs and cohorts assigned or organization-wide') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('events', 'manage', 'Schedule, edit, and record attendance for workshops and forums') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('events', 'view', 'View scheduled events and session rosters') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('tasks', 'manage', 'Assign, update status, and prioritize work milestones') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('tasks', 'view', 'View tasks assigned to user or team') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('funding', 'manage', 'Create, edit, reconcile, and delete fiduciary records and grants') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('funding', 'view', 'View confidential grant and donor allocations') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('documents', 'manage', 'Upload, classify, and delete storage files and cloud assets') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('documents', 'view', 'Access documents according to role confidentiality tier') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('audit_logs', 'view', 'Inspect security audit trail records') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('intelligence', 'manage', 'Upload datasets for grounded CSV profiling and AI analytics') ON CONFLICT (resource, action) DO NOTHING;
+INSERT INTO public.permissions (resource, action, description) VALUES ('intelligence', 'view', 'Read generated metrics and analytical breakdowns') ON CONFLICT (resource, action) DO NOTHING;
 
 -- 4. Role-to-Permission Baseline Mappings
 INSERT INTO public.role_permissions (role_id, permission_id)
