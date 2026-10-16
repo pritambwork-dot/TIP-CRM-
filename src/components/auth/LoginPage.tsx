@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowRight, AlertCircle } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { GoogleSignInModal, GoogleLogoSvg } from './GoogleSignInModal';
+import { SupabaseAuthEngine } from '../../lib/supabase';
 
 interface LoginPageProps {
   onGoogleSignIn: (email?: string, name?: string) => void;
@@ -238,6 +239,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         onSelectAccount={(selectedEmail, selectedName) => {
           setShowGoogleModal(false);
           onGoogleSignIn(selectedEmail, selectedName);
+        }}
+        onDirectOAuth={() => {
+          SupabaseAuthEngine.signInWithGoogle(undefined, undefined, undefined, true);
         }}
         users={users}
         loading={loading}

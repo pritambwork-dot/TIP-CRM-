@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Lock, ArrowRight, AlertCircle, ExternalLink, ShieldCheck, Mail } from 'lucide-react';
+import { X, Lock, ArrowRight, AlertCircle, ExternalLink, ShieldCheck, Mail, Users, CheckCircle2 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { verifyPassword } from '../../lib/passwordSecurity';
 
@@ -43,13 +43,44 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
   error = null,
   users = []
 }) => {
-  const [selectedEmail, setSelectedEmail] = useState<string>('tipcrm090@theinclusionproject.ca');
-  const [selectedName, setSelectedName] = useState<string>('TIP Super Admin');
-  const [password, setPassword] = useState<string>('');
-  const [showCustomInput, setShowCustomInput] = useState(false);
+  // Tabs: 'users' (Staff, Volunteers, Team Members) or 'admin' (Super Admin)
+  const [activeTab, setActiveTab] = useState<'users' | 'admin'>('users');
+
+  // Super Admin state
+  const adminUser = users.find(
+    u => u.id === 'u-admin-090' || u.roleId === 'super_admin' || u.email === 'tipcrm090@theinclusionproject.ca'
+  );
+  const adminEmail = adminUser?.email || 'tipcrm090@theinclusionproject.ca';
+  const adminName = adminUser?.name || 'TIP Super Admin';
+
+  // Team & Staff Users (active/approved, non-super-admin)
+  const staffUsers = users.filter(
+    u =>
+      u.roleId !== 'super_admin' &&
+      u.email.toLowerCase() !== 'tipcrm090@theinclusionproject.ca' &&
+      u.email.toLowerCase() !== 'admin@theinclusionproject.ca' &&
+      u.status !== 'disabled' &&
+      u.status !== 'rejected'
+  );
+
+  // User tab selection state
+  const [selectedStaffUser, setSelectedStaffUser] = useState<UserProfile | null>(
+    staffUsers.length > 0 ? staffUsers[0] : null
+  );
+  const [showCustomInput, setShowCustomInput] = useState<boolean>(staffUsers.length === 0);
   const [customEmail, setCustomEmail] = useState('');
   const [customName, setCustomName] = useState('');
+
+  // Password state
+  const [password, setPassword] = useState<string>('');
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // Sync selected staff user if list changes
+  useEffect(() => {
+    if (staffUsers.length > 0 && !selectedStaffUser && !showCustomInput) {
+      setSelectedStaffUser(staffUsers[0]);
+    }
+  }, [staffUsers, selectedStaffUser, showCustomInput]);
 
   // Close on Escape key
   useEffect(() => {
@@ -64,20 +95,28 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Primary Super Admin Profile
-  const adminUser = users.find(u => u.id === 'u-admin-090' || u.roleId === 'super_admin' || u.email === 'tipcrm090@theinclusionproject.ca');
-  const adminEmail = adminUser?.email || 'tipcrm090@theinclusionproject.ca';
-  const adminName = adminUser?.name || 'TIP Super Admin';
-
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setLocalError(null);
 
-    const targetEmail = (showCustomInput ? customEmail : selectedEmail).trim().toLowerCase();
-    const targetName = showCustomInput ? (customName.trim() || undefined) : selectedName;
+    let targetEmail = '';
+    let targetName: string | undefined;
+
+    if (activeTab === 'admin') {
+      targetEmail = adminEmail.trim().toLowerCase();
+      targetName = adminName;
+    } else {
+      if (showCustomInput) {
+        targetEmail = customEmail.trim().toLowerCase();
+        targetName = customName.trim() || undefined;
+      } else if (selectedStaffUser) {
+        targetEmail = selectedStaffUser.email.trim().toLowerCase();
+        targetName = selectedStaffUser.name;
+      }
+    }
 
     if (!targetEmail) {
-      setLocalError('Please enter a valid Google Account email.');
+      setLocalError('Please select a team member or enter a valid Google Account email.');
       return;
     }
 
@@ -87,9 +126,10 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
     }
 
     // Verify Password against primary super admin or provisioned user profile
-    const isAdmin = targetEmail === 'tipcrm090' || 
-                         targetEmail === 'tipcrm090@theinclusionproject.ca' || 
-                         targetEmail === 'admin@theinclusionproject.ca';
+    const isAdmin =
+      targetEmail === 'tipcrm090' ||
+      targetEmail === 'tipcrm090@theinclusionproject.ca' ||
+      targetEmail === 'admin@theinclusionproject.ca';
 
     if (isAdmin) {
       if (password !== 'CRM090') {
@@ -129,8 +169,8 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div 
-        className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl border border-zinc-200/80 overflow-hidden"
+      <div
+        className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-zinc-200/80 overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-labelledby="google-modal-title"
@@ -138,7 +178,7 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
         {/* Header */}
         <div className="p-6 pb-4 border-b border-zinc-100 flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-white shadow-2xs border border-zinc-200/80 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-full bg-white shadow-2xs border border-zinc-200/80 flex items-center justify-center shrink-0">
               <GoogleLogoSvg className="w-5 h-5 shrink-0" />
             </div>
             <div>
@@ -153,10 +193,52 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-lg text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors cursor-pointer"
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors cursor-pointer"
             aria-label="Close Google Sign In"
           >
             <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Tab Selector: Users vs Super Admin */}
+        <div className="px-6 pt-3 pb-0 flex border-b border-zinc-100 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('users');
+              setLocalError(null);
+              setPassword('');
+            }}
+            className={`pb-2.5 px-3 text-xs font-medium flex items-center gap-1.5 transition-colors border-b-2 cursor-pointer ${
+              activeTab === 'users'
+                ? 'border-zinc-900 text-zinc-900 font-semibold'
+                : 'border-transparent text-zinc-500 hover:text-zinc-800'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Staff & Users</span>
+            {staffUsers.length > 0 && (
+              <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-zinc-100 text-zinc-600">
+                {staffUsers.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('admin');
+              setLocalError(null);
+              setPassword('');
+            }}
+            className={`pb-2.5 px-3 text-xs font-medium flex items-center gap-1.5 transition-colors border-b-2 cursor-pointer ${
+              activeTab === 'admin'
+                ? 'border-zinc-900 text-zinc-900 font-semibold'
+                : 'border-transparent text-zinc-500 hover:text-zinc-800'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Super Admin</span>
           </button>
         </div>
 
@@ -177,7 +259,113 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
           )}
 
           <form onSubmit={handlePasswordSubmit} className="space-y-4">
-            {!showCustomInput ? (
+            {/* TAB 1: USERS (Staff, Volunteers, Coordinators) */}
+            {activeTab === 'users' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-medium text-zinc-700">
+                    Google Account Identification
+                  </label>
+                  {staffUsers.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCustomInput(!showCustomInput);
+                        setLocalError(null);
+                        setPassword('');
+                      }}
+                      className="text-xs text-zinc-500 hover:text-zinc-900 font-medium underline cursor-pointer"
+                    >
+                      {showCustomInput ? '← Select from team members' : 'Use another Google account'}
+                    </button>
+                  )}
+                </div>
+
+                {!showCustomInput && staffUsers.length > 0 ? (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {staffUsers.map(u => {
+                      const isSelected = selectedStaffUser?.id === u.id;
+                      return (
+                        <div
+                          key={u.id}
+                          onClick={() => {
+                            setSelectedStaffUser(u);
+                            setLocalError(null);
+                          }}
+                          className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                            isSelected
+                              ? 'border-zinc-900 bg-zinc-50 shadow-2xs'
+                              : 'border-zinc-200 hover:border-zinc-300 bg-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-8 h-8 rounded-full bg-zinc-800 text-white font-medium text-xs flex items-center justify-center shrink-0">
+                              {u.name
+                                .split(' ')
+                                .map(n => n[0])
+                                .join('')
+                                .slice(0, 2)
+                                .toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-medium text-zinc-900 truncate">
+                                  {u.name}
+                                </span>
+                                <span className="text-[9px] font-medium px-1.5 py-0.2 rounded-full bg-zinc-200 text-zinc-700 uppercase">
+                                  {u.roleId || 'staff'}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-zinc-500 truncate">{u.email}</div>
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <CheckCircle2 className="w-4 h-4 text-zinc-900 shrink-0 ml-2" />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    <div>
+                      <label className="block text-[11px] font-medium text-zinc-600 mb-1">
+                        Google Account Email
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        autoFocus
+                        placeholder="name@theinclusionproject.ca or name@gmail.com"
+                        value={customEmail}
+                        onChange={e => setCustomEmail(e.target.value)}
+                        className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-zinc-600 mb-1">
+                        Full Name (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Registered User Name"
+                        value={customName}
+                        onChange={e => setCustomName(e.target.value)}
+                        className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
+                      />
+                    </div>
+                    {staffUsers.length === 0 && (
+                      <p className="text-[11px] text-zinc-500 italic">
+                        Tip: You can use any approved Google email registered in the CRM.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 2: SUPER ADMIN */}
+            {activeTab === 'admin' && (
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Authorized Super Admin Account
@@ -199,42 +387,13 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 mb-1">
-                    Google Account Email
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    autoFocus
-                    placeholder="name@theinclusionproject.ca or name@gmail.com"
-                    value={customEmail}
-                    onChange={(e) => setCustomEmail(e.target.value)}
-                    className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 mb-1">
-                    Full Name (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Registered User Name"
-                    value={customName}
-                    onChange={(e) => setCustomName(e.target.value)}
-                    className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
-                  />
-                </div>
-              </div>
             )}
 
-            {/* Password Verification Field (Mandatory) */}
+            {/* Password Verification Field (Mandatory for both) */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-medium text-zinc-700">
-                  CRM Account Password
+                  {activeTab === 'admin' ? 'Super Admin Master Password' : 'CRM Account Password'}
                 </label>
                 <span className="text-[10px] text-zinc-400 font-mono">Password required</span>
               </div>
@@ -242,16 +401,18 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
                 <input
                   type="password"
                   required
-                  placeholder="Enter your account password"
+                  placeholder={
+                    activeTab === 'admin' ? 'Enter Super Admin password (CRM090)' : 'Enter your CRM account password'
+                  }
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={e => setPassword(e.target.value)}
                   className="w-full pl-3.5 pr-10 py-2.5 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
                 />
                 <Lock className="w-4 h-4 text-zinc-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
               </div>
             </div>
 
-            {/* Submit Button */}
+            {/* Submit Action */}
             <div className="pt-2 flex flex-col gap-2">
               <button
                 type="submit"
@@ -259,28 +420,49 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
                 className="w-full py-2.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white text-sm font-medium transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <GoogleLogoSvg className="w-4 h-4" />
-                <span>{loading ? 'Authenticating...' : 'Verify Password & Sign In'}</span>
+                <span>
+                  {loading
+                    ? 'Authenticating...'
+                    : activeTab === 'admin'
+                    ? 'Verify Password & Sign In as Super Admin'
+                    : 'Verify Password & Sign In as Team Member'}
+                </span>
                 <ArrowRight className="w-4 h-4" />
               </button>
 
               <div className="flex items-center justify-between pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCustomInput(!showCustomInput);
-                    setLocalError(null);
-                    setPassword('');
-                  }}
-                  className="text-xs text-zinc-500 hover:text-zinc-900 font-medium underline cursor-pointer"
-                >
-                  {showCustomInput ? '← Use Primary Super Admin' : 'Use another Google account'}
-                </button>
+                {activeTab === 'admin' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('users');
+                      setLocalError(null);
+                      setPassword('');
+                    }}
+                    className="text-xs text-zinc-500 hover:text-zinc-900 font-medium underline cursor-pointer"
+                  >
+                    Use another Google account
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCustomInput(!showCustomInput);
+                      setLocalError(null);
+                      setPassword('');
+                    }}
+                    className="text-xs text-zinc-500 hover:text-zinc-900 font-medium underline cursor-pointer"
+                  >
+                    {showCustomInput ? '← Select from team members' : 'Use another Google account'}
+                  </button>
+                )}
 
                 {onDirectOAuth && (
                   <button
                     type="button"
                     onClick={onDirectOAuth}
                     className="text-[11px] text-zinc-400 hover:text-zinc-700 flex items-center gap-1 cursor-pointer"
+                    title="Sign in directly through Google OAuth popup or redirect"
                   >
                     <ExternalLink className="w-3 h-3" />
                     <span>Browser OAuth</span>

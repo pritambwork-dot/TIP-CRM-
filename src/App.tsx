@@ -394,6 +394,9 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
               setShowGoogleModal(false);
               handleGoogleSignIn(selectedEmail, selectedName);
             }}
+            onDirectOAuth={() => {
+              SupabaseAuthEngine.signInWithGoogle(undefined, undefined, undefined, true);
+            }}
             users={users}
             loading={authLoading}
             error={authError}
