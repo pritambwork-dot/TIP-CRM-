@@ -20,10 +20,12 @@ import {
   Layers,
   Calendar,
   ListTodo,
-  Database
+  Database,
+  Lock
 } from 'lucide-react';
 import { AiMessage, AiSuggestion } from '../../types';
 import { ActionPreviewModal } from './ActionPreviewModal';
+import { Permissions } from '../../lib/permissions';
 
 interface TipIntelligenceDrawerProps {
   currentView?: string;
@@ -48,7 +50,8 @@ export const TipIntelligenceDrawer: React.FC<TipIntelligenceDrawerProps> = ({
     refreshAiSuggestions,
     pendingActionPreview,
     setPendingActionPreview,
-    aiBudgetConfig
+    aiBudgetConfig,
+    hasPermission
   } = useCrm();
 
   const [inputPrompt, setInputPrompt] = useState('');
@@ -56,9 +59,10 @@ export const TipIntelligenceDrawer: React.FC<TipIntelligenceDrawerProps> = ({
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  const isManagerOrAdmin = 
-    currentUser.roleId === 'super_admin' || 
-    currentUser.roleId === 'staff_manager';
+  const canView = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'view');
+  const canCreate = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'create');
+  const canManage = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'manage');
+  const isManagerOrAdmin = canManage;
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -75,12 +79,12 @@ export const TipIntelligenceDrawer: React.FC<TipIntelligenceDrawerProps> = ({
     }
   }, [successToast]);
 
-  if (!isAiDrawerOpen) return null;
+  if (!isAiDrawerOpen || !canView) return null;
 
   // Filter relevant suggestions for the user
   const relevantSuggestions = aiSuggestions.filter(s => {
     if (s.status === 'dismissed' || s.status === 'completed') return false;
-    if (isManagerOrAdmin) return true;
+    if (canManage) return true;
     return s.userId === currentUser.id || s.category === 'For You' || !s.userId;
   });
 
@@ -88,6 +92,10 @@ export const TipIntelligenceDrawer: React.FC<TipIntelligenceDrawerProps> = ({
   const topSuggestion = criticalOrImportant[0] || relevantSuggestions[0];
 
   const handleSend = async (messageText?: string) => {
+    if (!canCreate) {
+      alert(Permissions.getDisabledReason(currentUser, 'intelligence', 'create'));
+      return;
+    }
     const textToSend = messageText || inputPrompt;
     if (!textToSend.trim() || isSending) return;
 
@@ -109,6 +117,10 @@ export const TipIntelligenceDrawer: React.FC<TipIntelligenceDrawerProps> = ({
 
   const handleChipClick = (action: string, payload?: any) => {
     if (action === 'preview_action' && payload?.actionPreviewId) {
+      if (!canManage) {
+        alert(Permissions.getDisabledReason(currentUser, 'intelligence', 'manage'));
+        return;
+      }
       const foundSug = aiSuggestions.find(s => s.actionPreview?.id === payload.actionPreviewId);
       if (foundSug?.actionPreview) {
         setPendingActionPreview(foundSug.actionPreview);
@@ -255,11 +267,26 @@ export const TipIntelligenceDrawer: React.FC<TipIntelligenceDrawerProps> = ({
 
               {topSuggestion.actionPreview && (
                 <button
-                  onClick={() => setPendingActionPreview(topSuggestion.actionPreview || null)}
-                  className="w-full py-2 px-3 rounded-xl bg-white hover:bg-zinc-50 border border-indigo-200 text-[#140a8e] text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition-all hover:shadow cursor-pointer"
+                  disabled={!canManage}
+                  onClick={() => canManage && setPendingActionPreview(topSuggestion.actionPreview || null)}
+                  title={!canManage ? Permissions.getDisabledReason(currentUser, 'intelligence', 'manage') : undefined}
+                  className={`w-full py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition-all ${
+                    canManage 
+                      ? 'bg-white hover:bg-zinc-50 border-indigo-200 text-[#140a8e] cursor-pointer hover:shadow' 
+                      : 'bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed opacity-70'
+                  }`}
                 >
-                  <span>Review & Apply Action</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
+                  {canManage ? (
+                    <>
+                      <span>Review & Apply Action</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Action Review Restricted</span>
+                    </>
+                  )}
                 </button>
               )}
             </div>
@@ -391,28 +418,30 @@ export const TipIntelligenceDrawer: React.FC<TipIntelligenceDrawerProps> = ({
         </div>
 
         {/* Quick Question Starters */}
-        <div className="px-5 py-2 border-t border-zinc-100 bg-white flex items-center gap-1.5 overflow-x-auto text-xs no-scrollbar">
-          <button
-            onClick={() => handleSend("What are my top priorities for today?")}
-            className="px-2.5 py-1 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-full text-zinc-700 text-[11px] whitespace-nowrap transition-colors shrink-0 cursor-pointer"
-          >
-            📋 Today's Priorities
-          </button>
-          <button
-            onClick={() => handleSend("What needs to be prepared for Saturday's workshop?")}
-            className="px-2.5 py-1 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-full text-zinc-700 text-[11px] whitespace-nowrap transition-colors shrink-0 cursor-pointer"
-          >
-            🏛️ Workshop Readiness
-          </button>
-          {isManagerOrAdmin && (
+        {canCreate && (
+          <div className="px-5 py-2 border-t border-zinc-100 bg-white flex items-center gap-1.5 overflow-x-auto text-xs no-scrollbar">
             <button
-              onClick={() => handleSend("Show unassigned tasks and team workload distribution")}
+              onClick={() => handleSend("What are my top priorities for today?")}
               className="px-2.5 py-1 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-full text-zinc-700 text-[11px] whitespace-nowrap transition-colors shrink-0 cursor-pointer"
             >
-              👥 Team Workload
+              📋 Today's Priorities
             </button>
-          )}
-        </div>
+            <button
+              onClick={() => handleSend("What needs to be prepared for Saturday's workshop?")}
+              className="px-2.5 py-1 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-full text-zinc-700 text-[11px] whitespace-nowrap transition-colors shrink-0 cursor-pointer"
+            >
+              🏛️ Workshop Readiness
+            </button>
+            {canManage && (
+              <button
+                onClick={() => handleSend("Show unassigned tasks and team workload distribution")}
+                className="px-2.5 py-1 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-full text-zinc-700 text-[11px] whitespace-nowrap transition-colors shrink-0 cursor-pointer"
+              >
+                👥 Team Workload
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Chat Input Bar */}
         <div className="p-4 border-t border-zinc-200 bg-zinc-50/60">
@@ -425,15 +454,21 @@ export const TipIntelligenceDrawer: React.FC<TipIntelligenceDrawerProps> = ({
           >
             <input
               type="text"
+              disabled={!canCreate || isSending}
               value={inputPrompt}
               onChange={(e) => setInputPrompt(e.target.value)}
-              placeholder={isManagerOrAdmin ? "Ask about team workload, unassigned tasks..." : "Ask what to prioritize, event prep, tasks..."}
-              className="flex-1 bg-white border border-zinc-300 rounded-xl px-3.5 py-2.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-hidden focus:ring-2 focus:ring-[#140a8e]/20 focus:border-[#140a8e] transition-all shadow-2xs"
+              placeholder={
+                !canCreate
+                  ? "AI querying is restricted. Permission from Super Admin required."
+                  : (canManage ? "Ask about team workload, unassigned tasks..." : "Ask what to prioritize, event prep, tasks...")
+              }
+              className="flex-1 bg-white border border-zinc-300 rounded-xl px-3.5 py-2.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-hidden focus:ring-2 focus:ring-[#140a8e]/20 focus:border-[#140a8e] transition-all shadow-2xs disabled:bg-zinc-100 disabled:cursor-not-allowed"
             />
             <button
               type="submit"
-              disabled={!inputPrompt.trim() || isSending}
-              className="p-2.5 bg-[#140a8e] hover:bg-[#0f076e] disabled:opacity-40 text-white rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
+              disabled={!inputPrompt.trim() || isSending || !canCreate}
+              title={!canCreate ? Permissions.getDisabledReason(currentUser, 'intelligence', 'create') : undefined}
+              className="p-2.5 bg-[#140a8e] hover:bg-[#0f076e] disabled:opacity-40 text-white rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer disabled:cursor-not-allowed"
             >
               <Send className="w-4 h-4" />
             </button>

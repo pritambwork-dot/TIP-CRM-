@@ -15,6 +15,8 @@ import {
   RotateCw, 
   Zap, 
   ShieldCheck, 
+  ShieldAlert,
+  Lock,
   Info, 
   Inbox, 
   SlidersHorizontal,
@@ -27,6 +29,7 @@ import {
   AiSuggestionStatus 
 } from '../../types';
 import { ActionPreviewModal } from './ActionPreviewModal';
+import { Permissions } from '../../lib/permissions';
 
 export const SuggestionsCenterView: React.FC = () => {
   const { 
@@ -36,7 +39,8 @@ export const SuggestionsCenterView: React.FC = () => {
     recordSuggestionFeedback, 
     refreshAiSuggestions,
     pendingActionPreview,
-    setPendingActionPreview
+    setPendingActionPreview,
+    hasPermission
   } = useCrm();
 
   const [activeCategory, setActiveCategory] = useState<AiSuggestionCategory | 'All'>('All');
@@ -44,14 +48,33 @@ export const SuggestionsCenterView: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'active' | 'all' | 'completed' | 'dismissed'>('active');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const isManagerOrAdmin = 
-    currentUser.roleId === 'super_admin' || 
-    currentUser.roleId === 'staff_manager';
+  const canView = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'view');
+  const canCreate = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'create');
+  const canManage = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'manage');
+  const isManagerOrAdmin = canManage;
+
+  if (!canView) {
+    return (
+      <div className="bg-white rounded-2xl border border-zinc-200 p-8 sm:p-12 text-center max-w-lg mx-auto my-12 shadow-xs">
+        <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto mb-4">
+          <ShieldAlert className="w-6 h-6" />
+        </div>
+        <h3 className="text-lg font-bold text-zinc-900 mb-2">Restricted Access: AI Suggestions</h3>
+        <p className="text-sm text-zinc-500 mb-6 leading-relaxed">
+          {Permissions.getDisabledReason(currentUser, 'intelligence', 'view')}
+        </p>
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-100 text-xs font-medium text-zinc-600">
+          <span>Active Role:</span>
+          <strong className="text-zinc-900">{currentUser.roleId || 'User'}</strong>
+        </div>
+      </div>
+    );
+  }
 
   // Filter suggestions
   const filteredSuggestions = aiSuggestions.filter(s => {
     // Role scope
-    if (!isManagerOrAdmin && s.category === 'Organization' && s.userId && s.userId !== currentUser.id) {
+    if (!canManage && s.category === 'Organization' && s.userId && s.userId !== currentUser.id) {
       return false;
     }
 
@@ -124,10 +147,16 @@ export const SuggestionsCenterView: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => refreshAiSuggestions()}
-            className="px-3.5 py-2 bg-white hover:bg-zinc-50 border border-zinc-200 rounded-xl text-xs font-semibold text-zinc-700 shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            disabled={!canCreate}
+            onClick={() => canCreate && refreshAiSuggestions()}
+            title={!canCreate ? Permissions.getDisabledReason(currentUser, 'intelligence', 'create') : 'Scan CRM for actionable patterns'}
+            className={`px-3.5 py-2 border rounded-xl text-xs font-semibold shadow-2xs flex items-center gap-1.5 transition-colors ${
+              canCreate
+                ? 'bg-white hover:bg-zinc-50 border-zinc-200 text-zinc-700 cursor-pointer'
+                : 'bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed opacity-60'
+            }`}
           >
-            <RotateCw className="w-3.5 h-3.5 text-zinc-500" />
+            {canCreate ? <RotateCw className="w-3.5 h-3.5 text-zinc-500" /> : <Lock className="w-3.5 h-3.5 text-zinc-400" />}
             <span>Scan CRM Patterns</span>
           </button>
         </div>
@@ -275,11 +304,11 @@ export const SuggestionsCenterView: React.FC = () => {
                     <span className="text-[11px] text-zinc-400">
                       {new Date(sug.createdAt).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}
                     </span>
-                    {!isResolved && (
+                    {!isResolved && canManage && (
                       <button
                         onClick={() => updateSuggestionStatus(sug.id, 'dismissed')}
                         title="Dismiss suggestion"
-                        className="p-1 text-zinc-400 hover:text-zinc-600 rounded-md hover:bg-zinc-100 transition-colors"
+                        className="p-1 text-zinc-400 hover:text-zinc-600 rounded-md hover:bg-zinc-100 transition-colors cursor-pointer"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -373,12 +402,18 @@ export const SuggestionsCenterView: React.FC = () => {
                   {/* Action Preview Button */}
                   {sug.actionPreview && !isResolved && (
                     <button
-                      onClick={() => setPendingActionPreview(sug.actionPreview || null)}
-                      className="px-4 py-2 bg-[#140a8e] hover:bg-[#0f076e] text-white text-xs font-semibold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      disabled={!canManage}
+                      onClick={() => canManage && setPendingActionPreview(sug.actionPreview || null)}
+                      title={!canManage ? Permissions.getDisabledReason(currentUser, 'intelligence', 'manage') : undefined}
+                      className={`px-4 py-2 text-xs font-semibold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 ${
+                        canManage
+                          ? 'bg-[#140a8e] hover:bg-[#0f076e] text-white cursor-pointer'
+                          : 'bg-zinc-100 border border-zinc-200 text-zinc-400 cursor-not-allowed opacity-75'
+                      }`}
                     >
-                      <Zap className="w-3.5 h-3.5 text-amber-300" />
+                      {canManage ? <Zap className="w-3.5 h-3.5 text-amber-300" /> : <Lock className="w-3.5 h-3.5 text-zinc-400" />}
                       <span>{sug.actionPreview.title}</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
+                      {canManage && <ArrowRight className="w-3.5 h-3.5" />}
                     </button>
                   )}
                 </div>

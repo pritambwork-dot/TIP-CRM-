@@ -26,7 +26,14 @@ import {
   Calendar,
   Layers,
   ArrowRight,
-  Code
+  Code,
+  Mail,
+  Send,
+  Clock,
+  Timer,
+  LogOut,
+  LogIn,
+  Laptop
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { RoleId, UserProfile, ResourceType, ActionType, UserDataScope } from '../../types';
@@ -45,6 +52,7 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
     deleteUser, 
     adminProvisionUser,
     adminResetUserPassword,
+    resendUserWelcomeEmail,
     programs, 
     events,
     auditLogs,
@@ -52,14 +60,27 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
     postResponsibilities,
     isSuperAdmin,
     hasPermission,
-    Permissions
+    Permissions,
+    userSessions,
+    userSessionSummaries,
+    sessionStats,
+    isLoadingSessions,
+    fetchUserSessions,
+    adminTerminateSession
   } = useCrm();
 
   const canManageUsers = isSuperAdmin || hasPermission('users', 'manage');
+  const isAdministrator = currentUser.roleId === 'super_admin' || currentUser.roleId === 'staff_manager' || isSuperAdmin;
 
   const [selectedUserId, setSelectedUserId] = useState<string | null>(currentUser.id);
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
-  const [activeSubTab, setActiveSubTab] = useState<'users' | 'roles' | 'audit' | 'schema'>('users');
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'roles' | 'sessions' | 'audit' | 'schema'>('users');
+  const [sessionSubView, setSessionSubView] = useState<'summary' | 'detailed'>('summary');
+  const [sessionSearchQuery, setSessionSearchQuery] = useState('');
+  const [sessionRoleFilter, setSessionRoleFilter] = useState<string>('all');
+  const [sessionStatusFilter, setSessionStatusFilter] = useState<string>('all');
+  const [sessionUserFilter, setSessionUserFilter] = useState<string>('all');
+  const [terminatingSessionId, setTerminatingSessionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
@@ -82,7 +103,20 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   const [newUserDataScopeFunding, setNewUserDataScopeFunding] = useState<'ALL' | 'VIEW' | 'NONE'>('NONE');
 
   // Modal and Alert notices
-  const [provisionedNotice, setProvisionedNotice] = useState<{ name: string; email: string; tempPass: string } | null>(null);
+  const [provisionedNotice, setProvisionedNotice] = useState<{
+    name: string;
+    email: string;
+    tempPass: string;
+    userId?: string;
+    postTitle?: string;
+    roles?: string[];
+    emailSentFrom?: string;
+    emailSentAt?: string;
+    emailDeliveryStatus?: string;
+    previewHtml?: string;
+  } | null>(null);
+  const [previewEmailModal, setPreviewEmailModal] = useState<{ title: string; html: string; to: string } | null>(null);
+  const [isResendingEmail, setIsResendingEmail] = useState(false);
   const [resetPassNotice, setResetPassNotice] = useState<{ name: string; tempPass: string } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -144,6 +178,30 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
     }
   }, [activeSubTab, canViewAuditLogs, fetchServerAuditLogs]);
 
+  useEffect(() => {
+    if ((activeSubTab === 'sessions' || activeSubTab === 'users') && canManageUsers) {
+      fetchUserSessions();
+    }
+  }, [activeSubTab, canManageUsers, fetchUserSessions]);
+
+  const handleAdminTerminateSession = async (sessionId: string) => {
+    if (!confirm('Are you sure you want to forcefully terminate this active user session? The user will be logged out immediately.')) {
+      return;
+    }
+    setTerminatingSessionId(sessionId);
+    try {
+      const ok = await adminTerminateSession(sessionId);
+      if (ok) {
+        setSaveSuccessMessage('Active session successfully terminated.');
+        setTimeout(() => setSaveSuccessMessage(null), 3000);
+      } else {
+        alert('Failed to terminate session.');
+      }
+    } finally {
+      setTerminatingSessionId(null);
+    }
+  };
+
   // Selected User for editing with safe fallback
   const rawSelectedUser = users.find(u => u.id === selectedUserId) || users[0];
   const selectedUser = rawSelectedUser ? {
@@ -168,6 +226,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   });
 
   const handleRoleChange = (userId: string, newRoleId: RoleId) => {
+    if (!isAdministrator) {
+      alert('Access Denied: Only administrators can configure user roles and data scopes.');
+      return;
+    }
     const roleDef = ROLE_DEFINITIONS[newRoleId];
     updateUser(userId, {
       roleId: newRoleId,
@@ -181,6 +243,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   };
 
   const handlePostChange = (userId: string, newPostId: string) => {
+    if (!isAdministrator) {
+      alert('Access Denied: Only administrators can assign posts.');
+      return;
+    }
     const post = posts.find(p => p.id === newPostId);
     const responsibilities = postResponsibilities.filter(r => r.postId === newPostId).map(r => r.name);
     updateUser(userId, {
@@ -193,6 +259,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   };
 
   const handlePermissionToggle = (permKey: string) => {
+    if (!isAdministrator) {
+      alert('Access Denied: Only administrators can customize user permissions.');
+      return;
+    }
     if (!selectedUser) return;
     const currentOverrides = selectedUser.permissionsOverride || {};
     const roleDef = ROLE_DEFINITIONS[selectedUser.roleId || 'staff_member'] || ROLE_DEFINITIONS.staff_member;
@@ -203,7 +273,12 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
 
     const updatedOverrides = {
       ...currentOverrides,
-      [permKey]: !currentVal
+      [permKey]: !currentVal,
+      ...(permKey === 'funding.edit' ? { 'funding.create': !currentVal } : {}),
+      ...(permKey === 'funding.create' ? { 'funding.edit': !currentVal } : {}),
+      ...(permKey === 'intelligence.view' && currentVal === true ? { 'intelligence.create': false, 'intelligence.manage': false } : {}),
+      ...(permKey === 'intelligence.create' && currentVal === false ? { 'intelligence.view': true } : {}),
+      ...(permKey === 'intelligence.manage' && currentVal === false ? { 'intelligence.view': true } : {})
     };
 
     updateUser(selectedUser.id, {
@@ -214,6 +289,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   };
 
   const handleDataScopeChange = (key: keyof UserDataScope, value: any) => {
+    if (!isAdministrator) {
+      alert('Access Denied: Only administrators can configure which data users can see and access.');
+      return;
+    }
     if (!selectedUser) return;
     const currentScope = selectedUser.dataScope || { people: 'GLOBAL', programs: 'ALL', events: 'ALL', funding: 'ALL' };
     updateUser(selectedUser.id, {
@@ -227,6 +306,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   };
 
   const handleToggleProgramAssignment = (programId: string) => {
+    if (!isAdministrator) {
+      alert('Access Denied: Only administrators can configure program assignments.');
+      return;
+    }
     if (!selectedUser) return;
     const current = selectedUser.assignedProgramIds || [];
     const next = current.includes(programId) 
@@ -236,6 +319,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   };
 
   const handleToggleEventAssignment = (eventId: string) => {
+    if (!isAdministrator) {
+      alert('Access Denied: Only administrators can configure event assignments.');
+      return;
+    }
     if (!selectedUser) return;
     const current = selectedUser.assignedEventIds || [];
     const next = current.includes(eventId) 
@@ -265,7 +352,14 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
     setProvisionedNotice({
       name: created.name,
       email: created.email,
-      tempPass: created.tempPassword || newUserTempPassword
+      tempPass: created.tempPassword || newUserTempPassword,
+      userId: created.id,
+      postTitle: created.postTitle,
+      roles: rolesToAssign.map(r => ROLE_DEFINITIONS[r]?.name || r),
+      emailSentFrom: created.emailSentFrom || 'crm@theinclusionproject.ca',
+      emailSentAt: created.emailSentAt || new Date().toISOString(),
+      emailDeliveryStatus: created.emailDeliveryStatus || 'SENT',
+      previewHtml: created.emailPreviewHtml
     });
 
     setIsAddUserOpen(false);
@@ -275,8 +369,21 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
     setNewUserPhone('');
     setNewUserTitle('');
     setNewUserTempPassword('TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900));
-    setSaveSuccessMessage(`Account provisioned for "${created.name}"`);
-    setTimeout(() => setSaveSuccessMessage(null), 3500);
+    setSaveSuccessMessage(`Account created for "${created.name}" & credentials email sent to ${created.email} from ${created.emailSentFrom || 'crm@theinclusionproject.ca'}`);
+    setTimeout(() => setSaveSuccessMessage(null), 5000);
+  };
+
+  const handleResendWelcomeEmail = async (userId: string) => {
+    setIsResendingEmail(true);
+    try {
+      const res = await resendUserWelcomeEmail(userId);
+      setSaveSuccessMessage(res.message);
+      setTimeout(() => setSaveSuccessMessage(null), 4500);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to resend welcome email.');
+    } finally {
+      setIsResendingEmail(false);
+    }
   };
 
   const handleAdminResetPassword = async (userId: string) => {
@@ -296,6 +403,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   };
 
   const handleToggleAssignedRole = (userId: string, roleId: RoleId) => {
+    if (!isAdministrator) {
+      alert('Access Denied: Only administrators can modify assigned roles.');
+      return;
+    }
     const target = users.find(u => u.id === userId);
     if (!target) return;
     const currentRoles = target.assignedRoleIds || [target.roleId];
@@ -330,6 +441,23 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
     }
     const roleDef = ROLE_DEFINITIONS[user.roleId];
     return !!roleDef.defaultPermissions[permKey];
+  };
+
+  const renderPermButton = (permKey: string, labelActive: string, activeClass: string = 'text-emerald-700 bg-emerald-50') => {
+    if (!selectedUser) return null;
+    const active = isPermActive(selectedUser, permKey);
+    return (
+      <button
+        type="button"
+        disabled={!isAdministrator}
+        onClick={() => handlePermissionToggle(permKey)}
+        className={`w-16 py-1 rounded flex items-center justify-center font-medium ${
+          !isAdministrator ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+        } ${active ? activeClass : 'text-zinc-400 bg-zinc-100'}`}
+      >
+        {active ? `✓ ${labelActive}` : '✕'}
+      </button>
+    );
   };
 
   return (
@@ -386,6 +514,29 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
           >
             <Sliders className="w-3.5 h-3.5" />
             <span>Role Hierarchy (4 Tiers)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('sessions')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 ${
+              activeSubTab === 'sessions'
+                ? 'bg-zinc-900 text-white'
+                : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>User Activity & Sessions</span>
+            {sessionStats && sessionStats.activeUsersCount > 0 ? (
+              <span className="px-1.5 py-0.2 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                {sessionStats.activeUsersCount} Active
+              </span>
+            ) : (
+              <span className="px-1.5 py-0.2 rounded-full bg-zinc-200 text-zinc-700 text-[10px]">
+                {userSessions.length || '0'}
+              </span>
+            )}
           </button>
 
           <button
@@ -625,6 +776,15 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
               </div>
 
               {/* 1. ROLE SELECTOR */}
+              {!isAdministrator && (
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2.5 text-xs text-amber-900 font-medium">
+                  <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    <strong>Administrative Authority Required:</strong> Only Super Admins and Staff Managers are authorized to configure which data users can see, modify roles, or assign data scopes.
+                  </span>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-zinc-700 uppercase tracking-wider">
@@ -643,8 +803,11 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                       <button
                         key={roleKey}
                         type="button"
+                        disabled={!isAdministrator}
                         onClick={() => handleRoleChange(selectedUser.id, roleKey)}
-                        className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                        className={`p-3 rounded-xl border text-left transition-all ${
+                          !isAdministrator ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
+                        } ${
                           isCurrentRole
                             ? 'border-zinc-900 bg-zinc-900 text-white shadow-xs'
                             : 'border-zinc-200 hover:border-zinc-300 bg-white text-zinc-900'
@@ -694,7 +857,7 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                       <label
                         key={r.id}
                         className={`flex items-center justify-between p-2 rounded-lg border transition-all ${
-                          canManageUsers ? 'cursor-pointer' : 'cursor-not-allowed'
+                          isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
                         } ${
                           assigned ? 'bg-white border-zinc-800 shadow-2xs font-semibold' : 'border-zinc-200 bg-white/60 text-zinc-500'
                         }`}
@@ -702,7 +865,7 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                         <div className="flex items-center gap-2">
                           <input
                             type="checkbox"
-                            disabled={!canManageUsers}
+                            disabled={!isAdministrator}
                             checked={assigned}
                             onChange={() => handleToggleAssignedRole(selectedUser.id, r.id)}
                             className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
@@ -759,20 +922,138 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                         Last changed: {new Date(selectedUser.passwordChangedAt).toLocaleDateString()}
                       </p>
                     )}
+                    <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 pt-0.5">
+                      <Mail className="w-3.5 h-3.5 text-indigo-500" />
+                      <span>
+                        {selectedUser.emailSentAt 
+                          ? `Credentials emailed from ${selectedUser.emailSentFrom || 'crm@theinclusionproject.ca'}` 
+                          : 'No credentials email recorded yet'}
+                      </span>
+                    </div>
                   </div>
 
                   {canManageUsers && (
-                    <button
-                      type="button"
-                      onClick={() => handleAdminResetPassword(selectedUser.id)}
-                      className="px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-black text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
-                    >
-                      <Key className="w-3.5 h-3.5" />
-                      <span>Reset Password</span>
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={isResendingEmail}
+                        onClick={() => handleResendWelcomeEmail(selectedUser.id)}
+                        className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-900 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                        title="Resend account credentials email with The Inclusion Project template"
+                      >
+                        <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>{isResendingEmail ? 'Sending...' : 'Send Welcome Email'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAdminResetPassword(selectedUser.id)}
+                        className="px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-black text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        <Key className="w-3.5 h-3.5" />
+                        <span>Reset Password</span>
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
+
+              {/* CRM ACTIVITY & USAGE DURATION */}
+              {(() => {
+                const userSummary = userSessionSummaries.find(s => s.userId === selectedUser.id);
+                const userSessionsList = userSessions.filter(s => s.userId === selectedUser.id);
+                const isOnline = userSummary?.status === 'active';
+                return (
+                  <div className="space-y-2 pt-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-zinc-700 uppercase tracking-wider flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>CRM Usage & Login Activity</span>
+                      </label>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 border ${
+                        isOnline ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-zinc-100 text-zinc-600 border-zinc-200'
+                      }`}>
+                        {isOnline ? (
+                          <>
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span>Active Now</span>
+                          </>
+                        ) : (
+                          <span>Offline</span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl border border-zinc-200 bg-zinc-50/70 text-xs space-y-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        <div className="bg-white p-2.5 rounded-lg border border-zinc-200 shadow-2xs">
+                          <span className="text-[10px] uppercase font-bold text-zinc-400 block">Total Time Used</span>
+                          <span className="text-sm font-bold text-zinc-900 flex items-center gap-1 mt-0.5">
+                            <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                            {userSummary?.totalDurationFormatted || '0m'}
+                          </span>
+                        </div>
+                        <div className="bg-white p-2.5 rounded-lg border border-zinc-200 shadow-2xs">
+                          <span className="text-[10px] uppercase font-bold text-zinc-400 block">Sessions Count</span>
+                          <span className="text-sm font-bold text-zinc-900 mt-0.5 block">
+                            {userSummary?.totalSessions || userSessionsList.length || 0}
+                          </span>
+                        </div>
+                        <div className="bg-white p-2.5 rounded-lg border border-zinc-200 shadow-2xs col-span-2 sm:col-span-1">
+                          <span className="text-[10px] uppercase font-bold text-zinc-400 block">Avg Session</span>
+                          <span className="text-sm font-bold text-zinc-900 mt-0.5 block">
+                            {userSummary?.averageSessionFormatted || '0m'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {userSummary?.lastLoginAt && (
+                        <div className="text-[11px] text-zinc-500 flex flex-col gap-0.5 pt-1 border-t border-zinc-200/60">
+                          <div>
+                            <span className="font-semibold text-zinc-700">Last Logged In: </span>
+                            {new Date(userSummary.lastLoginAt).toLocaleString(undefined, {
+                              month: 'short', day: 'numeric', year: 'numeric',
+                              hour: 'numeric', minute: '2-digit', hour12: true
+                            })}
+                          </div>
+                          {userSummary.lastLogoutAt && (
+                            <div>
+                              <span className="font-semibold text-zinc-700">Last Logged Out: </span>
+                              {new Date(userSummary.lastLogoutAt).toLocaleString(undefined, {
+                                month: 'short', day: 'numeric', year: 'numeric',
+                                hour: 'numeric', minute: '2-digit', hour12: true
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {userSessionsList.length > 0 && (
+                        <div className="pt-2 border-t border-zinc-200/60">
+                          <span className="text-[10px] font-bold uppercase text-zinc-400 block mb-1.5">
+                            Recent Sessions (Hours & Minutes Used):
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {userSessionsList.slice(0, 4).map(s => (
+                              <span
+                                key={s.id}
+                                className={`px-2 py-0.5 rounded-md text-[11px] font-medium border flex items-center gap-1 ${
+                                  s.status === 'active'
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 font-bold'
+                                    : 'bg-white text-zinc-700 border-zinc-200'
+                                }`}
+                              >
+                                {s.status === 'active' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                                <span>{new Date(s.loginAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}:</span>
+                                <strong className="text-indigo-900">{s.durationFormatted}</strong>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* DESIGNATED POST & RESPONSIBILITIES (Four-Layer Employee Model) */}
               <div className="space-y-3 pt-2">
@@ -794,9 +1075,12 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                       Assigned Organizational Post:
                     </label>
                     <select
+                      disabled={!isAdministrator}
                       value={selectedUser.postId || ''}
                       onChange={(e) => handlePostChange(selectedUser.id, e.target.value)}
-                      className="w-full text-xs p-2 rounded-lg border border-zinc-300 bg-white"
+                      className={`w-full text-xs p-2 rounded-lg border border-zinc-300 bg-white ${
+                        !isAdministrator ? 'opacity-60 cursor-not-allowed bg-zinc-100' : ''
+                      }`}
                     >
                       <option value="">No Post Assigned</option>
                       {posts.map(p => (
@@ -851,33 +1135,9 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50">
                     <span className="w-1/3 font-semibold text-zinc-900">People</span>
                     <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('people.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'people.view') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'people.view') ? '✓ View' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('people.edit')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'people.edit') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'people.edit') ? '✓ Edit' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('people.export')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'people.export') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'people.export') ? '✓ Export' : '✕'}
-                      </button>
+                      {renderPermButton('people.view', 'View')}
+                      {renderPermButton('people.edit', 'Edit')}
+                      {renderPermButton('people.export', 'Export')}
                     </span>
                   </div>
 
@@ -885,24 +1145,8 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50">
                     <span className="w-1/3 font-semibold text-zinc-900">Organizations</span>
                     <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('organizations.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'organizations.view') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'organizations.view') ? '✓ View' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('organizations.edit')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'organizations.edit') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'organizations.edit') ? '✓ Edit' : '✕'}
-                      </button>
+                      {renderPermButton('organizations.view', 'View')}
+                      {renderPermButton('organizations.edit', 'Edit')}
                       <span className="w-16 text-center text-zinc-300">—</span>
                     </span>
                   </div>
@@ -911,24 +1155,8 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50">
                     <span className="w-1/3 font-semibold text-zinc-900">Programs</span>
                     <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('programs.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'programs.view') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'programs.view') ? '✓ View' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('programs.edit')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'programs.edit') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'programs.edit') ? '✓ Edit' : '✕'}
-                      </button>
+                      {renderPermButton('programs.view', 'View')}
+                      {renderPermButton('programs.edit', 'Edit')}
                       <span className="w-16 text-center text-zinc-300">—</span>
                     </span>
                   </div>
@@ -937,24 +1165,8 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50">
                     <span className="w-1/3 font-semibold text-zinc-900">Events</span>
                     <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('events.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'events.view') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'events.view') ? '✓ View' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('events.edit')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'events.edit') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'events.edit') ? '✓ Edit' : '✕'}
-                      </button>
+                      {renderPermButton('events.view', 'View')}
+                      {renderPermButton('events.edit', 'Edit')}
                       <span className="w-16 text-center text-zinc-300">—</span>
                     </span>
                   </div>
@@ -963,24 +1175,8 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50">
                     <span className="w-1/3 font-semibold text-zinc-900">Participants</span>
                     <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('participants.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'participants.view') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'participants.view') ? '✓ View' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('participants.edit')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'participants.edit') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'participants.edit') ? '✓ Edit' : '✕'}
-                      </button>
+                      {renderPermButton('participants.view', 'View')}
+                      {renderPermButton('participants.edit', 'Edit')}
                       <span className="w-16 text-center text-zinc-300">—</span>
                     </span>
                   </div>
@@ -989,24 +1185,8 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50">
                     <span className="w-1/3 font-semibold text-zinc-900">Tasks</span>
                     <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('tasks.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'tasks.view') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'tasks.view') ? '✓ View' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('tasks.edit')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'tasks.edit') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'tasks.edit') ? '✓ Edit' : '✕'}
-                      </button>
+                      {renderPermButton('tasks.view', 'View')}
+                      {renderPermButton('tasks.edit', 'Edit')}
                       <span className="w-16 text-center text-zinc-300">—</span>
                     </span>
                   </div>
@@ -1015,24 +1195,8 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50">
                     <span className="w-1/3 font-semibold text-zinc-900">Interactions</span>
                     <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('interactions.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'interactions.view') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'interactions.view') ? '✓ View' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('interactions.edit')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'interactions.edit') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'interactions.edit') ? '✓ Edit' : '✕'}
-                      </button>
+                      {renderPermButton('interactions.view', 'View')}
+                      {renderPermButton('interactions.edit', 'Edit')}
                       <span className="w-16 text-center text-zinc-300">—</span>
                     </span>
                   </div>
@@ -1044,24 +1208,8 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                       <Lock className="w-3 h-3 text-amber-600" />
                     </span>
                     <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('funding.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'funding.view') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'funding.view') ? '✓ View' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('funding.edit')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'funding.edit') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'funding.edit') ? '✓ Edit' : '✕'}
-                      </button>
+                      {renderPermButton('funding.view', 'View')}
+                      {renderPermButton('funding.edit', 'Edit')}
                       <span className="w-16 text-center text-zinc-300">—</span>
                     </span>
                   </div>
@@ -1070,25 +1218,9 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50">
                     <span className="w-1/3 font-semibold text-zinc-900">Reports</span>
                     <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('reports.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'reports.view') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'reports.view') ? '✓ View' : '✕'}
-                      </button>
+                      {renderPermButton('reports.view', 'View')}
                       <span className="w-16 text-center text-zinc-300">—</span>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('reports.export')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'reports.export') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'reports.export') ? '✓ Export' : '✕'}
-                      </button>
+                      {renderPermButton('reports.export', 'Export')}
                     </span>
                   </div>
 
@@ -1096,25 +1228,22 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50">
                     <span className="w-1/3 font-semibold text-zinc-900">Documents</span>
                     <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('documents.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'documents.view') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'documents.view') ? '✓ View' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('documents.create')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'documents.create') ? 'text-emerald-700 bg-emerald-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'documents.create') ? '✓ Upload' : '✕'}
-                      </button>
+                      {renderPermButton('documents.view', 'View')}
+                      {renderPermButton('documents.create', 'Link / Up')}
                       <span className="w-16 text-center text-zinc-300">—</span>
+                    </span>
+                  </div>
+
+                  {/* AI & Suggestions */}
+                  <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50 bg-[#140a8e]/5">
+                    <span className="w-1/3 font-semibold text-zinc-900 flex items-center gap-1.5">
+                      <span>AI & Suggestions</span>
+                      <Sparkles className="w-3.5 h-3.5 text-[#140a8e]" />
+                    </span>
+                    <span className="w-2/3 flex items-center justify-end gap-6">
+                      {renderPermButton('intelligence.view', 'View')}
+                      {renderPermButton('intelligence.create', 'Scan/Ask')}
+                      {renderPermButton('intelligence.manage', 'Apply', 'text-indigo-700 bg-indigo-50')}
                     </span>
                   </div>
 
@@ -1122,33 +1251,9 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="px-4 py-2.5 flex items-center justify-between hover:bg-zinc-50/50 bg-zinc-50/40">
                     <span className="w-1/3 font-semibold text-zinc-900">Users & Security</span>
                     <span className="w-2/3 flex items-center justify-end gap-6">
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('users.manage')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'users.manage') ? 'text-rose-700 bg-rose-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'users.manage') ? '✓ Manage' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('settings.manage')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'settings.manage') ? 'text-rose-700 bg-rose-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'settings.manage') ? '✓ Settings' : '✕'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePermissionToggle('audit_logs.view')}
-                        className={`w-16 py-1 rounded flex items-center justify-center font-medium cursor-pointer ${
-                          isPermActive(selectedUser, 'audit_logs.view') ? 'text-blue-700 bg-blue-50' : 'text-zinc-400 bg-zinc-100'
-                        }`}
-                      >
-                        {isPermActive(selectedUser, 'audit_logs.view') ? '✓ Logs' : '✕'}
-                      </button>
+                      {renderPermButton('users.manage', 'Manage', 'text-rose-700 bg-rose-50')}
+                      {renderPermButton('settings.manage', 'Settings', 'text-rose-700 bg-rose-50')}
+                      {renderPermButton('audit_logs.view', 'Logs', 'text-blue-700 bg-blue-50')}
                     </span>
                   </div>
                 </div>
@@ -1170,20 +1275,22 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="p-3.5 rounded-xl border border-zinc-200 bg-zinc-50/50 space-y-2">
                     <p className="text-xs font-bold text-zinc-900">People</p>
                     <div className="space-y-1.5 text-xs text-zinc-700">
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className={`flex items-center gap-2 ${isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                         <input
                           type="radio"
                           name="peopleScope"
+                          disabled={!isAdministrator}
                           checked={selectedUser?.dataScope?.people === 'GLOBAL'}
                           onChange={() => handleDataScopeChange('people', 'GLOBAL')}
                           className="accent-zinc-900"
                         />
                         <span>● Entire organization</span>
                       </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className={`flex items-center gap-2 ${isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                         <input
                           type="radio"
                           name="peopleScope"
+                          disabled={!isAdministrator}
                           checked={selectedUser?.dataScope?.people === 'ASSIGNED'}
                           onChange={() => handleDataScopeChange('people', 'ASSIGNED')}
                           className="accent-zinc-900"
@@ -1197,20 +1304,22 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="p-3.5 rounded-xl border border-zinc-200 bg-zinc-50/50 space-y-2">
                     <p className="text-xs font-bold text-zinc-900">Programs</p>
                     <div className="space-y-1.5 text-xs text-zinc-700">
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className={`flex items-center gap-2 ${isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                         <input
                           type="radio"
                           name="programsScope"
+                          disabled={!isAdministrator}
                           checked={selectedUser?.dataScope?.programs === 'ALL'}
                           onChange={() => handleDataScopeChange('programs', 'ALL')}
                           className="accent-zinc-900"
                         />
                         <span>● All programs</span>
                       </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className={`flex items-center gap-2 ${isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                         <input
                           type="radio"
                           name="programsScope"
+                          disabled={!isAdministrator}
                           checked={selectedUser?.dataScope?.programs === 'ASSIGNED'}
                           onChange={() => handleDataScopeChange('programs', 'ASSIGNED')}
                           className="accent-zinc-900"
@@ -1224,20 +1333,22 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="p-3.5 rounded-xl border border-zinc-200 bg-zinc-50/50 space-y-2">
                     <p className="text-xs font-bold text-zinc-900">Events</p>
                     <div className="space-y-1.5 text-xs text-zinc-700">
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className={`flex items-center gap-2 ${isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                         <input
                           type="radio"
                           name="eventsScope"
+                          disabled={!isAdministrator}
                           checked={selectedUser?.dataScope?.events === 'ALL'}
                           onChange={() => handleDataScopeChange('events', 'ALL')}
                           className="accent-zinc-900"
                         />
                         <span>● All events</span>
                       </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className={`flex items-center gap-2 ${isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                         <input
                           type="radio"
                           name="eventsScope"
+                          disabled={!isAdministrator}
                           checked={selectedUser?.dataScope?.events === 'ASSIGNED'}
                           onChange={() => handleDataScopeChange('events', 'ASSIGNED')}
                           className="accent-zinc-900"
@@ -1251,30 +1362,33 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   <div className="p-3.5 rounded-xl border border-zinc-200 bg-zinc-50/50 space-y-2">
                     <p className="text-xs font-bold text-zinc-900">Funding</p>
                     <div className="space-y-1.5 text-xs text-zinc-700">
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className={`flex items-center gap-2 ${isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                         <input
                           type="radio"
                           name="fundingScope"
+                          disabled={!isAdministrator}
                           checked={selectedUser?.dataScope?.funding === 'ALL'}
                           onChange={() => handleDataScopeChange('funding', 'ALL')}
                           className="accent-zinc-900"
                         />
                         <span>● Full access</span>
                       </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className={`flex items-center gap-2 ${isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                         <input
                           type="radio"
                           name="fundingScope"
+                          disabled={!isAdministrator}
                           checked={selectedUser?.dataScope?.funding === 'VIEW'}
                           onChange={() => handleDataScopeChange('funding', 'VIEW')}
                           className="accent-zinc-900"
                         />
                         <span>○ View only</span>
                       </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className={`flex items-center gap-2 ${isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                         <input
                           type="radio"
                           name="fundingScope"
+                          disabled={!isAdministrator}
                           checked={selectedUser?.dataScope?.funding === 'NONE'}
                           onChange={() => handleDataScopeChange('funding', 'NONE')}
                           className="accent-zinc-900"
@@ -1301,9 +1415,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                       {programs.map(pr => {
                         const isAssigned = selectedUser.assignedProgramIds?.includes(pr.id);
                         return (
-                          <label key={pr.id} className="flex items-center gap-2 text-xs text-zinc-700 p-1 hover:bg-white rounded cursor-pointer">
+                          <label key={pr.id} className={`flex items-center gap-2 text-xs text-zinc-700 p-1 hover:bg-white rounded ${isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                             <input
                               type="checkbox"
+                              disabled={!isAdministrator}
                               checked={isAssigned}
                               onChange={() => handleToggleProgramAssignment(pr.id)}
                               className="accent-zinc-900"
@@ -1324,9 +1439,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                       {events.map(ev => {
                         const isAssigned = selectedUser.assignedEventIds?.includes(ev.id);
                         return (
-                          <label key={ev.id} className="flex items-center gap-2 text-xs text-zinc-700 p-1 hover:bg-white rounded cursor-pointer">
+                          <label key={ev.id} className={`flex items-center gap-2 text-xs text-zinc-700 p-1 hover:bg-white rounded ${isAdministrator ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                             <input
                               type="checkbox"
+                              disabled={!isAdministrator}
                               checked={isAssigned}
                               onChange={() => handleToggleEventAssignment(ev.id)}
                               className="accent-zinc-900"
@@ -1405,6 +1521,429 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* SUBTAB: USER ACTIVITY & LOGIN/LOGOUT SESSIONS TRACKING */}
+      {activeSubTab === 'sessions' && (
+        <div className="space-y-6">
+          {/* Header Panel */}
+          <div className="bg-white rounded-xl border border-zinc-200 p-5 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-indigo-600" />
+                <h4 className="text-xs font-bold text-zinc-900 uppercase tracking-wider">
+                  User Login, Logout & CRM Usage Duration Tracking
+                </h4>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  Real-Time Audit
+                </span>
+              </div>
+              <p className="text-xs text-zinc-500 mt-1 max-w-2xl leading-relaxed">
+                Monitor team activity: see which users logged in, which users logged out, their exact timestamps, and precisely how many hours and minutes they have spent in the CRM.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fetchUserSessions()}
+                disabled={isLoadingSessions}
+                className="px-3 py-1.5 rounded-lg border border-zinc-200 hover:bg-zinc-50 text-xs font-semibold text-zinc-700 flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50"
+                title="Refresh user session logs"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSessions ? 'animate-spin' : ''}`} />
+                <span>Refresh Activity</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 4 Metric Telemetry Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-4 rounded-xl border border-zinc-200 shadow-2xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-zinc-400 uppercase">Active Now</span>
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              </div>
+              <div className="text-2xl font-black text-zinc-900">
+                {sessionStats?.activeUsersCount || 0}
+              </div>
+              <p className="text-[11px] text-zinc-500">
+                {sessionStats?.activeUsersCount === 1 ? '1 team member online' : `${sessionStats?.activeUsersCount || 0} team members online`}
+              </p>
+            </div>
+
+            <div className="bg-white p-4 rounded-xl border border-zinc-200 shadow-2xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-zinc-400 uppercase">Total Sessions</span>
+                <Users className="w-4 h-4 text-zinc-400" />
+              </div>
+              <div className="text-2xl font-black text-zinc-900">
+                {sessionStats?.totalSessionsCount || userSessions.length}
+              </div>
+              <p className="text-[11px] text-zinc-500">
+                Historical logins tracked
+              </p>
+            </div>
+
+            <div className="bg-white p-4 rounded-xl border border-zinc-200 shadow-2xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-zinc-400 uppercase">Total CRM Time</span>
+                <Clock className="w-4 h-4 text-indigo-600" />
+              </div>
+              <div className="text-2xl font-black text-indigo-950">
+                {sessionStats?.totalDurationFormatted || '0m'}
+              </div>
+              <p className="text-[11px] text-zinc-500">
+                Cumulative team usage
+              </p>
+            </div>
+
+            <div className="bg-white p-4 rounded-xl border border-zinc-200 shadow-2xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-zinc-400 uppercase">Avg Session Length</span>
+                <Timer className="w-4 h-4 text-amber-600" />
+              </div>
+              <div className="text-2xl font-black text-zinc-900">
+                {sessionStats?.averageDurationFormatted || '0m'}
+              </div>
+              <p className="text-[11px] text-zinc-500">
+                Average continuous work
+              </p>
+            </div>
+          </div>
+
+          {/* Sub-View Switcher: Team Summary vs Detailed Event Log */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-200 pb-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSessionSubView('summary')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                  sessionSubView === 'summary'
+                    ? 'bg-zinc-900 text-white'
+                    : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200'
+                }`}
+              >
+                Team Usage Summary (By User)
+              </button>
+              <button
+                type="button"
+                onClick={() => setSessionSubView('detailed')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                  sessionSubView === 'detailed'
+                    ? 'bg-zinc-900 text-white'
+                    : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200'
+                }`}
+              >
+                Detailed Session Log ({userSessions.length} Events)
+              </button>
+            </div>
+          </div>
+
+          {/* VIEW A: Team Usage Summary */}
+          {sessionSubView === 'summary' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {userSessionSummaries.map(summary => {
+                const isOnline = summary.status === 'active';
+                const roleDef = ROLE_DEFINITIONS[summary.userRole as RoleId] || ROLE_DEFINITIONS.volunteer;
+                return (
+                  <div
+                    key={summary.userId}
+                    className="bg-white rounded-xl border border-zinc-200 p-5 shadow-2xs space-y-4 hover:border-zinc-300 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-zinc-900 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                          {summary.userName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-zinc-900 leading-tight">
+                            {summary.userName}
+                          </h4>
+                          <span className="text-[11px] text-zinc-400 block truncate max-w-[180px]">
+                            {summary.userEmail}
+                          </span>
+                        </div>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border shrink-0 ${
+                        isOnline ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-zinc-100 text-zinc-600 border-zinc-200'
+                      }`}>
+                        {isOnline ? (
+                          <>
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span>Active Now</span>
+                          </>
+                        ) : (
+                          <span>Offline</span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${roleDef.badgeBg} ${roleDef.badgeText}`}>
+                        {roleDef.name}
+                      </span>
+                      <span className="text-[11px] text-zinc-400">
+                        • {summary.totalSessions} {summary.totalSessions === 1 ? 'Session' : 'Sessions'}
+                      </span>
+                    </div>
+
+                    {/* Prominent Hours and Minutes Box */}
+                    <div className="bg-gradient-to-br from-indigo-50/70 to-zinc-50 p-3 rounded-lg border border-indigo-100">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
+                          Time Spent in CRM
+                        </span>
+                        <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                      </div>
+                      <div className="text-xl font-black text-indigo-950 mt-1">
+                        {summary.totalDurationFormatted}
+                      </div>
+                      <span className="text-[10px] text-zinc-400 block mt-0.5">
+                        Average session: {summary.averageSessionFormatted}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 text-[11px] text-zinc-500 pt-1 border-t border-zinc-100">
+                      <div className="flex items-center justify-between">
+                        <span>Last Logged In:</span>
+                        <strong className="text-zinc-700">
+                          {new Date(summary.lastLoginAt).toLocaleString(undefined, {
+                            month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
+                          })}
+                        </strong>
+                      </div>
+                      {summary.lastLogoutAt ? (
+                        <div className="flex items-center justify-between">
+                          <span>Last Logged Out:</span>
+                          <strong className="text-zinc-700">
+                            {new Date(summary.lastLogoutAt).toLocaleString(undefined, {
+                              month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
+                            })}
+                          </strong>
+                        </div>
+                      ) : isOnline ? (
+                        <div className="flex items-center justify-between">
+                          <span>Session Status:</span>
+                          <strong className="text-emerald-700">Currently in session</strong>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSessionUserFilter(summary.userId);
+                        setSessionSubView('detailed');
+                      }}
+                      className="w-full text-center py-1.5 text-xs font-semibold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50/60 rounded-lg border border-indigo-100 transition-colors cursor-pointer"
+                    >
+                      View Individual Session History &rarr;
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* VIEW B: Detailed Session Log */}
+          {sessionSubView === 'detailed' && (
+            <div className="bg-white rounded-xl border border-zinc-200 shadow-2xs overflow-hidden">
+              {/* Filter Bar */}
+              <div className="p-4 border-b border-zinc-200 bg-zinc-50/70 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-1 flex-wrap">
+                  <div className="relative flex-1 min-w-[160px] max-w-xs">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="text"
+                      placeholder="Search user or email..."
+                      value={sessionSearchQuery}
+                      onChange={e => setSessionSearchQuery(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-zinc-200 bg-white text-xs focus:ring-1 focus:ring-zinc-900 focus:outline-none"
+                    />
+                  </div>
+
+                  <select
+                    value={sessionRoleFilter}
+                    onChange={e => setSessionRoleFilter(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg border border-zinc-200 bg-white text-xs font-medium text-zinc-700"
+                  >
+                    <option value="all">All Roles</option>
+                    <option value="super_admin">Super Admin</option>
+                    <option value="staff_manager">Staff Manager</option>
+                    <option value="staff_member">Staff Member</option>
+                    <option value="volunteer">Volunteer</option>
+                  </select>
+
+                  <select
+                    value={sessionStatusFilter}
+                    onChange={e => setSessionStatusFilter(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg border border-zinc-200 bg-white text-xs font-medium text-zinc-700"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="active">Active Now</option>
+                    <option value="logged_out">Logged Out</option>
+                    <option value="terminated">Terminated</option>
+                  </select>
+
+                  {sessionUserFilter !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setSessionUserFilter('all')}
+                      className="text-xs text-indigo-700 hover:underline flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded"
+                    >
+                      <span>Filtered by User</span>
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                <span className="text-xs text-zinc-500 font-medium shrink-0">
+                  Showing {userSessions.filter(s => {
+                    if (sessionUserFilter !== 'all' && s.userId !== sessionUserFilter) return false;
+                    if (sessionRoleFilter !== 'all' && s.userRole !== sessionRoleFilter) return false;
+                    if (sessionStatusFilter !== 'all' && s.status !== sessionStatusFilter) return false;
+                    if (sessionSearchQuery.trim()) {
+                      const q = sessionSearchQuery.toLowerCase();
+                      return s.userName.toLowerCase().includes(q) || s.userEmail.toLowerCase().includes(q);
+                    }
+                    return true;
+                  }).length} entries
+                </span>
+              </div>
+
+              {/* Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-zinc-200 bg-zinc-50 text-zinc-500 font-semibold uppercase tracking-wider text-[10px]">
+                      <th className="py-3 px-4">User</th>
+                      <th className="py-3 px-3">Role</th>
+                      <th className="py-3 px-3">Logged In At</th>
+                      <th className="py-3 px-3">Logged Out At</th>
+                      <th className="py-3 px-3">Time in CRM</th>
+                      <th className="py-3 px-3">Status</th>
+                      <th className="py-3 px-3">Device / IP</th>
+                      {isSuperAdmin && <th className="py-3 px-4 text-right">Actions</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-200">
+                    {userSessions
+                      .filter(s => {
+                        if (sessionUserFilter !== 'all' && s.userId !== sessionUserFilter) return false;
+                        if (sessionRoleFilter !== 'all' && s.userRole !== sessionRoleFilter) return false;
+                        if (sessionStatusFilter !== 'all' && s.status !== sessionStatusFilter) return false;
+                        if (sessionSearchQuery.trim()) {
+                          const q = sessionSearchQuery.toLowerCase();
+                          return s.userName.toLowerCase().includes(q) || s.userEmail.toLowerCase().includes(q);
+                        }
+                        return true;
+                      })
+                      .map(session => {
+                        const isCurrentActive = session.status === 'active';
+                        const roleDef = ROLE_DEFINITIONS[session.userRole as RoleId] || ROLE_DEFINITIONS.volunteer;
+                        return (
+                          <tr key={session.id} className="hover:bg-zinc-50/70 transition-colors">
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-7 h-7 rounded-full bg-zinc-900 text-white font-bold text-[10px] flex items-center justify-center shrink-0">
+                                  {session.userName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                </div>
+                                <div>
+                                  <strong className="text-zinc-900 block font-semibold">{session.userName}</strong>
+                                  <span className="text-[11px] text-zinc-400">{session.userEmail}</span>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${roleDef.badgeBg} ${roleDef.badgeText}`}>
+                                {roleDef.name}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5 text-zinc-800 font-medium">
+                                <LogIn className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>
+                                  {new Date(session.loginAt).toLocaleString(undefined, {
+                                    month: 'short', day: 'numeric', year: 'numeric',
+                                    hour: 'numeric', minute: '2-digit', hour12: true
+                                  })}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 whitespace-nowrap">
+                              {session.logoutAt ? (
+                                <div className="flex items-center gap-1.5 text-zinc-600">
+                                  <LogOut className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                                  <span>
+                                    {new Date(session.logoutAt).toLocaleString(undefined, {
+                                      month: 'short', day: 'numeric', year: 'numeric',
+                                      hour: 'numeric', minute: '2-digit', hour12: true
+                                    })}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold text-[11px] bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  Active Now
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 whitespace-nowrap">
+                              <span className={`inline-flex items-center gap-1 font-bold px-2.5 py-1 rounded-md text-xs ${
+                                isCurrentActive
+                                  ? 'bg-indigo-50 text-indigo-900 border border-indigo-200'
+                                  : 'bg-zinc-100 text-zinc-800'
+                              }`}>
+                                <Clock className="w-3 h-3 text-indigo-600" />
+                                <span>{session.durationFormatted}</span>
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 whitespace-nowrap">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                                session.status === 'active'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : session.status === 'terminated'
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-zinc-100 text-zinc-600'
+                              }`}>
+                                {session.status === 'active' ? 'Online' : session.status === 'terminated' ? 'Terminated' : 'Logged Out'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 text-[11px] text-zinc-500 whitespace-nowrap">
+                              <div className="flex items-center gap-1">
+                                <Laptop className="w-3 h-3 text-zinc-400" />
+                                <span>{session.deviceInfo || 'Desktop'}</span>
+                              </div>
+                              {session.ipAddress && (
+                                <span className="text-[10px] text-zinc-400 font-mono block">
+                                  {session.ipAddress}
+                                </span>
+                              )}
+                            </td>
+                            {isSuperAdmin && (
+                              <td className="py-3 px-4 text-right whitespace-nowrap">
+                                {isCurrentActive && session.userId !== currentUser.id && (
+                                  <button
+                                    type="button"
+                                    disabled={terminatingSessionId === session.sessionId}
+                                    onClick={() => handleAdminTerminateSession(session.sessionId)}
+                                    className="px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded cursor-pointer transition-colors disabled:opacity-50"
+                                  >
+                                    {terminatingSessionId === session.sessionId ? 'Ending...' : 'End Session'}
+                                  </button>
+                                )}
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1966,13 +2505,29 @@ CREATE POLICY people_scoped_view ON people
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/60 backdrop-blur-xs">
           <div className="bg-white rounded-2xl border border-zinc-200 shadow-2xl max-w-md w-full p-6 space-y-4 animate-scaleUp">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
                 <Check className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-zinc-900">Account Provisioned!</h3>
-                <p className="text-xs text-zinc-500">Provide these credentials to the user</p>
+                <h3 className="text-base font-bold text-zinc-900">Account Provisioned & Email Sent!</h3>
+                <p className="text-xs text-zinc-500">Credentials have been emailed to the user</p>
               </div>
+            </div>
+
+            {/* Email Dispatch Notice */}
+            <div className="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs space-y-1.5 text-emerald-900">
+              <div className="flex items-center justify-between font-semibold">
+                <span className="flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Welcome Email Delivered</span>
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-800 text-[10px] font-mono font-bold">
+                  SENT
+                </span>
+              </div>
+              <p className="text-[11px] text-emerald-800 leading-relaxed">
+                Dispatched from <strong>{provisionedNotice.emailSentFrom || 'crm@theinclusionproject.ca'}</strong> to <strong>{provisionedNotice.email}</strong> using <em>The Inclusion Project</em> official onboarding template.
+              </p>
             </div>
 
             <div className="p-3.5 rounded-xl bg-zinc-50 border border-zinc-200 space-y-2 text-xs">
@@ -1981,13 +2536,13 @@ CREATE POLICY people_scoped_view ON people
                 <span className="font-bold text-zinc-900">{provisionedNotice.name}</span>
               </div>
               <div>
-                <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider block">Email Address</span>
-                <span className="font-mono text-zinc-800">{provisionedNotice.email}</span>
+                <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider block">Login ID (Email)</span>
+                <span className="font-mono text-zinc-800 font-semibold">{provisionedNotice.email}</span>
               </div>
               <div>
                 <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider block">Temporary Password</span>
                 <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded border border-zinc-200 font-mono font-bold text-zinc-900 mt-0.5">
-                  <span>{provisionedNotice.tempPass}</span>
+                  <span className="text-rose-600">{provisionedNotice.tempPass}</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -2007,13 +2562,87 @@ CREATE POLICY people_scoped_view ON people
               ⚠️ User will be forced to change this temporary password upon first login before accessing CRM data.
             </div>
 
+            <div className="flex items-center gap-2">
+              {provisionedNotice.previewHtml && (
+                <button
+                  type="button"
+                  onClick={() => setPreviewEmailModal({
+                    title: `Welcome Email — ${provisionedNotice.name}`,
+                    html: provisionedNotice.previewHtml!,
+                    to: provisionedNotice.email
+                  })}
+                  className="flex-1 py-2 px-3 rounded-xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-900 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Eye className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Preview Sent Email</span>
+                </button>
+              )}
+              {provisionedNotice.userId && (
+                <button
+                  type="button"
+                  disabled={isResendingEmail}
+                  onClick={() => handleResendWelcomeEmail(provisionedNotice.userId!)}
+                  className="py-2 px-3 rounded-xl border border-zinc-200 hover:bg-zinc-100 text-zinc-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
+                  title="Resend email"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-zinc-500 ${isResendingEmail ? 'animate-spin' : ''}`} />
+                  <span>Resend</span>
+                </button>
+              )}
+            </div>
+
             <button
               type="button"
               onClick={() => setProvisionedNotice(null)}
-              className="w-full py-2.5 rounded-xl bg-zinc-900 hover:bg-black text-white text-xs font-semibold transition-all cursor-pointer"
+              className="w-full py-2.5 rounded-xl bg-zinc-900 hover:bg-black text-white text-xs font-semibold transition-all cursor-pointer shadow-xs"
             >
               Done
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Branded Email Preview Modal */}
+      {previewEmailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/70 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl border border-zinc-200 shadow-2xl max-w-2xl w-full p-6 space-y-4 animate-scaleUp max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center">
+                  <Mail className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-900">{previewEmailModal.title}</h3>
+                  <p className="text-xs text-zinc-500">Sent to: <span className="font-mono">{previewEmailModal.to}</span></p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewEmailModal(null)}
+                className="p-1 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto border border-zinc-200 rounded-xl bg-zinc-50 p-2">
+              <iframe
+                title="Email Preview"
+                srcDoc={previewEmailModal.html}
+                className="w-full h-[450px] border-0 rounded-lg bg-white"
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-zinc-500 pt-2 border-t border-zinc-100">
+              <span>Sender: <strong className="text-zinc-700">The Inclusion Project CRM &lt;crm@theinclusionproject.ca&gt;</strong></span>
+              <button
+                type="button"
+                onClick={() => setPreviewEmailModal(null)}
+                className="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-black text-white text-xs font-semibold cursor-pointer"
+              >
+                Close Preview
+              </button>
+            </div>
           </div>
         </div>
       )}

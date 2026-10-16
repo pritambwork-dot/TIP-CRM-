@@ -113,11 +113,11 @@ export function parseRawContactsCsv(csvText: string): ParsedContactRow[] {
     else if (lowerType.includes('advisor') || lowerType.includes('council')) type = 'Advisor';
     else if (lowerType.includes('facilitator') || lowerType.includes('trainer')) type = 'Facilitator';
     else if (lowerType.includes('stakeholder')) type = 'Stakeholder';
-    else if (lowerType.includes('government') || lowerType.includes('public')) type = 'Government Official';
-    else if (lowerType.includes('board')) type = 'Board Member';
-    else if (lowerType.includes('corporate') || lowerType.includes('business')) type = 'Corporate Partner';
-    else if (lowerType.includes('academic') || lowerType.includes('university') || lowerType.includes('college')) type = 'Academic Partner';
-    else if (lowerType.includes('community')) type = 'Community Member';
+    else if (lowerType.includes('government') || lowerType.includes('public')) type = 'Stakeholder';
+    else if (lowerType.includes('board')) type = 'Advisor';
+    else if (lowerType.includes('corporate') || lowerType.includes('business')) type = 'Partner';
+    else if (lowerType.includes('academic') || lowerType.includes('university') || lowerType.includes('college')) type = 'Partner';
+    else if (lowerType.includes('community')) type = 'Stakeholder';
 
     results.push({
       name: name || (email ? email.split('@')[0] : 'Unknown Contact'),

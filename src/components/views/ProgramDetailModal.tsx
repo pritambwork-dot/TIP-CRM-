@@ -33,6 +33,8 @@ import {
   AvatarFallback 
 } from '../ui';
 
+import { validateExternalUrl } from '../../lib/fileValidation';
+
 interface ProgramDetailModalProps {
   programId: string;
   isOpen: boolean;
@@ -56,8 +58,10 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
     events, 
     tasks, 
     documents, 
+    addDocument,
     organizations,
     currentUser,
+    isSuperAdmin,
     addTask,
     toggleTaskStatus,
     hasPermission
@@ -79,7 +83,42 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
 
+  // Document linking state (governed by Super Admin permissions)
+  const canLinkDoc = isSuperAdmin || hasPermission('documents', 'create') || hasPermission('documents', 'edit');
+  const [showAddDocForm, setShowAddDocForm] = useState(false);
+  const [docTitle, setDocTitle] = useState('');
+  const [docUrl, setDocUrl] = useState('');
+  const [docType, setDocType] = useState<'Google Docs' | 'Google Sheets' | 'Google Drive' | 'PDF / File' | 'Cloud Link'>('Google Docs');
+  const [docUrlError, setDocUrlError] = useState<string | null>(null);
+
   if (!isOpen || !program) return null;
+
+  const handleLinkDoc = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!program || !docTitle.trim() || !docUrl.trim()) return;
+
+    const check = validateExternalUrl(docUrl);
+    if (!check.isValid || !check.sanitizedUrl) {
+      setDocUrlError(check.error || 'Invalid or insecure document URL.');
+      return;
+    }
+
+    addDocument({
+      title: docTitle.trim(),
+      url: check.sanitizedUrl,
+      type: docType,
+      relatedType: 'Program',
+      relatedId: program.id,
+      relatedName: program.name,
+      addedBy: currentUser.name,
+      description: `Document linked to program: ${program.name}`
+    });
+
+    setDocTitle('');
+    setDocUrl('');
+    setDocUrlError(null);
+    setShowAddDocForm(false);
+  };
 
   const handleStartEdit = () => {
     setEditName(program.name);
@@ -571,9 +610,102 @@ export const ProgramDetailModal: React.FC<ProgramDetailModalProps> = ({
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2 }}
-              className="space-y-3"
+              className="space-y-3.5"
             >
-              <h4 className="text-sm font-semibold text-zinc-900 font-serif">Google Drive & Document Links</h4>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold text-zinc-900 font-serif">Google Drive & Document Links</h4>
+                  <p className="text-[11px] text-zinc-500">Agreements, briefs, and files linked to this program.</p>
+                </div>
+                {canLinkDoc && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowAddDocForm(!showAddDocForm)}
+                    className="text-xs gap-1.5 h-8 cursor-pointer border-[#140a8e]/30 text-[#140a8e] hover:bg-[#140a8e]/10"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-[#ea0543]" />
+                    <span>{showAddDocForm ? 'Cancel' : 'Link Document'}</span>
+                  </Button>
+                )}
+              </div>
+
+              {/* Inline Link Document Form */}
+              {showAddDocForm && canLinkDoc && (
+                <motion.form
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  onSubmit={handleLinkDoc}
+                  className="p-3.5 rounded-2xl border border-zinc-200 bg-zinc-50 space-y-3 shadow-2xs"
+                >
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Document Title *</label>
+                      <Input
+                        type="text"
+                        required
+                        placeholder="e.g. Program Charter 2026"
+                        value={docTitle}
+                        onChange={e => setDocTitle(e.target.value)}
+                        className="bg-white text-xs h-8"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Format</label>
+                      <select
+                        value={docType}
+                        onChange={e => setDocType(e.target.value as any)}
+                        className="w-full text-xs h-8 px-2 rounded-lg border border-zinc-300 bg-white text-zinc-900"
+                      >
+                        <option value="Google Docs">Google Docs</option>
+                        <option value="Google Sheets">Google Sheets</option>
+                        <option value="Google Drive">Google Drive Folder</option>
+                        <option value="PDF / File">PDF / File</option>
+                        <option value="Cloud Link">Cloud Link</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-700 mb-1">External URL *</label>
+                    <Input
+                      type="url"
+                      required
+                      placeholder="https://docs.google.com/document/d/... or drive folder"
+                      value={docUrl}
+                      onChange={e => {
+                        setDocUrl(e.target.value);
+                        if (docUrlError) setDocUrlError(null);
+                      }}
+                      className={`bg-white text-xs h-8 ${docUrlError ? 'border-rose-500' : ''}`}
+                    />
+                    {docUrlError && (
+                      <p className="text-[10px] text-rose-600 mt-1">{docUrlError}</p>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowAddDocForm(false)}
+                      className="text-xs h-7"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="crimson"
+                      size="sm"
+                      className="text-xs h-7 font-semibold"
+                    >
+                      Attach Document
+                    </Button>
+                  </div>
+                </motion.form>
+              )}
+
               {programDocs.length === 0 ? (
                 <p className="text-xs text-zinc-400 py-4 text-center">No documents linked to this program.</p>
               ) : (

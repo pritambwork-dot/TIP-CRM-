@@ -81,9 +81,14 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
   onSelectPerson,
   onSelectEvent
 }) => {
-  const { programs, addProgram, currentUser, people, events, hasPermission } = useCrm();
+  const { scopedPrograms, programs, addProgram, currentUser, people, events, hasPermission } = useCrm();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<ProgramStatus | 'All'>('All');
+
+  // Filter based on administrator configured data scope
+  const visiblePrograms = (currentUser.roleId === 'super_admin' || currentUser.roleId === 'staff_manager' || currentUser.dataScope?.programs === 'ALL')
+    ? programs
+    : scopedPrograms;
 
   // Add Program Modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -97,7 +102,7 @@ export const ProgramsView: React.FC<ProgramsViewProps> = ({
   const [newOutcomes, setNewOutcomes] = useState('');
   const [newBudget, setNewBudget] = useState('');
 
-  const filteredPrograms = programs.filter(pr => {
+  const filteredPrograms = visiblePrograms.filter(pr => {
     const matchesFilter = selectedFilter === 'All' ? true : pr.status === selectedFilter;
     const q = searchQuery.toLowerCase().trim();
     const matchesQuery = q === '' ? true : 

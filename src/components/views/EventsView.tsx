@@ -45,11 +45,16 @@ export const EventsView: React.FC<EventsViewProps> = ({
   onSelectEvent,
   onSelectPerson
 }) => {
-  const { events, addEvent, programs, participants, hasPermission, Permissions } = useCrm();
+  const { scopedEvents, events, addEvent, programs, participants, hasPermission, Permissions, currentUser } = useCrm();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<EventType | 'All'>('All');
 
-  const canCreateEvent = hasPermission('events', 'create');
+  const canCreateEvent = currentUser.roleId === 'super_admin' || currentUser.roleId === 'staff_manager' || hasPermission('events', 'create');
+
+  // Filter based on administrator configured data scope
+  const visibleEvents = (currentUser.roleId === 'super_admin' || currentUser.roleId === 'staff_manager' || currentUser.dataScope?.events === 'ALL')
+    ? events
+    : scopedEvents;
 
   // Add event modal
   const [showAddModal, setShowAddModal] = useState(false);
@@ -58,12 +63,13 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [newDate, setNewDate] = useState('2026-10-15');
   const [newTime, setNewTime] = useState('14:00 - 16:00 EDT');
   const [newLocation, setNewLocation] = useState('Centre for Social Innovation (Toronto) & Zoom');
-  const [newFacilitator, setNewFacilitator] = useState('Ruth Mojeed Ramirez');
+  const [newFacilitator, setNewFacilitator] = useState(currentUser?.name || 'Ruth Mojeed Ramirez');
   const [newCapacity, setNewCapacity] = useState('35');
   const [newProgramId, setNewProgramId] = useState('');
   const [newNotes, setNewNotes] = useState('');
+  const [newInstructions, setNewInstructions] = useState('');
 
-  const filteredEvents = events.filter(e => {
+  const filteredEvents = visibleEvents.filter(e => {
     const matchesFilter = selectedFilter === 'All' ? true : e.type === selectedFilter;
     const q = searchQuery.toLowerCase().trim();
     const matchesQuery = q === '' ? true :
@@ -77,6 +83,16 @@ export const EventsView: React.FC<EventsViewProps> = ({
     e.preventDefault();
     if (!newName.trim()) return;
 
+    const initialInstructionLogs = newInstructions.trim() ? [{
+      id: 'inst-' + Date.now(),
+      text: newInstructions.trim(),
+      loggedBy: currentUser.id,
+      authorName: currentUser.name,
+      authorRole: currentUser.roleId,
+      timestamp: new Date().toISOString(),
+      category: 'Run of Show' as const
+    }] : [];
+
     const created = addEvent({
       name: newName.trim(),
       type: newType,
@@ -84,15 +100,18 @@ export const EventsView: React.FC<EventsViewProps> = ({
       time: newTime.trim(),
       location: newLocation.trim(),
       isOnline: newLocation.toLowerCase().includes('zoom') || newLocation.toLowerCase().includes('online'),
-      facilitator: newFacilitator.trim(),
+      facilitator: newFacilitator.trim() || currentUser.name,
       partnerIds: [],
       capacity: Number(newCapacity) || 25,
       programId: newProgramId || undefined,
-      notes: newNotes.trim() || undefined
+      notes: newNotes.trim() || undefined,
+      instructions: newInstructions.trim() || undefined,
+      instructionLogs: initialInstructionLogs
     });
 
     setNewName('');
     setNewNotes('');
+    setNewInstructions('');
     setShowAddModal(false);
     onSelectEvent(created.id);
   };
@@ -395,6 +414,20 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     placeholder="Workshop agenda, learning objectives, or participant prep..."
                     value={newNotes}
                     onChange={e => setNewNotes(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-lg border border-input bg-card text-foreground focus:ring-1 focus:ring-ring focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-foreground">Log Instructions & Run of Show</label>
+                    <span className="text-[10px] text-muted-foreground">Setup, run-of-show, or facilitator guidelines</span>
+                  </div>
+                  <textarea 
+                    rows={2}
+                    placeholder="e.g. Setup: Arrange seating and test audio by 1:30 PM. Provide CART live captions. Keynote starts at 2:00 PM..."
+                    value={newInstructions}
+                    onChange={e => setNewInstructions(e.target.value)}
                     className="w-full text-xs p-2.5 rounded-lg border border-input bg-card text-foreground focus:ring-1 focus:ring-ring focus:outline-hidden"
                   />
                 </div>

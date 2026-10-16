@@ -269,6 +269,7 @@ export const INITIAL_DOCUMENTS: DocumentItem[] = [];
 export const INITIAL_AUDIT_LOGS: AuditLogItem[] = [];
 
 export const INITIAL_AI_USER_SETTINGS: AiUserSettings = {
+  aiEnabled: true,
   taskSuggestionsEnabled: true,
   dailyBriefEnabled: true,
   workflowSuggestionsEnabled: true,

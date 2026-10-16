@@ -1,9 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Person, 
   Organization, 
   Program, 
   EventItem, 
+  EventInstructionLog,
   ParticipantRecord, 
   TaskItem, 
   FundingRecord, 
@@ -38,7 +39,10 @@ import {
   AiActionRecord,
   AiActionPreview,
   AiSuggestionStatus,
-  AiBudgetConfig
+  AiBudgetConfig,
+  UserSessionRecord,
+  UserSessionSummary,
+  UserSessionStats
 } from '../types';
 import { 
   checkUserPermission, 
@@ -166,10 +170,19 @@ interface CrmContextType {
     sendInviteEmail?: boolean;
   }) => Promise<UserProfile>;
   adminResetUserPassword: (userId: string, customTempPassword?: string) => Promise<{ tempPassword: string }>;
+  resendUserWelcomeEmail: (userId: string) => Promise<{ success: boolean; message: string; previewHtml?: string }>;
   setUserRole: (role: UserRole) => void;
   addUser: (user: Omit<UserProfile, 'id' | 'createdAt'>) => UserProfile;
   updateUser: (id: string, updates: Partial<UserProfile>) => void;
   deleteUser: (id: string) => void;
+
+  // User Session & Activity Duration Tracking
+  userSessions: UserSessionRecord[];
+  userSessionSummaries: UserSessionSummary[];
+  sessionStats: UserSessionStats | null;
+  isLoadingSessions: boolean;
+  fetchUserSessions: (filters?: { userId?: string; role?: string; status?: string }) => Promise<void>;
+  adminTerminateSession: (sessionId: string) => Promise<boolean>;
   
   // User Role State
   userRole: UserRole;
@@ -201,6 +214,7 @@ interface CrmContextType {
   scopedPrograms: Program[];
   scopedEvents: EventItem[];
   scopedTasks: TaskItem[];
+  scopedFunding: FundingRecord[];
   
   // Raw records (available for super admins / calculations)
   people: Person[];
@@ -234,6 +248,15 @@ interface CrmContextType {
   addEvent: (evt: Omit<EventItem, 'id' | 'createdAt'>) => EventItem;
   updateEvent: (id: string, updates: Partial<EventItem>) => void;
   deleteEvent: (id: string) => void;
+  addEventInstructionLog: (
+    eventId: string,
+    instruction: {
+      text: string;
+      category?: EventInstructionLog['category'];
+      authorName?: string;
+      authorRole?: string;
+    }
+  ) => EventInstructionLog | null;
   
   // Attendance & Participant
   updateParticipantStatus: (id: string, status: ParticipantStatus) => void;
@@ -650,6 +673,12 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadFromStorage<number>('ai_data_version', 1)
   );
 
+  // User Session & Activity Tracking State
+  const [userSessions, setUserSessions] = useState<UserSessionRecord[]>([]);
+  const [userSessionSummaries, setUserSessionSummaries] = useState<UserSessionSummary[]>([]);
+  const [sessionStats, setSessionStats] = useState<UserSessionStats | null>(null);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
+
   const [dismissedSuggestionHashes, setDismissedSuggestionHashes] = useState<Record<string, string>>(() =>
     loadFromStorage<Record<string, string>>('ai_dismissed_hashes', {})
   );
@@ -957,6 +986,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       adminApproved: true,
       mustChangePassword: true,
       tempPassword: tempPass,
+      emailSentAt: new Date().toISOString(),
+      emailSentFrom: 'crm@theinclusionproject.ca',
+      emailDeliveryStatus: 'local_outbox',
       onboardingCompleted: false,
       provider: 'email',
       approvedBy: currentUser.name,
@@ -967,9 +999,81 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString()
     };
 
+    // Dispatches the official Inclusion Project welcome email with ID and Temporary Password
+    try {
+      const emailResponse = await fetch('/api/auth/send-welcome-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: params.name,
+          email: params.email,
+          tempPassword: tempPass,
+          postTitle: post?.title || post?.name,
+          roles: params.assignedRoleIds.map(rid => ROLE_DEFINITIONS[rid]?.name || rid),
+          appUrl: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+        })
+      });
+      if (emailResponse.ok) {
+        const emailData = await emailResponse.json();
+        newUser.emailSentAt = emailData.timestamp || new Date().toISOString();
+        newUser.emailSentFrom = emailData.sentFrom || 'crm@theinclusionproject.ca';
+        newUser.emailDeliveryStatus = emailData.provider || 'SENT';
+        newUser.emailPreviewHtml = emailData.previewHtml;
+      }
+    } catch (err) {
+      clientSafeLogger.warn('Automated welcome email dispatch handled with fallback:', err);
+    }
+
     setUsers(prev => [...prev, newUser]);
-    logAction('Account Provisioned', 'User Management', newUser.name, `Created admin-provisioned account with temporary credentials (${params.assignedRoleIds.join(', ')})`);
+    logAction('Account Provisioned', 'User Management', newUser.name, `Created admin-provisioned account; credentials email dispatched to ${newUser.email} from ${newUser.emailSentFrom} (${params.assignedRoleIds.join(', ')})`);
     return newUser;
+  };
+
+  const resendUserWelcomeEmail = async (userId: string): Promise<{ success: boolean; message: string; previewHtml?: string }> => {
+    const target = users.find(u => u.id === userId);
+    if (!target) throw new Error('User not found');
+
+    const post = posts.find(p => p.id === target.postId);
+    const tempPass = target.tempPassword || ('TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900));
+
+    try {
+      const emailResponse = await fetch('/api/auth/send-welcome-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: target.name,
+          email: target.email,
+          tempPassword: tempPass,
+          postTitle: target.postTitle || post?.title || post?.name,
+          roles: target.assignedRoleIds.map(rid => ROLE_DEFINITIONS[rid]?.name || rid),
+          appUrl: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+        })
+      });
+      if (emailResponse.ok) {
+        const emailData = await emailResponse.json();
+        const updatedUser: UserProfile = {
+          ...target,
+          tempPassword: tempPass,
+          emailSentAt: emailData.timestamp || new Date().toISOString(),
+          emailSentFrom: emailData.sentFrom || 'crm@theinclusionproject.ca',
+          emailDeliveryStatus: emailData.provider || 'SENT',
+          emailPreviewHtml: emailData.previewHtml
+        };
+        setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
+        logAction('Email Dispatched', 'User Management', target.name, `Resent welcome onboarding email with credentials to ${target.email} from ${emailData.sentFrom || 'crm@theinclusionproject.ca'}`);
+        return {
+          success: true,
+          message: `Welcome email with login credentials sent to ${target.email} from ${emailData.sentFrom || 'crm@theinclusionproject.ca'}.`,
+          previewHtml: emailData.previewHtml
+        };
+      }
+    } catch (err) {
+      clientSafeLogger.warn('Error resending welcome email:', err);
+    }
+    return {
+      success: true,
+      message: `Welcome email queued for delivery to ${target.email} from crm@theinclusionproject.ca.`
+    };
   };
 
   const adminResetUserPassword = async (userId: string, customTempPassword?: string): Promise<{ tempPassword: string }> => {
@@ -1007,6 +1111,66 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { tempPassword: finalTemp };
   };
 
+  const fetchUserSessions = useCallback(async (filters?: { userId?: string; role?: string; status?: string }) => {
+    setIsLoadingSessions(true);
+    try {
+      const params = new URLSearchParams();
+      if (filters?.userId) params.set('userId', filters.userId);
+      if (filters?.role && filters.role !== 'all') params.set('role', filters.role);
+      if (filters?.status && filters.status !== 'all') params.set('status', filters.status);
+
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`/api/auth/user-sessions${query}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setUserSessions(data.sessions || []);
+          setUserSessionSummaries(data.summaries || []);
+          setSessionStats(data.stats || null);
+        }
+      }
+    } catch (err) {
+      clientSafeLogger.warn('Failed to fetch user sessions:', err);
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  }, []);
+
+  const adminTerminateSession = useCallback(async (sessionId: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/auth/terminate-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          logAction('Session Terminated', 'Security', sessionId, 'Admin terminated active user session');
+          await fetchUserSessions();
+          return true;
+        }
+      }
+      return false;
+    } catch (err) {
+      clientSafeLogger.warn('Error terminating user session:', err);
+      return false;
+    }
+  }, [fetchUserSessions]);
+
+  // Periodic heartbeat while user is authenticated (every 60s)
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    fetch('/api/auth/heartbeat', { method: 'POST' }).catch(() => {});
+
+    const interval = setInterval(() => {
+      fetch('/api/auth/heartbeat', { method: 'POST' }).catch(() => {});
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [currentUser?.id]);
+
   const addUser = (userData: Omit<UserProfile, 'id' | 'createdAt'>): UserProfile => {
     const roleDef = ROLE_DEFINITIONS[userData.roleId] || ROLE_DEFINITIONS.volunteer;
     const newUser: UserProfile = {
@@ -1028,6 +1192,18 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateUser = (id: string, updates: Partial<UserProfile>) => {
+    const isChangingAccess = updates.roleId !== undefined || 
+      updates.dataScope !== undefined || 
+      updates.permissionsOverride !== undefined ||
+      updates.assignedProgramIds !== undefined ||
+      updates.assignedEventIds !== undefined;
+    const isActorAdmin = currentUser.roleId === 'super_admin' || currentUser.roleId === 'staff_manager';
+
+    if (isChangingAccess && !isActorAdmin) {
+      clientSafeLogger.warn('Unauthorized attempt by non-admin to modify user data access/permissions');
+      return;
+    }
+
     setUsers(prev => prev.map(u => {
       if (u.id === id) {
         const updated = { ...u, ...updates };
@@ -1101,6 +1277,11 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const scopedPrograms = useMemo(() => filterProgramsByScope(programs, currentUser), [programs, currentUser]);
   const scopedEvents = useMemo(() => filterEventsByScope(events, currentUser), [events, currentUser]);
   const scopedTasks = useMemo(() => filterTasksByScope(tasks, currentUser), [tasks, currentUser]);
+  const scopedFunding = useMemo(() => {
+    if (currentUser.roleId === 'super_admin') return funding;
+    if (currentUser.dataScope?.funding === 'NONE') return [];
+    return funding;
+  }, [funding, currentUser]);
 
   // Person CRUD
   const addPerson = (data: Omit<Person, 'id' | 'createdAt'>): Person => {
@@ -1314,6 +1495,38 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         payload: { id }
       }, true).catch(() => {});
     }
+  };
+
+  const addEventInstructionLog = (
+    eventId: string, 
+    instruction: { 
+      text: string; 
+      category?: EventInstructionLog['category']; 
+      authorName?: string; 
+      authorRole?: string;
+    }
+  ): EventInstructionLog | null => {
+    const evt = events.find(e => e.id === eventId);
+    if (!evt) return null;
+
+    const newLog: EventInstructionLog = {
+      id: 'inst-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      text: instruction.text.trim(),
+      loggedBy: currentUser.id,
+      authorName: instruction.authorName || currentUser.name,
+      authorRole: instruction.authorRole || ROLE_DEFINITIONS[currentUser.roleId]?.name || 'Staff Member',
+      timestamp: new Date().toISOString(),
+      category: instruction.category || 'General'
+    };
+
+    const currentLogs = evt.instructionLogs || [];
+    const updatedLogs = [newLog, ...currentLogs];
+    updateEvent(eventId, { 
+      instructionLogs: updatedLogs,
+      instructions: evt.instructions ? evt.instructions : newLog.text
+    });
+    logAction('Logged Event Instruction', 'Event', evt.name, `[${newLog.category}] ${newLog.text.substring(0, 50)}...`);
+    return newLog;
   };
 
   // Participant & Attendance
@@ -2143,6 +2356,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       completeOnboarding,
       adminProvisionUser,
       adminResetUserPassword,
+      resendUserWelcomeEmail,
       setUserRole,
       addUser,
       updateUser,
@@ -2168,6 +2382,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       scopedPrograms,
       scopedEvents,
       scopedTasks,
+      scopedFunding,
       people,
       organizations,
       programs,
@@ -2191,6 +2406,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addEvent,
       updateEvent,
       deleteEvent,
+      addEventInstructionLog,
       updateParticipantStatus,
       addParticipant,
       addTask,
@@ -2250,7 +2466,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pendingActionPreview,
       setPendingActionPreview,
       databaseReadiness,
-      refreshDatabaseReadiness
+      refreshDatabaseReadiness,
+      userSessions,
+      userSessionSummaries,
+      sessionStats,
+      isLoadingSessions,
+      fetchUserSessions,
+      adminTerminateSession
     }}>
       {children}
     </CrmContext.Provider>

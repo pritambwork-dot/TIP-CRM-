@@ -1,0 +1,1396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TIP CRM — Official Launch Video & Interactive Showcase</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #07090e;
+      color: #f1f5f9;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow-x: hidden;
+      padding: 24px;
+    }
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+    .header {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 8px;
+    }
+    .brand-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 8px 16px;
+      border-radius: 9999px;
+      font-size: 14px;
+      font-weight: 600;
+      backdrop-filter: blur(12px);
+    }
+    .brand-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ea0543;
+      box-shadow: 0 0 12px #ea0543;
+    }
+    .actions-top {
+      display: flex;
+      gap: 12px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      color: #fff;
+      padding: 9px 18px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      text-decoration: none;
+    }
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(255, 255, 255, 0.25);
+      transform: translateY(-1px);
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #ea0543 0%, #140a8e 100%);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 4px 20px rgba(234, 5, 67, 0.35);
+    }
+    .btn-primary:hover {
+      box-shadow: 0 6px 24px rgba(234, 5, 67, 0.5);
+      transform: translateY(-2px);
+    }
+    .video-viewport {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.8), 0 0 40px rgba(20, 10, 142, 0.25), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+      position: relative;
+    }
+    canvas#videoCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .controls-panel {
+      width: 100%;
+      background: rgba(18, 22, 34, 0.85);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 18px;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    }
+    .progress-bar-container {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 9999px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+    }
+    .progress-fill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 0%;
+      background: linear-gradient(90deg, #ea0543, #8b5cf6, #3b82f6);
+      border-radius: 9999px;
+      transition: width 0.05s linear;
+    }
+    .controls-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .left-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .play-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: #ea0543;
+      border: none;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(234, 5, 67, 0.4);
+      transition: all 0.2s;
+    }
+    .play-btn:hover {
+      transform: scale(1.08);
+      background: #ff1856;
+    }
+    .time-display {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .scene-markers {
+      display: flex;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 4px;
+      border-radius: 10px;
+    }
+    .scene-pill {
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .scene-pill:hover, .scene-pill.active {
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+    }
+    .right-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .info-footer {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #64748b;
+      font-size: 13px;
+      padding: 0 6px;
+    }
+    .recording-indicator {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="brand-pill">
+        <div class="brand-dot"></div>
+        <span>TIP CRM Launch Video • 20s Showcase</span>
+      </div>
+      <div class="actions-top">
+        <button id="downloadPosterBtn" class="btn" title="Download High-Res Thumbnail Poster">
+          📸 Save Poster Frame
+        </button>
+        <button id="recordVideoBtn" class="btn btn-primary" title="Export 60fps MP4/WebM Video file directly">
+          🎬 Export Video File (.webm / .mp4)
+        </button>
+      </div>
+    </div>
+
+    <div class="video-viewport" id="viewport">
+      <canvas id="videoCanvas" width="1920" height="1080"></canvas>
+    </div>
+
+    <div class="controls-panel">
+      <div class="progress-bar-container" id="progressBar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="controls-row">
+        <div class="left-controls">
+          <button class="play-btn" id="playBtn" title="Play / Pause">
+            <svg id="playIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            <svg id="pauseIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="display:none;">
+              <rect x="6" y="4" width="4" height="16"></rect>
+              <rect x="14" y="4" width="4" height="16"></rect>
+            </svg>
+          </button>
+          <div class="time-display" id="timeDisplay">00:00 / 00:20</div>
+          <button class="btn" id="restartBtn" style="padding: 6px 12px; font-size: 12px;">↺ Restart</button>
+        </div>
+
+        <div class="scene-markers">
+          <button class="scene-pill active" data-time="0">1. Hook</button>
+          <button class="scene-pill" data-time="3.0">2. My Work</button>
+          <button class="scene-pill" data-time="7.5">3. Contacts</button>
+          <button class="scene-pill" data-time="12.0">4. AI Intelligence</button>
+          <button class="scene-pill" data-time="16.5">5. Offline Sync</button>
+        </div>
+
+        <div class="right-controls">
+          <div class="recording-indicator" id="recBadge">🔴 RECORDING VIDEO...</div>
+          <button class="btn" id="audioToggleBtn">🔊 Audio On</button>
+          <button class="btn" id="fullscreenBtn">⛶ Fullscreen</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="info-footer">
+      <div>Crafted for <strong>The Inclusion Project</strong> • Production Ready v1.0.0</div>
+      <div>Local Host: <a href="http://localhost:3000" target="_blank" style="color:#818cf8; text-decoration:none;">http://localhost:3000</a></div>
+    </div>
+  </div>
+
+  <script>
+    // --- SYNTHESIZER & AUDIO ARCHITECTURE ---
+    class SoundTrackEngine {
+      constructor() {
+        this.ctx = null;
+        this.isMuted = false;
+        this.isPlaying = false;
+        this.lastBeat = -1;
+        this.destinationNode = null;
+      }
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioContext();
+          this.destinationNode = this.ctx.createMediaStreamDestination();
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+      getMediaStreamAudioTrack() {
+        this.init();
+        return this.destinationNode.stream.getAudioTracks()[0];
+      }
+      triggerKick(time) {
+        if (!this.ctx || this.isMuted) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        if (this.destinationNode) gain.connect(this.destinationNode);
+
+        osc.frequency.setValueAtTime(140, time);
+        osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.35);
+        gain.gain.setValueAtTime(0.7, time);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.35);
+
+        osc.start(time);
+        osc.stop(time + 0.35);
+      }
+      triggerHiHat(time) {
+        if (!this.ctx || this.isMuted) return;
+        const bufferSize = this.ctx.sampleRate * 0.04;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'highpass';
+        filter.frequency.value = 7500;
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.12, time);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        if (this.destinationNode) gain.connect(this.destinationNode);
+
+        noise.start(time);
+      }
+      triggerSynthNote(freq, time, duration = 0.2, type = 'sine') {
+        if (!this.ctx || this.isMuted) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, time);
+
+        gain.gain.setValueAtTime(0.18, time);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        if (this.destinationNode) gain.connect(this.destinationNode);
+
+        osc.start(time);
+        osc.stop(time + duration);
+      }
+      triggerChime(time) {
+        if (!this.ctx || this.isMuted) return;
+        const freqs = [523.25, 659.25, 783.99, 1046.50]; // C Major arpeggio
+        freqs.forEach((f, idx) => {
+          this.triggerSynthNote(f, time + idx * 0.06, 0.6, 'triangle');
+        });
+      }
+      triggerClick(time) {
+        if (!this.ctx || this.isMuted) return;
+        this.triggerSynthNote(1200, time, 0.03, 'sine');
+      }
+      update(videoTime) {
+        if (!this.ctx || this.isMuted) return;
+        const bpm = 120;
+        const beatInterval = 60 / bpm; // 0.5s per beat
+        const currentBeat = Math.floor(videoTime / beatInterval);
+
+        if (currentBeat !== this.lastBeat && videoTime > 0.05 && videoTime < 19.8) {
+          this.lastBeat = currentBeat;
+          const now = this.ctx.currentTime;
+          // Kick on 1 and 3
+          if (currentBeat % 2 === 0) {
+            this.triggerKick(now);
+          }
+          // Hihat on offbeats
+          this.triggerHiHat(now + 0.25);
+
+          // Synth melody chords
+          const scale = [220, 261.63, 293.66, 329.63, 392.00, 440.00];
+          const note = scale[currentBeat % scale.length];
+          this.triggerSynthNote(note, now, 0.28, 'sawtooth');
+
+          // SFX Cues matched to narrative storyboard
+          if (currentBeat === 10) { // ~5.0s task click
+            this.triggerClick(now);
+            this.triggerChime(now + 0.1);
+          } else if (currentBeat === 18) { // ~9.0s data import
+            this.triggerSynthNote(880, now, 0.35, 'triangle');
+          } else if (currentBeat === 26) { // ~13.0s AI sparkle
+            this.triggerChime(now);
+          } else if (currentBeat === 34) { // ~17.0s sync bell
+            this.triggerSynthNote(1046.5, now, 0.8, 'sine');
+          }
+        }
+      }
+    }
+
+    // --- VIDEO RENDERING ENGINE ---
+    const canvas = document.getElementById('videoCanvas');
+    const ctx = canvas.getContext('2d');
+    const DURATION = 20.0;
+    let currentTime = 0;
+    let isPlaying = false;
+    let lastTimestamp = 0;
+    const soundEngine = new SoundTrackEngine();
+
+    // UI elements
+    const playBtn = document.getElementById('playBtn');
+    const playIcon = document.getElementById('playIcon');
+    const pauseIcon = document.getElementById('pauseIcon');
+    const timeDisplay = document.getElementById('timeDisplay');
+    const progressFill = document.getElementById('progressFill');
+    const progressBar = document.getElementById('progressBar');
+    const restartBtn = document.getElementById('restartBtn');
+    const audioToggleBtn = document.getElementById('audioToggleBtn');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    const scenePills = document.querySelectorAll('.scene-pill');
+    const downloadPosterBtn = document.getElementById('downloadPosterBtn');
+    const recordVideoBtn = document.getElementById('recordVideoBtn');
+    const recBadge = document.getElementById('recBadge');
+
+    // Smooth easing helper
+    function easeOutCubic(x) {
+      return 1 - Math.pow(1 - x, 3);
+    }
+    function easeInOutQuad(x) {
+      return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+    }
+    function clamp(val, min, max) {
+      return Math.min(Math.max(val, min), max);
+    }
+
+    // --- RENDER SCENES ---
+    function renderFrame(t) {
+      ctx.save();
+      ctx.clearRect(0, 0, 1920, 1080);
+
+      // 1. Dynamic Studio Background with Ambient Gradient
+      const grad = ctx.createRadialGradient(960, 540, 100, 960, 540, 1100);
+      grad.addColorStop(0, '#101528');
+      grad.addColorStop(0.5, '#090b14');
+      grad.addColorStop(1, '#040508');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 1920, 1080);
+
+      // Subtle dynamic mesh lights
+      const lightX = 960 + Math.sin(t * 1.5) * 200;
+      const lightY = 540 + Math.cos(t * 1.2) * 150;
+      const crimsonGlow = ctx.createRadialGradient(lightX - 250, lightY - 100, 20, lightX - 250, lightY - 100, 450);
+      crimsonGlow.addColorStop(0, 'rgba(234, 5, 67, 0.16)');
+      crimsonGlow.addColorStop(1, 'rgba(234, 5, 67, 0)');
+      ctx.fillStyle = crimsonGlow;
+      ctx.fillRect(0, 0, 1920, 1080);
+
+      const indigoGlow = ctx.createRadialGradient(lightX + 250, lightY + 100, 20, lightX + 250, lightY + 100, 500);
+      indigoGlow.addColorStop(0, 'rgba(20, 10, 142, 0.25)');
+      indigoGlow.addColorStop(1, 'rgba(20, 10, 142, 0)');
+      ctx.fillStyle = indigoGlow;
+      ctx.fillRect(0, 0, 1920, 1080);
+
+      // Grid dots in background
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+      for (let x = 60; x < 1920; x += 60) {
+        for (let y = 60; y < 1080; y += 60) {
+          ctx.beginPath();
+          ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // --- SCENE 1: THE HOOK & IDENTITY (0.0s - 3.0s) ---
+      if (t < 3.2) {
+        const p = clamp(t / 3.0, 0, 1);
+        const opacity = t > 2.7 ? clamp((3.0 - t) / 0.3, 0, 1) : clamp(p * 2.5, 0, 1);
+        ctx.globalAlpha = opacity;
+
+        // Big Monogram Logo Lockup
+        const scale = 0.85 + easeOutCubic(Math.min(p * 1.4, 1)) * 0.15;
+        ctx.save();
+        ctx.translate(960, 460);
+        ctx.scale(scale, scale);
+
+        // Logo circle badge
+        ctx.shadowColor = 'rgba(234, 5, 67, 0.6)';
+        ctx.shadowBlur = 40;
+        const logoGrad = ctx.createLinearGradient(-70, -70, 70, 70);
+        logoGrad.addColorStop(0, '#ea0543');
+        logoGrad.addColorStop(1, '#140a8e');
+        ctx.fillStyle = logoGrad;
+        ctx.beginPath();
+        ctx.roundRect(-80, -80, 160, 160, 40);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Inner Emblem
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '800 72px "Plus Jakarta Sans"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('TIP', 0, 4);
+
+        ctx.restore();
+
+        // Main Headline
+        ctx.font = '800 56px "Plus Jakarta Sans"';
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.fillText('Nonprofits run on spreadsheets and chaos.', 960, 640);
+
+        // Subtitle
+        ctx.font = '600 36px "Plus Jakarta Sans"';
+        const textGrad = ctx.createLinearGradient(700, 710, 1220, 710);
+        textGrad.addColorStop(0, '#ea0543');
+        textGrad.addColorStop(1, '#818cf8');
+        ctx.fillStyle = textGrad;
+        ctx.fillText('We built the operating system for impact.', 960, 710);
+
+        // Tagline badge
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.beginPath();
+        ctx.roundRect(830, 770, 260, 44, 22);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.stroke();
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '600 16px "JetBrains Mono"';
+        ctx.fillText('MEET TIP CRM v1.0', 960, 798);
+
+        ctx.globalAlpha = 1;
+      }
+
+      // --- SCENE 2: HOME = MY WORK & TASK COMPLETION (3.0s - 7.5s) ---
+      if (t >= 2.8 && t < 7.7) {
+        const sceneT = t - 3.0;
+        const fadeIn = clamp(sceneT / 0.4, 0, 1);
+        const fadeOut = t > 7.3 ? clamp((7.5 - t) / 0.2, 0, 1) : 1;
+        ctx.globalAlpha = fadeIn * fadeOut;
+
+        renderAppWindowFrame(960, 520, 1540, 880, 'Home — My Work', 'task-view');
+
+        // Header overlay tag
+        renderFeatureBanner('01 / REAL-TIME OPERATIONS', 'Home = My Work', 'Priority tasks auto-routed to your operational role');
+
+        // Simulate interactive cursor and task click
+        const clickProgress = clamp((sceneT - 1.8) / 0.5, 0, 1);
+        const isClicked = sceneT >= 2.0;
+
+        // Render My Work Card 1: Review Cohort 4 Applicants (The interactive one)
+        renderTaskCard(420, 360, 720, 110, {
+          title: 'Review Cohort 4 Tech Innovators Applications',
+          due: 'Today • 5:00 PM',
+          priority: 'High Priority (Tier 1)',
+          isDone: isClicked,
+          clickP: clickProgress
+        });
+
+        // Other task cards
+        renderTaskCard(420, 490, 720, 100, {
+          title: 'Finalize RBC Foundation Grant Progress Report',
+          due: 'Tomorrow',
+          priority: 'Medium Priority',
+          isDone: false
+        });
+        renderTaskCard(420, 610, 720, 100, {
+          title: 'Send Orientation Welcome Email to 24 Facilitators',
+          due: 'Oct 20',
+          priority: 'Routine',
+          isDone: false
+        });
+
+        // Right side: Live Progress & Impact Metrics widget
+        renderMetricsWidget(1180, 360, 440, 350, isClicked);
+
+        // Animated Simulated Cursor
+        if (sceneT < 4.2) {
+          const startX = 200, startY = 800;
+          const targetX = 460, targetY = 415;
+          const moveP = easeInOutQuad(clamp(sceneT / 1.8, 0, 1));
+          const curX = startX + (targetX - startX) * moveP;
+          const curY = startY + (targetY - startY) * moveP;
+          renderMouseCursor(curX, curY, isClicked);
+        }
+
+        ctx.globalAlpha = 1;
+      }
+
+      // --- SCENE 3: COMMUNITY CONTACTS & DUAL INGESTION (7.5s - 12.0s) ---
+      if (t >= 7.3 && t < 12.2) {
+        const sceneT = t - 7.5;
+        const fadeIn = clamp(sceneT / 0.4, 0, 1);
+        const fadeOut = t > 11.8 ? clamp((12.0 - t) / 0.2, 0, 1) : 1;
+        ctx.globalAlpha = fadeIn * fadeOut;
+
+        renderAppWindowFrame(960, 520, 1540, 880, 'People & Organizations', 'people-view');
+        renderFeatureBanner('02 / CONTACT INGESTION', 'CSV + Google Drive Ingestion', 'Zero manual data entry. Intelligent duplicate detection.');
+
+        // Ingestion Modal pops up in center
+        renderImportModal(960, 530, 840, 510, sceneT);
+
+        ctx.globalAlpha = 1;
+      }
+
+      // --- SCENE 4: GROUNDED TIP INTELLIGENCE (12.0s - 16.5s) ---
+      if (t >= 11.8 && t < 16.7) {
+        const sceneT = t - 12.0;
+        const fadeIn = clamp(sceneT / 0.4, 0, 1);
+        const fadeOut = t > 16.3 ? clamp((16.5 - t) / 0.2, 0, 1) : 1;
+        ctx.globalAlpha = fadeIn * fadeOut;
+
+        renderAppWindowFrame(960, 520, 1540, 880, 'Programs & Cohorts Overview', 'programs-view');
+        renderFeatureBanner('03 / TIP INTELLIGENCE', 'Grounded AI Companion', 'Query real database records with strict role isolation & citations.');
+
+        // Slide out Intelligence Drawer on right
+        const drawerSlide = easeOutCubic(clamp(sceneT / 0.6, 0, 1));
+        renderIntelligenceDrawer(1920 - 580 * drawerSlide, 160, 540, 790, sceneT);
+
+        ctx.globalAlpha = 1;
+      }
+
+      // --- SCENE 5: LOCAL-FIRST SYNC & FINAL CALL TO ACTION (16.5s - 20.0s) ---
+      if (t >= 16.3) {
+        const sceneT = t - 16.5;
+        const fadeIn = clamp(sceneT / 0.4, 0, 1);
+        ctx.globalAlpha = fadeIn;
+
+        // Grand final reveal
+        renderAppWindowFrame(960, 500, 1460, 780, 'TIP CRM — Connected', 'dashboard-all');
+
+        // Cloud sync toast banner
+        renderSyncPulseToast(960, 240, sceneT);
+
+        // Giant final Call to Action overlay
+        if (sceneT > 1.2) {
+          const ctaP = easeOutCubic(clamp((sceneT - 1.2) / 0.5, 0, 1));
+          ctx.save();
+          ctx.fillStyle = 'rgba(7, 9, 14, 0.88)';
+          ctx.backdropFilter = 'blur(16px)';
+          ctx.fillRect(0, 0, 1920, 1080);
+
+          ctx.translate(960, 540);
+          ctx.scale(0.9 + ctaP * 0.1, 0.9 + ctaP * 0.1);
+
+          // Glowing badge
+          ctx.fillStyle = 'rgba(234, 5, 67, 0.15)';
+          ctx.beginPath();
+          ctx.roundRect(-140, -180, 280, 40, 20);
+          ctx.fill();
+          ctx.strokeStyle = '#ea0543';
+          ctx.stroke();
+
+          ctx.fillStyle = '#ff3b6f';
+          ctx.font = '700 16px "JetBrains Mono"';
+          ctx.textAlign = 'center';
+          ctx.fillText('100% OPEN SOURCE & FREE', 0, -154);
+
+          // Hero headline
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '800 68px "Plus Jakarta Sans"';
+          ctx.fillText('Built for Social Impact.', 0, -60);
+
+          const grad = ctx.createLinearGradient(-350, 20, 350, 20);
+          grad.addColorStop(0, '#ea0543');
+          grad.addColorStop(1, '#6366f1');
+          ctx.fillStyle = grad;
+          ctx.fillText('Ready for Production.', 0, 24);
+
+          // Feature check pills
+          ctx.font = '600 20px "Plus Jakarta Sans"';
+          ctx.fillStyle = '#94a3b8';
+          ctx.fillText('✓ Local-First Offline Resilience   ✓ Dual CSV & Drive Ingestion   ✓ Zero-Hallucination AI', 0, 110);
+
+          // GitHub link card
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+          ctx.beginPath();
+          ctx.roundRect(-300, 160, 600, 64, 16);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+          ctx.stroke();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '700 22px "JetBrains Mono"';
+          ctx.fillText('github.com/theinclusionprojectcrm-dev/TIP-CRM', 0, 200);
+
+          ctx.restore();
+        }
+
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.restore();
+    }
+
+    // --- REUSABLE UI RENDERING HELPERS ---
+
+    function renderAppWindowFrame(cx, cy, w, h, title, activeTab) {
+      const x = cx - w / 2;
+      const y = cy - h / 2;
+
+      ctx.save();
+      // Window shadow
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+      ctx.shadowBlur = 60;
+      ctx.shadowOffsetY = 25;
+
+      // Window background
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 20);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Window border
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Top title bar
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, 56, [20, 20, 0, 0]);
+      ctx.fill();
+
+      // Window controls (Mac style red/yellow/green dots)
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath(); ctx.arc(x + 24, y + 28, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath(); ctx.arc(x + 44, y + 28, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#10b981';
+      ctx.beginPath(); ctx.arc(x + 64, y + 28, 6, 0, Math.PI * 2); ctx.fill();
+
+      // Window Title
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = '600 16px "Plus Jakarta Sans"';
+      ctx.textAlign = 'center';
+      ctx.fillText(`TIP CRM — ${title}`, cx, y + 34);
+
+      // Top-right user indicator and sync status
+      ctx.fillStyle = '#10b981';
+      ctx.beginPath(); ctx.arc(x + w - 160, y + 28, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '500 13px "JetBrains Mono"';
+      ctx.textAlign = 'left';
+      ctx.fillText('SYNCED', x + w - 148, y + 33);
+
+      // User avatar pill
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.beginPath();
+      ctx.roundRect(x + w - 85, y + 14, 65, 28, 14);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 12px "Plus Jakarta Sans"';
+      ctx.textAlign = 'center';
+      ctx.fillText('ADMIN', x + w - 52, y + 32);
+
+      // Floating Apple Dock at bottom of app
+      renderAppleDock(cx, y + h - 50, activeTab);
+
+      ctx.restore();
+    }
+
+    function renderAppleDock(cx, y, activeTab) {
+      const dockW = 480;
+      const dockH = 64;
+      const x = cx - dockW / 2;
+
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+      ctx.shadowBlur = 25;
+      ctx.shadowOffsetY = 10;
+
+      // Frosted Glass Dock
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.beginPath();
+      ctx.roundRect(x, y - dockH / 2, dockW, dockH, 24);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      const tabs = [
+        { id: 'dashboard', name: 'Home' },
+        { id: 'people', name: 'People' },
+        { id: 'tasks', name: 'Tasks' },
+        { id: 'programs', name: 'Programs' },
+        { id: 'ai', name: '✨ AI' }
+      ];
+
+      tabs.forEach((tab, idx) => {
+        const itemX = x + 40 + idx * 100;
+        const isSelected = (activeTab.includes(tab.id));
+
+        if (isSelected) {
+          ctx.fillStyle = 'rgba(234, 5, 67, 0.25)';
+          ctx.beginPath();
+          ctx.roundRect(itemX - 35, y - 22, 70, 44, 12);
+          ctx.fill();
+          ctx.strokeStyle = '#ea0543';
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = isSelected ? '#ffffff' : '#94a3b8';
+        ctx.font = isSelected ? '700 14px "Plus Jakarta Sans"' : '500 14px "Plus Jakarta Sans"';
+        ctx.textAlign = 'center';
+        ctx.fillText(tab.name, itemX, y + 5);
+
+        if (isSelected) {
+          ctx.fillStyle = '#ea0543';
+          ctx.beginPath();
+          ctx.arc(itemX, y + 20, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+
+      ctx.restore();
+    }
+
+    function renderFeatureBanner(stepTag, title, subtitle) {
+      ctx.save();
+      ctx.translate(280, 180);
+
+      ctx.fillStyle = '#ea0543';
+      ctx.font = '700 14px "JetBrains Mono"';
+      ctx.textAlign = 'left';
+      ctx.fillText(stepTag, 0, 0);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 36px "Plus Jakarta Sans"';
+      ctx.fillText(title, 0, 40);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '500 18px "Plus Jakarta Sans"';
+      ctx.fillText(subtitle, 0, 72);
+
+      ctx.restore();
+    }
+
+    function renderTaskCard(x, y, w, h, data) {
+      ctx.save();
+
+      ctx.fillStyle = data.isDone ? 'rgba(16, 185, 129, 0.08)' : 'rgba(30, 41, 59, 0.7)';
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 16);
+      ctx.fill();
+
+      ctx.strokeStyle = data.isDone ? 'rgba(16, 185, 129, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Checkbox circle
+      const cbX = x + 40;
+      const cbY = y + h / 2;
+
+      ctx.beginPath();
+      ctx.arc(cbX, cbY, 16, 0, Math.PI * 2);
+      if (data.isDone) {
+        ctx.fillStyle = '#10b981';
+        ctx.fill();
+        // Checkmark
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(cbX - 6, cbY);
+        ctx.lineTo(cbX - 2, cbY + 5);
+        ctx.lineTo(cbX + 7, cbY - 5);
+        ctx.stroke();
+
+        // Ripple pulse
+        if (data.clickP && data.clickP < 1) {
+          ctx.beginPath();
+          ctx.arc(cbX, cbY, 16 + data.clickP * 30, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(16, 185, 129, ${1 - data.clickP})`;
+          ctx.stroke();
+        }
+      } else {
+        ctx.strokeStyle = '#64748b';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // Title
+      ctx.fillStyle = data.isDone ? '#94a3b8' : '#ffffff';
+      ctx.font = '600 18px "Plus Jakarta Sans"';
+      ctx.textAlign = 'left';
+      ctx.fillText(data.title, x + 80, y + 42);
+
+      // Sub details
+      ctx.fillStyle = '#64748b';
+      ctx.font = '500 14px "Plus Jakarta Sans"';
+      ctx.fillText(data.due, x + 80, y + 74);
+
+      // Status Pill
+      const pillX = x + w - 120;
+      const pillY = y + h / 2;
+
+      if (data.isDone) {
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.2)';
+        ctx.beginPath(); ctx.roundRect(pillX - 45, pillY - 14, 90, 28, 8); ctx.fill();
+        ctx.fillStyle = '#34d399';
+        ctx.font = '700 12px "JetBrains Mono"';
+        ctx.textAlign = 'center';
+        ctx.fillText('✓ DONE', pillX, pillY + 4);
+      } else {
+        ctx.fillStyle = 'rgba(234, 5, 67, 0.15)';
+        ctx.beginPath(); ctx.roundRect(pillX - 55, pillY - 14, 110, 28, 8); ctx.fill();
+        ctx.fillStyle = '#fb7185';
+        ctx.font = '700 12px "JetBrains Mono"';
+        ctx.textAlign = 'center';
+        ctx.fillText('TIER 1 FOCUS', pillX, pillY + 4);
+      }
+
+      ctx.restore();
+    }
+
+    function renderMetricsWidget(x, y, w, h, isDone) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(30, 41, 59, 0.6)';
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 20);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 20px "Plus Jakarta Sans"';
+      ctx.textAlign = 'left';
+      ctx.fillText('Weekly Execution Velocity', x + 30, y + 45);
+
+      // Circular completion ring
+      const cx = x + w / 2;
+      const cy = y + 175;
+      const radius = 75;
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 14;
+      ctx.stroke();
+
+      const progress = isDone ? 1.0 : 0.78;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+      ctx.strokeStyle = isDone ? '#10b981' : '#ea0543';
+      ctx.lineWidth = 14;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 36px "JetBrains Mono"';
+      ctx.textAlign = 'center';
+      ctx.fillText(isDone ? '100%' : '78%', cx, cy + 12);
+
+      ctx.fillStyle = isDone ? '#34d399' : '#94a3b8';
+      ctx.font = '600 14px "Plus Jakarta Sans"';
+      ctx.fillText(isDone ? 'All Priorities Clear! 🚀' : '3 of 4 Completed Today', cx, y + 300);
+
+      ctx.restore();
+    }
+
+    function renderMouseCursor(x, y, isClicking) {
+      ctx.save();
+      ctx.translate(x, y);
+      if (isClicking) ctx.scale(0.9, 0.9);
+
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+      ctx.shadowBlur = 12;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, 22);
+      ctx.lineTo(6, 17);
+      ctx.lineTo(12, 26);
+      ctx.lineTo(16, 24);
+      ctx.lineTo(10, 15);
+      ctx.lineTo(18, 15);
+      ctx.closePath();
+
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function renderImportModal(cx, cy, w, h, t) {
+      const x = cx - w / 2;
+      const y = cy - h / 2;
+
+      ctx.save();
+      // Modal backdrop
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+      ctx.shadowBlur = 80;
+
+      ctx.fillStyle = '#131b2e';
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 20);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Modal Title
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 24px "Plus Jakarta Sans"';
+      ctx.textAlign = 'left';
+      ctx.fillText('Import Community Contacts', x + 35, y + 55);
+
+      // Dual Source Tabs: CSV vs Google Drive
+      const tab1Active = t < 2.2;
+      const tabW = 200, tabH = 40;
+
+      // Tab 1: CSV File
+      ctx.fillStyle = tab1Active ? '#ea0543' : 'rgba(255, 255, 255, 0.08)';
+      ctx.beginPath(); ctx.roundRect(x + 35, y + 80, tabW, tabH, 10); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '600 14px "Plus Jakarta Sans"';
+      ctx.textAlign = 'center';
+      ctx.fillText('📄 CSV Spreadsheet', x + 35 + tabW / 2, y + 105);
+
+      // Tab 2: Google Drive
+      ctx.fillStyle = !tab1Active ? '#ea0543' : 'rgba(255, 255, 255, 0.08)';
+      ctx.beginPath(); ctx.roundRect(x + 245, y + 80, tabW, tabH, 10); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('📁 Google Drive Folder', x + 245 + tabW / 2, y + 105);
+
+      // Drop Zone / Ingestion Area
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.6)';
+      ctx.beginPath();
+      ctx.roundRect(x + 35, y + 145, w - 70, 200, 16);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(234, 5, 67, 0.4)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 6]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = '700 32px "Plus Jakarta Sans"';
+      ctx.fillText('↓', cx, y + 215);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '600 18px "Plus Jakarta Sans"';
+      ctx.fillText('Roster_2026_Participants.csv loaded', cx, y + 260);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '500 14px "Plus Jakarta Sans"';
+      ctx.fillText('128 new contacts recognized • 2 duplicates auto-detected', cx, y + 295);
+
+      // Duplicate handling pill
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.15)';
+      ctx.beginPath();
+      ctx.roundRect(x + 35, y + 370, w - 70, 50, 12);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(245, 158, 11, 0.3)';
+      ctx.stroke();
+
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = '600 14px "Plus Jakarta Sans"';
+      ctx.textAlign = 'left';
+      ctx.fillText('⚠️ Strategy: Update existing records and skip zero-field duplicates.', x + 55, y + 401);
+
+      // Import Button
+      ctx.fillStyle = '#ea0543';
+      ctx.beginPath();
+      ctx.roundRect(x + w - 240, y + 440, 205, 46, 12);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 15px "Plus Jakarta Sans"';
+      ctx.textAlign = 'center';
+      ctx.fillText('Import 128 Contacts →', x + w - 137, y + 469);
+
+      ctx.restore();
+    }
+
+    function renderIntelligenceDrawer(x, y, w, h, t) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+      ctx.shadowBlur = 60;
+
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, [20, 0, 0, 20]);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      ctx.strokeStyle = 'rgba(139, 92, 246, 0.4)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Drawer Header
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 20px "Plus Jakarta Sans"';
+      ctx.textAlign = 'left';
+      ctx.fillText('✨ TIP Intelligence Copilot', x + 30, y + 50);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '500 13px "JetBrains Mono"';
+      ctx.fillText('GROUNDED • NO HALLUCINATIONS', x + 30, y + 78);
+
+      // User question chat bubble
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.beginPath();
+      ctx.roundRect(x + 30, y + 120, w - 60, 75, 14);
+      ctx.fill();
+
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = '500 15px "Plus Jakarta Sans"';
+      ctx.fillText('"Which participants in Cohort 3 require', x + 48, y + 152);
+      ctx.fillText('additional funding follow-ups?"', x + 48, y + 175);
+
+      // AI response card with citations
+      if (t > 1.2) {
+        ctx.fillStyle = 'rgba(139, 92, 246, 0.12)';
+        ctx.beginPath();
+        ctx.roundRect(x + 30, y + 220, w - 60, 240, 16);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(139, 92, 246, 0.3)';
+        ctx.stroke();
+
+        ctx.fillStyle = '#a78bfa';
+        ctx.font = '700 14px "JetBrains Mono"';
+        ctx.fillText('FOUND IN 3 PROGRAM RECORDS:', x + 48, y + 256);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '500 15px "Plus Jakarta Sans"';
+        ctx.fillText('• Marcus Vance (Scholarship Fund: Pending)', x + 48, y + 295);
+        ctx.fillText('• Elena Rostova (Stipend Disbursed: Oct 12)', x + 48, y + 328);
+        ctx.fillText('• David Chen (Banking Details Needed)', x + 48, y + 361);
+
+        // Auto action button
+        ctx.fillStyle = '#8b5cf6';
+        ctx.beginPath();
+        ctx.roundRect(x + 48, y + 395, 220, 36, 8);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '600 13px "Plus Jakarta Sans"';
+        ctx.textAlign = 'center';
+        ctx.fillText('Auto-Create 2 Follow-Up Tasks', x + 158, y + 418);
+      }
+
+      ctx.restore();
+    }
+
+    function renderSyncPulseToast(cx, cy, t) {
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      const pulse = 1.0 + Math.sin(t * 8) * 0.05;
+      ctx.scale(pulse, pulse);
+
+      ctx.shadowColor = 'rgba(16, 185, 129, 0.5)';
+      ctx.shadowBlur = 30;
+
+      ctx.fillStyle = '#064e3b';
+      ctx.beginPath();
+      ctx.roundRect(-220, -28, 440, 56, 28);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      ctx.strokeStyle = '#10b981';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = '#34d399';
+      ctx.font = '700 15px "JetBrains Mono"';
+      ctx.textAlign = 'center';
+      ctx.fillText('✓ LOCAL-FIRST: 100% SYNCED TO SUPABASE', 0, 7);
+
+      ctx.restore();
+    }
+
+    // --- ANIMATION LOOP ---
+    function loop(timestamp) {
+      if (!lastTimestamp) lastTimestamp = timestamp;
+      const delta = (timestamp - lastTimestamp) / 1000;
+      lastTimestamp = timestamp;
+
+      if (isPlaying) {
+        currentTime += delta;
+        if (currentTime >= DURATION) {
+          currentTime = DURATION;
+          pause();
+        }
+        soundEngine.update(currentTime);
+      }
+
+      renderFrame(currentTime);
+      updateControlsUI();
+
+      if (isPlaying || currentTime < DURATION) {
+        requestAnimationFrame(loop);
+      }
+    }
+
+    function updateControlsUI() {
+      const p = (currentTime / DURATION) * 100;
+      progressFill.style.width = `${p}%`;
+
+      const curSec = Math.floor(currentTime);
+      const curMs = Math.floor((currentTime % 1) * 10);
+      timeDisplay.textContent = `00:${curSec.toString().padStart(2, '0')}.${curMs} / 00:20`;
+
+      // Update active scene pill
+      scenePills.forEach(pill => {
+        const tVal = parseFloat(pill.getAttribute('data-time'));
+        if (currentTime >= tVal && currentTime < tVal + 4.5) {
+          pill.classList.add('active');
+        } else {
+          pill.classList.remove('active');
+        }
+      });
+    }
+
+    function play() {
+      soundEngine.init();
+      isPlaying = true;
+      lastTimestamp = performance.now();
+      playIcon.style.display = 'none';
+      pauseIcon.style.display = 'block';
+      requestAnimationFrame(loop);
+    }
+
+    function pause() {
+      isPlaying = false;
+      playIcon.style.display = 'block';
+      pauseIcon.style.display = 'none';
+    }
+
+    playBtn.addEventListener('click', () => {
+      if (isPlaying) {
+        pause();
+      } else {
+        if (currentTime >= DURATION) currentTime = 0;
+        play();
+      }
+    });
+
+    restartBtn.addEventListener('click', () => {
+      currentTime = 0;
+      play();
+    });
+
+    progressBar.addEventListener('click', (e) => {
+      const rect = progressBar.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const ratio = clamp(clickX / rect.width, 0, 1);
+      currentTime = ratio * DURATION;
+      renderFrame(currentTime);
+      updateControlsUI();
+    });
+
+    scenePills.forEach(pill => {
+      pill.addEventListener('click', () => {
+        currentTime = parseFloat(pill.getAttribute('data-time'));
+        renderFrame(currentTime);
+        updateControlsUI();
+      });
+    });
+
+    audioToggleBtn.addEventListener('click', () => {
+      soundEngine.init();
+      soundEngine.isMuted = !soundEngine.isMuted;
+      audioToggleBtn.textContent = soundEngine.isMuted ? '🔇 Audio Off' : '🔊 Audio On';
+    });
+
+    fullscreenBtn.addEventListener('click', () => {
+      const el = document.getElementById('viewport');
+      if (!document.fullscreenElement) {
+        el.requestFullscreen().catch(err => alert(err.message));
+      } else {
+        document.exitFullscreen();
+      }
+    });
+
+    // --- SAVE HIGH-RES POSTER FRAME ---
+    downloadPosterBtn.addEventListener('click', () => {
+      renderFrame(5.2); // Frame 5.2s has the task completion ripple + dock
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      const link = document.createElement('a');
+      link.download = 'brag.jpg';
+      link.href = dataUrl;
+      link.click();
+    });
+
+    // --- NATIVE BROWSER VIDEO EXPORT ENGINE (WebM / MP4) ---
+    recordVideoBtn.addEventListener('click', async () => {
+      if (recBadge.style.display === 'inline-flex') return;
+
+      soundEngine.init();
+      soundEngine.isMuted = false;
+      audioToggleBtn.textContent = '🔊 Audio On';
+
+      // Setup MediaStream from Canvas and Web Audio
+      const canvasStream = canvas.captureStream(60);
+      const audioTrack = soundEngine.getMediaStreamAudioTrack();
+      if (audioTrack) {
+        canvasStream.addTrack(audioTrack);
+      }
+
+      // Check supported codecs
+      const mimeTypes = [
+        'video/mp4;codecs=avc1',
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm'
+      ];
+      let selectedMime = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+
+      const recorder = new MediaRecorder(canvasStream, {
+        mimeType: selectedMime,
+        videoBitsPerSecond: 8000000 // 8 Mbps high quality
+      });
+
+      const chunks = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        recBadge.style.display = 'none';
+        recordVideoBtn.disabled = false;
+        recordVideoBtn.textContent = '🎬 Export Video File (.webm / .mp4)';
+
+        const ext = selectedMime.includes('mp4') ? 'mp4' : 'webm';
+        const blob = new Blob(chunks, { type: selectedMime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `tip-crm-launch-video.${ext}`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      };
+
+      // Reset to 0 and begin recording
+      currentTime = 0;
+      recBadge.style.display = 'inline-flex';
+      recordVideoBtn.disabled = true;
+      recordVideoBtn.textContent = '⏳ Recording 20s Video...';
+
+      recorder.start();
+      play();
+
+      const checkFinish = setInterval(() => {
+        if (currentTime >= DURATION) {
+          clearInterval(checkFinish);
+          recorder.stop();
+          pause();
+        }
+      }, 100);
+    });
+
+    // Check if URL has ?autorecord=true or ?export=true to immediately capture and save to laptop
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('autorecord') === 'true' || urlParams.get('export') === 'true') {
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          recordVideoBtn.click();
+        }, 500);
+      });
+    }
+
+    // Initial render at frame 0 (poster frame)
+    renderFrame(0);
+    updateControlsUI();
+  </script>
+</body>
+</html>

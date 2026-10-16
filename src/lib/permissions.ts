@@ -116,7 +116,7 @@ export const ROLE_DEFINITIONS: Record<RoleId, RoleDefinition> = {
       events: 'ALL',
       funding: 'VIEW'
     },
-    defaultPermissions: makePermissions(["people.view","people.create","people.edit","people.export","people.import","organizations.view","organizations.create","organizations.edit","programs.view","programs.create","programs.edit","events.view","events.create","events.edit","participants.view","participants.create","participants.edit","tasks.view","tasks.create","tasks.edit","tasks.delete","tasks.assign","interactions.view","interactions.create","interactions.edit","funding.view","reports.view","reports.export","documents.view","documents.create","users.view","settings.view","audit_logs.view","intelligence.view","intelligence.create","intelligence.export"])
+    defaultPermissions: makePermissions(["people.view","people.create","people.edit","people.export","people.import","organizations.view","organizations.create","organizations.edit","programs.view","programs.create","programs.edit","events.view","events.create","events.edit","participants.view","participants.create","participants.edit","tasks.view","tasks.create","tasks.edit","tasks.delete","tasks.assign","interactions.view","interactions.create","interactions.edit","funding.view","reports.view","reports.export","documents.view","documents.create","users.view","settings.view","audit_logs.view","intelligence.view","intelligence.create","intelligence.manage","intelligence.export"])
   },
 
   staff_member: {
@@ -206,6 +206,29 @@ export function checkUserPermission(
   // Check custom override if present
   if (user.permissionsOverride && typeof user.permissionsOverride[permKey] === 'boolean') {
     return user.permissionsOverride[permKey];
+  }
+
+  // Cross-map create <-> edit when custom overrides are provided by Super Admin
+  if (user.permissionsOverride) {
+    if (action === 'create' && typeof user.permissionsOverride[`${resource}.edit`] === 'boolean') {
+      return user.permissionsOverride[`${resource}.edit`];
+    }
+    if (action === 'edit' && typeof user.permissionsOverride[`${resource}.create`] === 'boolean') {
+      return user.permissionsOverride[`${resource}.create`];
+    }
+  }
+
+  // Evaluate data scope for funding
+  if (resource === 'funding') {
+    if (user.dataScope?.funding === 'ALL') {
+      return true; // Full access: view, create, edit
+    }
+    if (user.dataScope?.funding === 'VIEW' && action === 'view') {
+      return true;
+    }
+    if (user.dataScope?.funding === 'NONE') {
+      return false; // Explicitly hidden/blocked
+    }
   }
 
   // Fall back to role default
@@ -324,8 +347,23 @@ export const Permissions = {
     if (action === 'delete') {
       return `Restricted: Only Super Admins are authorized to delete ${resource}.`;
     }
+    if (action === 'view' && resource === 'intelligence') {
+      return 'Restricted: Access to AI Intelligence & Suggestions requires permission from a Super Admin.';
+    }
+    if (action === 'create' && resource === 'intelligence') {
+      return 'Restricted: Scanning CRM patterns and generating AI insights requires AI generation permission.';
+    }
+    if (action === 'manage' && resource === 'intelligence') {
+      return 'Restricted: Applying AI suggestions and executing automated actions requires AI management permission.';
+    }
+    if (action === 'export' && resource === 'intelligence') {
+      return 'Restricted: Exporting AI intelligence data requires export authorization.';
+    }
     if (action === 'create' && resource === 'funding') {
-      return 'Restricted: Only Super Admins can log or allocate funding records.';
+      return 'Restricted: Logging funding records requires authorization from a Super Admin.';
+    }
+    if ((action === 'create' || action === 'edit') && resource === 'documents') {
+      return 'Restricted: Linking or creating documents requires authorization from a Super Admin.';
     }
     if (action === 'create' && resource === 'programs') {
       return 'Restricted: Program creation requires Staff Manager or Super Admin role.';

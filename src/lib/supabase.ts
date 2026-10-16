@@ -178,7 +178,7 @@ export class SupabaseAuthEngine {
 
         if (data?.session?.user && data.session.user.email) {
           const user = data.session.user;
-          const email = user.email.toLowerCase().trim();
+          const email = user.email!.toLowerCase().trim();
           const fullName = user.user_metadata?.full_name || 
                            user.user_metadata?.name || 
                            email.split('@')[0];

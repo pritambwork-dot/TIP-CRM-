@@ -59,7 +59,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
   } = useCrm();
 
   const isManagerOrAdmin = isSuperAdmin || isStaffManager;
-  const visibleTasks = currentUser.role === 'volunteer' ? scopedTasks : tasks;
+  const visibleTasks = isManagerOrAdmin ? tasks : scopedTasks;
 
   const [activeTab, setActiveTab] = useState<TaskFilterTab>('All');
   const [ownerFilter, setOwnerFilter] = useState<string>('All');

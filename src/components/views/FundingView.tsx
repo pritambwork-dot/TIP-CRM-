@@ -13,10 +13,14 @@ import {
   Trash2,
   Lock,
   X,
-  Sparkles
+  Sparkles,
+  Link2,
+  ExternalLink,
+  FileSpreadsheet,
+  FolderOpen
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { FundingRecord, FundingStatus, FundingType } from '../../types';
+import { FundingRecord, FundingStatus, FundingType, DocumentItem } from '../../types';
 import { useCrm } from '../../context/CrmContext';
 import { ProtectedAction } from '../common/ProtectedAction';
 import { Button } from '../ui/button';
@@ -25,6 +29,7 @@ import { Card } from '../ui/card';
 import { Input } from '../ui/input';
 import { OneUiSearchBar } from '../ui/OneUiSearchBar';
 import { exportToCsv } from '../../lib/csvExport';
+import { validateExternalUrl } from '../../lib/fileValidation';
 
 const STATUS_FILTERS: Array<FundingStatus | 'All'> = [
   'All',
@@ -51,15 +56,27 @@ export const FundingView: React.FC<FundingViewProps> = ({
     updateFunding, 
     deleteFunding, 
     programs, 
+    documents,
+    addDocument,
+    deleteDocument,
     currentUser,
+    isSuperAdmin,
     hasPermission,
     Permissions
   } = useCrm();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<FundingStatus | 'All'>('All');
 
-  const canCreateFunding = hasPermission('funding', 'create');
-  const canDeleteFunding = hasPermission('funding', 'delete');
+  // Permission evaluations based on Super Admin configurations & dataScope
+  const canCreateFunding = isSuperAdmin || 
+    currentUser.dataScope?.funding === 'ALL' || 
+    hasPermission('funding', 'create') || 
+    hasPermission('funding', 'edit');
+  const canDeleteFunding = isSuperAdmin || hasPermission('funding', 'delete');
+  const canLinkDocuments = isSuperAdmin || 
+    hasPermission('documents', 'create') || 
+    hasPermission('documents', 'edit');
+  const canDeleteDocuments = isSuperAdmin || hasPermission('documents', 'delete');
   const canExport = hasPermission('reports', 'export');
 
   // Add funding modal
@@ -73,16 +90,36 @@ export const FundingView: React.FC<FundingViewProps> = ({
   const [newProgramId, setNewProgramId] = useState('');
   const [newNotes, setNewNotes] = useState('');
 
-  // Access Control: Volunteers cannot see donor/funding financial records
-  if (currentUser.role === 'volunteer') {
+  // Optional initial document attachment state
+  const [attachInitialDoc, setAttachInitialDoc] = useState(false);
+  const [initialDocTitle, setInitialDocTitle] = useState('');
+  const [initialDocUrl, setInitialDocUrl] = useState('');
+  const [initialDocType, setInitialDocType] = useState<DocumentItem['type']>('Google Docs');
+  const [initialDocUrlError, setInitialDocUrlError] = useState<string | null>(null);
+
+  // Dedicated funding documents & agreements modal state
+  const [selectedFundingForDocs, setSelectedFundingForDocs] = useState<FundingRecord | null>(null);
+  const [newDocTitle, setNewDocTitle] = useState('');
+  const [newDocUrl, setNewDocUrl] = useState('');
+  const [newDocType, setNewDocType] = useState<DocumentItem['type']>('Google Docs');
+  const [newDocDescription, setNewDocDescription] = useState('');
+  const [newDocUrlError, setNewDocUrlError] = useState<string | null>(null);
+
+  // Access Control: Check administrator-configured data scope and role permissions
+  const isFundingRestricted = !isSuperAdmin && (
+    currentUser.dataScope?.funding === 'NONE' || 
+    !hasPermission('funding', 'view')
+  );
+
+  if (isFundingRestricted) {
     return (
       <div className="p-12 text-center max-w-md mx-auto">
         <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto mb-3">
           <ShieldAlert className="w-6 h-6" />
         </div>
-        <h3 className="text-base font-bold text-foreground">Restricted Access</h3>
+        <h3 className="text-base font-bold text-foreground">Restricted Data Access</h3>
         <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-          Financial ledgers and donor contributions are restricted to TIP Staff members to maintain donor privacy.
+          Financial ledgers and donor contributions are hidden for your account based on administrator data scope configuration.
         </p>
       </div>
     );
@@ -118,9 +155,17 @@ export const FundingView: React.FC<FundingViewProps> = ({
     e.preventDefault();
     if (!newFunderName.trim()) return;
 
+    if (attachInitialDoc && initialDocUrl.trim()) {
+      const check = validateExternalUrl(initialDocUrl);
+      if (!check.isValid || !check.sanitizedUrl) {
+        setInitialDocUrlError(check.error || 'Invalid or insecure document URL.');
+        return;
+      }
+    }
+
     const programObj = programs.find(p => p.id === newProgramId);
 
-    addFunding({
+    const createdRecord = addFunding({
       donorOrFunder: newFunderName.trim(),
       funderName: newFunderName.trim(),
       fundingType: newType,
@@ -137,9 +182,63 @@ export const FundingView: React.FC<FundingViewProps> = ({
       notes: newNotes.trim() || undefined
     });
 
+    if (attachInitialDoc && initialDocUrl.trim() && initialDocTitle.trim()) {
+      const check = validateExternalUrl(initialDocUrl);
+      addDocument({
+        title: initialDocTitle.trim(),
+        url: check.sanitizedUrl || initialDocUrl.trim(),
+        type: initialDocType,
+        relatedType: 'Funding',
+        relatedId: createdRecord.id,
+        relatedName: createdRecord.funderName || createdRecord.donorOrFunder,
+        addedBy: currentUser.name,
+        description: `Grant agreement / funder documentation for ${createdRecord.funderName || createdRecord.donorOrFunder}`
+      });
+    }
+
     setNewFunderName('');
     setNewNotes('');
+    setAttachInitialDoc(false);
+    setInitialDocTitle('');
+    setInitialDocUrl('');
+    setInitialDocUrlError(null);
     setShowAddModal(false);
+  };
+
+  const handleLinkFundingDocument = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFundingForDocs || !newDocTitle.trim() || !newDocUrl.trim()) return;
+
+    const check = validateExternalUrl(newDocUrl);
+    if (!check.isValid || !check.sanitizedUrl) {
+      setNewDocUrlError(check.error || 'Invalid or insecure document URL.');
+      return;
+    }
+
+    addDocument({
+      title: newDocTitle.trim(),
+      url: check.sanitizedUrl,
+      type: newDocType,
+      relatedType: 'Funding',
+      relatedId: selectedFundingForDocs.id,
+      relatedName: selectedFundingForDocs.funderName || selectedFundingForDocs.donorOrFunder,
+      addedBy: currentUser.name,
+      description: newDocDescription.trim() || undefined
+    });
+
+    setNewDocTitle('');
+    setNewDocUrl('');
+    setNewDocDescription('');
+    setNewDocUrlError(null);
+  };
+
+  const handleOpenDoc = (url: string) => {
+    const check = validateExternalUrl(url);
+    if (check.isValid && check.sanitizedUrl) {
+      window.open(check.sanitizedUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      alert(check.error || 'Insecure URL protocol blocked.');
+    }
   };
 
   const exportFundingCSV = () => {
@@ -195,18 +294,35 @@ export const FundingView: React.FC<FundingViewProps> = ({
             </Button>
           </ProtectedAction>
 
-          <ProtectedAction resource="funding" action="create">
+          {canCreateFunding ? (
             <Button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => {
+                setShowAddModal(true);
+                setAttachInitialDoc(false);
+                setInitialDocTitle('');
+                setInitialDocUrl('');
+                setInitialDocUrlError(null);
+              }}
               id="btn-add-funding"
               variant="crimson"
               size="sm"
-              className="gap-1.5 text-xs shadow-xs"
+              className="gap-1.5 text-xs shadow-xs cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Add funding</span>
             </Button>
-          </ProtectedAction>
+          ) : (
+            <Button
+              disabled
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs opacity-50 cursor-not-allowed"
+              title={Permissions.getDisabledReason('funding', 'create')}
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Add funding</span>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -316,6 +432,7 @@ export const FundingView: React.FC<FundingViewProps> = ({
                 <th className="py-3 px-4">Fiscal Year</th>
                 <th className="py-3 px-4">Reporting / Renewal</th>
                 <th className="py-3 px-4">Associated Initiative</th>
+                <th className="py-3 px-4">Agreements & Docs</th>
                 {canDeleteFunding && <th className="py-3 px-4 text-right">Actions</th>}
               </tr>
             </thead>
@@ -378,6 +495,47 @@ export const FundingView: React.FC<FundingViewProps> = ({
                       ) : (
                         <span className="text-muted-foreground">General Operations</span>
                       )}
+                    </td>
+
+                    <td className="py-3.5 px-4">
+                      {(() => {
+                        const linkedDocs = documents.filter(d => 
+                          d.relatedType === 'Funding' && 
+                          (d.relatedId === item.id || d.relatedName === funder)
+                        );
+                        return (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedFundingForDocs(item);
+                                setNewDocUrlError(null);
+                              }}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${
+                                linkedDocs.length > 0
+                                  ? 'bg-[#140a8e]/10 text-[#140a8e] hover:bg-[#140a8e]/20'
+                                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                              }`}
+                              title={canLinkDocuments ? "View or Link Documents" : "View Linked Documents"}
+                            >
+                              <FileText className="w-3 h-3" />
+                              <span>{linkedDocs.length} {linkedDocs.length === 1 ? 'Doc' : 'Docs'}</span>
+                            </button>
+                            {canLinkDocuments && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedFundingForDocs(item);
+                                  setNewDocUrlError(null);
+                                }}
+                                className="text-[11px] text-[#ea0543] hover:underline font-medium cursor-pointer"
+                              >
+                                + Link
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     <td className="py-3.5 px-4 text-right">
@@ -533,12 +691,83 @@ export const FundingView: React.FC<FundingViewProps> = ({
                   />
                 </div>
 
+                {/* Optional Grant Agreement / Document Link */}
+                <div className="pt-2 border-t border-border/80">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Link2 className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span>Attach Grant Agreement / Document (Optional)</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setAttachInitialDoc(!attachInitialDoc)}
+                      className="text-xs text-primary font-medium hover:underline cursor-pointer"
+                    >
+                      {attachInitialDoc ? 'Remove Document' : '+ Attach Document Link'}
+                    </button>
+                  </div>
+
+                  {attachInitialDoc && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="mt-3 p-3 rounded-xl bg-muted/40 border border-border/80 space-y-3"
+                    >
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-medium text-foreground mb-1">Document Title</label>
+                          <Input
+                            type="text"
+                            placeholder="e.g. Contribution Agreement 2026"
+                            value={initialDocTitle}
+                            onChange={e => setInitialDocTitle(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-medium text-foreground mb-1">Format</label>
+                          <select
+                            value={initialDocType}
+                            onChange={e => setInitialDocType(e.target.value as any)}
+                            className="w-full text-xs p-2 rounded-lg border border-input bg-background text-foreground"
+                          >
+                            <option value="Google Docs">Google Docs</option>
+                            <option value="Google Sheets">Google Sheets</option>
+                            <option value="Google Drive">Google Drive Folder</option>
+                            <option value="PDF / File">PDF / File</option>
+                            <option value="Cloud Link">Cloud Link</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-foreground mb-1">External URL *</label>
+                        <Input
+                          type="url"
+                          placeholder="https://docs.google.com/document/d/..."
+                          value={initialDocUrl}
+                          onChange={e => {
+                            setInitialDocUrl(e.target.value);
+                            if (initialDocUrlError) setInitialDocUrlError(null);
+                          }}
+                          className={initialDocUrlError ? 'border-rose-500' : ''}
+                        />
+                        {initialDocUrlError && (
+                          <p className="text-[10px] text-rose-600 mt-1 flex items-center gap-1 font-medium">
+                            <AlertCircle className="w-3 h-3 shrink-0" />
+                            <span>{initialDocUrlError}</span>
+                          </p>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+
                 <div className="flex justify-end gap-2 pt-3 border-t border-border">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => setShowAddModal(false)}
+                    className="cursor-pointer"
                   >
                     Cancel
                   </Button>
@@ -546,12 +775,228 @@ export const FundingView: React.FC<FundingViewProps> = ({
                     type="submit"
                     variant="crimson"
                     size="sm"
-                    className="shadow-xs font-semibold"
+                    className="shadow-xs font-semibold cursor-pointer"
                   >
                     Save Record
                   </Button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Dedicated Funding Documents & Agreements Modal */}
+      <AnimatePresence>
+        {selectedFundingForDocs && (
+          <div 
+            className="fixed inset-0 z-50 bg-black/45 backdrop-blur-xs flex items-center justify-center p-4"
+            onClick={() => setSelectedFundingForDocs(null)}
+          >
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+              className="w-full max-w-xl bg-card rounded-2xl shadow-2xl border border-border overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-[#140a8e]" />
+                    <span>Funding Agreements & Linked Documents</span>
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {selectedFundingForDocs.funderName || selectedFundingForDocs.donorOrFunder} · ${selectedFundingForDocs.amountCad.toLocaleString('en-CA')} CAD ({selectedFundingForDocs.fiscalYear || '2026-2027'})
+                  </p>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={() => setSelectedFundingForDocs(null)} 
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+
+              <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+                {/* Existing Linked Documents List */}
+                <div>
+                  <h4 className="text-xs font-semibold text-foreground mb-2 flex items-center justify-between">
+                    <span>Linked Documents</span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {documents.filter(d => d.relatedType === 'Funding' && (d.relatedId === selectedFundingForDocs.id || d.relatedName === (selectedFundingForDocs.funderName || selectedFundingForDocs.donorOrFunder))).length} Total
+                    </Badge>
+                  </h4>
+
+                  {(() => {
+                    const currentDocs = documents.filter(d => 
+                      d.relatedType === 'Funding' && 
+                      (d.relatedId === selectedFundingForDocs.id || d.relatedName === (selectedFundingForDocs.funderName || selectedFundingForDocs.donorOrFunder))
+                    );
+
+                    if (currentDocs.length === 0) {
+                      return (
+                        <div className="p-6 text-center border border-dashed border-border rounded-xl bg-muted/10">
+                          <FileText className="w-6 h-6 text-muted-foreground/60 mx-auto mb-1.5" />
+                          <p className="text-xs text-muted-foreground">No documents linked to this funding agreement yet.</p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-2">
+                        {currentDocs.map(doc => (
+                          <div 
+                            key={doc.id}
+                            className="p-3 rounded-xl border border-border bg-background hover:border-primary/40 transition-colors flex items-center justify-between gap-3"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                                {doc.type.includes('Sheet') ? <FileSpreadsheet className="w-3.5 h-3.5" /> :
+                                 doc.type.includes('Drive') ? <FolderOpen className="w-3.5 h-3.5" /> :
+                                 <FileText className="w-3.5 h-3.5" />}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-foreground truncate">{doc.title}</p>
+                                <p className="text-[11px] text-muted-foreground truncate">
+                                  {doc.type} · Added {doc.addedAt} by {doc.addedBy}
+                                </p>
+                                {doc.description && (
+                                  <p className="text-[11px] text-muted-foreground/80 italic mt-0.5">{doc.description}</p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs gap-1 cursor-pointer"
+                                onClick={() => handleOpenDoc(doc.url)}
+                              >
+                                <span>Open</span>
+                                <ExternalLink className="w-3 h-3 text-muted-foreground" />
+                              </Button>
+
+                              {canDeleteDocuments && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (confirm(`Remove document link "${doc.title}"?`)) {
+                                      deleteDocument(doc.id);
+                                    }
+                                  }}
+                                  className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors cursor-pointer"
+                                  title="Remove Document Link"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Link New Document Form (Governed by Super Admin Permissions) */}
+                <div className="pt-3 border-t border-border">
+                  {canLinkDocuments ? (
+                    <form onSubmit={handleLinkFundingDocument} className="space-y-3">
+                      <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <Plus className="w-3.5 h-3.5 text-[#ea0543]" />
+                        <span>Link New Document or Agreement</span>
+                      </h4>
+
+                      <div>
+                        <label className="block text-[11px] font-medium text-foreground mb-1">Document Title *</label>
+                        <Input 
+                          type="text"
+                          required
+                          placeholder="e.g. Master Grant Agreement, Budget Spreadsheet"
+                          value={newDocTitle}
+                          onChange={e => setNewDocTitle(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-medium text-foreground mb-1">Format</label>
+                          <select 
+                            value={newDocType}
+                            onChange={e => setNewDocType(e.target.value as any)}
+                            className="w-full text-xs p-2 rounded-lg border border-input bg-background text-foreground"
+                          >
+                            <option value="Google Docs">Google Docs</option>
+                            <option value="Google Sheets">Google Sheets</option>
+                            <option value="Google Drive">Google Drive Folder</option>
+                            <option value="Google Slides">Google Slides</option>
+                            <option value="PDF / File">PDF / File</option>
+                            <option value="Cloud Link">Cloud Link</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-medium text-foreground mb-1">Description (Optional)</label>
+                          <Input 
+                            type="text"
+                            placeholder="e.g. Signed contract and disbursement terms"
+                            value={newDocDescription}
+                            onChange={e => setNewDocDescription(e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-medium text-foreground mb-1">Google Drive or External URL *</label>
+                        <Input 
+                          type="url"
+                          required
+                          placeholder="https://docs.google.com/document/d/... or cloud storage URL"
+                          value={newDocUrl}
+                          onChange={e => {
+                            setNewDocUrl(e.target.value);
+                            if (newDocUrlError) setNewDocUrlError(null);
+                          }}
+                          className={newDocUrlError ? 'border-rose-500' : ''}
+                        />
+                        {newDocUrlError && (
+                          <p className="text-[11px] text-rose-600 mt-1 flex items-center gap-1 font-medium">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{newDocUrlError}</span>
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex justify-end pt-2">
+                        <Button
+                          type="submit"
+                          variant="crimson"
+                          size="sm"
+                          className="shadow-xs font-semibold cursor-pointer gap-1.5"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                          <span>Link Document</span>
+                        </Button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 flex items-start gap-2.5">
+                      <Lock className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div className="text-xs">
+                        <p className="font-semibold">Document Linking Restricted</p>
+                        <p className="text-muted-foreground mt-0.5">
+                          Only users granted document creation or edit permissions by the Super Administrator can link new files to funding agreements.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </motion.div>
           </div>
         )}

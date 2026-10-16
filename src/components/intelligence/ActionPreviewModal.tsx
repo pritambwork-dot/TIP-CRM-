@@ -10,7 +10,8 @@ import {
   Tag, 
   Zap, 
   ShieldCheck, 
-  Loader2 
+  Loader2,
+  Lock 
 } from 'lucide-react';
 import { AiActionPreview } from '../../types';
 
@@ -21,13 +22,19 @@ interface ActionPreviewModalProps {
 }
 
 export const ActionPreviewModal: React.FC<ActionPreviewModalProps> = ({ preview, onClose, onSuccess }) => {
-  const { executeAiAction } = useCrm();
+  const { executeAiAction, currentUser, hasPermission } = useCrm();
   const [isExecuting, setIsExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const canManage = currentUser?.roleId === 'super_admin' || hasPermission('intelligence', 'manage');
 
   if (!preview) return null;
 
   const handleConfirm = async () => {
+    if (!canManage) {
+      setError('Restricted: Applying AI suggestions requires AI management permission from a Super Admin.');
+      return;
+    }
     setIsExecuting(true);
     setError(null);
     try {
@@ -209,6 +216,14 @@ export const ActionPreviewModal: React.FC<ActionPreviewModalProps> = ({ preview,
             </div>
           )}
 
+          {/* Permission restriction warning */}
+          {!canManage && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2.5 text-amber-800 text-xs">
+              <Lock className="w-4 h-4 shrink-0 text-amber-600" />
+              <span>Restricted: Applying AI suggestions and executing automated actions requires AI management permission from a Super Admin.</span>
+            </div>
+          )}
+
           {/* Guardrail Guarantee */}
           <div className="bg-emerald-50/70 border border-emerald-200/70 rounded-xl p-3 flex items-start gap-2.5 text-left">
             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
@@ -231,10 +246,20 @@ export const ActionPreviewModal: React.FC<ActionPreviewModalProps> = ({ preview,
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={isExecuting}
-            className="px-5 py-2 text-sm font-semibold text-white bg-[#140a8e] hover:bg-[#0f076e] rounded-xl shadow-sm transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+            disabled={isExecuting || !canManage}
+            title={!canManage ? 'Restricted: Applying AI suggestions requires AI management permission.' : undefined}
+            className={`px-5 py-2 text-sm font-semibold rounded-xl shadow-sm transition-all flex items-center gap-2 ${
+              canManage 
+                ? 'text-white bg-[#140a8e] hover:bg-[#0f076e] disabled:opacity-50 cursor-pointer' 
+                : 'text-zinc-400 bg-zinc-200 cursor-not-allowed opacity-60'
+            }`}
           >
-            {isExecuting ? (
+            {!canManage ? (
+              <>
+                <Lock className="w-4 h-4" />
+                Permission Required
+              </>
+            ) : isExecuting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
                 Applying Changes...

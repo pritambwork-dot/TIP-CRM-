@@ -39,6 +39,10 @@ export const DocumentsView: React.FC = () => {
     documents, 
     addDocument, 
     deleteDocument, 
+    funding,
+    programs,
+    events,
+    people,
     currentUser, 
     hasPermission, 
     isSuperAdmin, 
@@ -59,6 +63,7 @@ export const DocumentsView: React.FC = () => {
   const [newUrl, setNewUrl] = useState('');
   const [newType, setNewType] = useState<DocumentItem['type']>('Google Docs');
   const [newRelatedType, setNewRelatedType] = useState<DocumentItem['relatedType']>('Program');
+  const [newRelatedId, setNewRelatedId] = useState('');
   const [newRelatedName, setNewRelatedName] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -132,6 +137,7 @@ export const DocumentsView: React.FC = () => {
         url: urlValidation.sanitizedUrl,
         type: newType,
         relatedType: newRelatedType,
+        relatedId: newRelatedId || undefined,
         relatedName: newRelatedName.trim() || undefined,
         addedBy: currentUser.name,
         description: newDescription.trim() || undefined
@@ -189,6 +195,7 @@ export const DocumentsView: React.FC = () => {
           url: '',
           type: 'PDF / File',
           relatedType: newRelatedType,
+          relatedId: newRelatedId || undefined,
           relatedName: newRelatedName.trim() || undefined,
           addedBy: currentUser.name,
           description: newDescription.trim() || `Uploaded document (${(selectedFile.size / 1024).toFixed(0)} KB)`,
@@ -211,6 +218,7 @@ export const DocumentsView: React.FC = () => {
     setNewTitle('');
     setNewUrl('');
     setNewRelatedName('');
+    setNewRelatedId('');
     setNewDescription('');
     setSelectedFile(null);
     setUrlError(null);
@@ -543,28 +551,116 @@ export const DocumentsView: React.FC = () => {
                     <label className="block text-xs font-semibold text-foreground mb-1">Related Record Category</label>
                     <select 
                       value={newRelatedType}
-                      onChange={e => setNewRelatedType(e.target.value as any)}
+                      onChange={e => {
+                        setNewRelatedType(e.target.value as any);
+                        setNewRelatedId('');
+                        setNewRelatedName('');
+                      }}
                       className="w-full text-xs p-2 rounded-lg border border-input bg-background text-foreground"
                     >
+                      <option value="Funding">Donor / Grant Agreement</option>
                       <option value="Program">Program / Initiative</option>
                       <option value="Event">Event / Workshop</option>
-                      <option value="Funding">Donor / Grant Agreement</option>
-                      <option value="Organization">Organization</option>
                       <option value="Person">Person</option>
+                      <option value="Organization">Organization</option>
                       <option value="General">General Operations</option>
                     </select>
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-foreground mb-1">Related Entity Name</label>
-                  <Input 
-                    type="text"
-                    placeholder="e.g. Civic Accessibility Lab"
-                    value={newRelatedName}
-                    onChange={e => setNewRelatedName(e.target.value)}
-                  />
-                </div>
+                {newRelatedType === 'Funding' ? (
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1">Select Funding / Grant Record *</label>
+                    <select
+                      value={newRelatedId}
+                      onChange={e => {
+                        const id = e.target.value;
+                        setNewRelatedId(id);
+                        const f = funding.find(item => item.id === id);
+                        if (f) setNewRelatedName(f.funderName || f.donorOrFunder);
+                        else setNewRelatedName('');
+                      }}
+                      className="w-full text-xs p-2 rounded-lg border border-input bg-background text-foreground"
+                    >
+                      <option value="">-- Choose Grant Agreement --</option>
+                      {funding.map(f => (
+                        <option key={f.id} value={f.id}>
+                          {f.funderName || f.donorOrFunder} (${f.amountCad.toLocaleString('en-CA')} CAD · {f.fiscalYear || '2026-2027'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : newRelatedType === 'Program' ? (
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1">Select Program / Initiative *</label>
+                    <select
+                      value={newRelatedId}
+                      onChange={e => {
+                        const id = e.target.value;
+                        setNewRelatedId(id);
+                        const pr = programs.find(item => item.id === id);
+                        if (pr) setNewRelatedName(pr.name);
+                        else setNewRelatedName('');
+                      }}
+                      className="w-full text-xs p-2 rounded-lg border border-input bg-background text-foreground"
+                    >
+                      <option value="">-- Choose Program --</option>
+                      {programs.map(pr => (
+                        <option key={pr.id} value={pr.id}>{pr.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : newRelatedType === 'Event' ? (
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1">Select Event / Workshop *</label>
+                    <select
+                      value={newRelatedId}
+                      onChange={e => {
+                        const id = e.target.value;
+                        setNewRelatedId(id);
+                        const ev = events.find(item => item.id === id);
+                        if (ev) setNewRelatedName(ev.name);
+                        else setNewRelatedName('');
+                      }}
+                      className="w-full text-xs p-2 rounded-lg border border-input bg-background text-foreground"
+                    >
+                      <option value="">-- Choose Event --</option>
+                      {events.map(ev => (
+                        <option key={ev.id} value={ev.id}>{ev.name} ({ev.date})</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : newRelatedType === 'Person' ? (
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1">Select Person / Stakeholder *</label>
+                    <select
+                      value={newRelatedId}
+                      onChange={e => {
+                        const id = e.target.value;
+                        setNewRelatedId(id);
+                        const p = people.find(item => item.id === id);
+                        if (p) setNewRelatedName(p.name);
+                        else setNewRelatedName('');
+                      }}
+                      className="w-full text-xs p-2 rounded-lg border border-input bg-background text-foreground"
+                    >
+                      <option value="">-- Choose Person --</option>
+                      {people.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.email})</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1">Related Entity Name</label>
+                    <Input 
+                      type="text"
+                      placeholder="e.g. Operations, Legal, or Community Board"
+                      value={newRelatedName}
+                      onChange={e => setNewRelatedName(e.target.value)}
+                    />
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-semibold text-foreground mb-1">Notes / Description</label>

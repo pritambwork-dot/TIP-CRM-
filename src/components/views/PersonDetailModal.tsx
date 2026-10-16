@@ -23,6 +23,7 @@ import { Person, InteractionType, RelationshipType } from '../../types';
 import { useCrm } from '../../context/CrmContext';
 import { ProtectedAction } from '../common/ProtectedAction';
 import { sanitizeExternalUrl, sanitizeMailto } from '../../lib/safeUrls';
+import { validateExternalUrl } from '../../lib/fileValidation';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -53,9 +54,11 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
     addTask, 
     toggleTaskStatus,
     documents,
+    addDocument,
     programs,
     events,
     currentUser,
+    isSuperAdmin,
     hasPermission,
     Permissions
   } = useCrm();
@@ -64,6 +67,7 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const canDeletePerson = hasPermission('people', 'delete');
   const canCreateInteraction = hasPermission('interactions', 'create');
   const canCreateTask = hasPermission('tasks', 'create');
+  const canLinkDoc = isSuperAdmin || hasPermission('documents', 'create') || hasPermission('documents', 'edit');
 
   const [activeTab, setActiveTab] = useState<'timeline' | 'details' | 'tasks' | 'documents'>('timeline');
   const [isEditing, setIsEditing] = useState(false);
@@ -81,6 +85,13 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const [taskDueDate, setTaskDueDate] = useState('');
   const [taskPriority, setTaskPriority] = useState<'Low' | 'Medium' | 'High'>('Medium');
 
+  // Document linking state (governed by Super Admin permissions)
+  const [showAddDocForm, setShowAddDocForm] = useState(false);
+  const [docTitle, setDocTitle] = useState('');
+  const [docUrl, setDocUrl] = useState('');
+  const [docType, setDocType] = useState<'Google Docs' | 'Google Sheets' | 'Google Drive' | 'PDF / File' | 'Cloud Link'>('Google Docs');
+  const [docUrlError, setDocUrlError] = useState<string | null>(null);
+
   const person = people.find(p => p.id === personId);
 
   // Edit fields
@@ -93,6 +104,33 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
   const [editNextFollowUp, setEditNextFollowUp] = useState('');
 
   if (!isOpen || !person) return null;
+
+  const handleLinkDoc = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!person || !docTitle.trim() || !docUrl.trim()) return;
+
+    const check = validateExternalUrl(docUrl);
+    if (!check.isValid || !check.sanitizedUrl) {
+      setDocUrlError(check.error || 'Invalid or insecure document URL.');
+      return;
+    }
+
+    addDocument({
+      title: docTitle.trim(),
+      url: check.sanitizedUrl,
+      type: docType,
+      relatedType: 'Person',
+      relatedId: person.id,
+      relatedName: person.name,
+      addedBy: currentUser.name,
+      description: `Document linked to ${person.name}`
+    });
+
+    setDocTitle('');
+    setDocUrl('');
+    setDocUrlError(null);
+    setShowAddDocForm(false);
+  };
 
   const handleStartEdit = () => {
     setEditName(person.name);
@@ -751,10 +789,99 @@ export const PersonDetailModal: React.FC<PersonDetailModalProps> = ({
           {/* TAB 4: Documents */}
           {activeTab === 'documents' && (
             <div className="space-y-4">
-              <div>
-                <h4 className="text-sm font-semibold text-foreground">Linked Documents</h4>
-                <p className="text-xs text-muted-foreground">Google Drive links and files associated with {person.name}</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground">Linked Documents</h4>
+                  <p className="text-xs text-muted-foreground">Google Drive links and files associated with {person.name}</p>
+                </div>
+                {canLinkDoc && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowAddDocForm(!showAddDocForm)}
+                    className="text-xs gap-1.5 h-8 cursor-pointer border-[#140a8e]/30 text-[#140a8e] hover:bg-[#140a8e]/10"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-[#ea0543]" />
+                    <span>{showAddDocForm ? 'Cancel' : 'Link Document'}</span>
+                  </Button>
+                )}
               </div>
+
+              {/* Inline Link Document Form */}
+              {showAddDocForm && canLinkDoc && (
+                <motion.form
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  onSubmit={handleLinkDoc}
+                  className="p-3.5 rounded-2xl border border-border bg-muted/20 space-y-3"
+                >
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-foreground mb-1">Document Title *</label>
+                      <Input
+                        type="text"
+                        required
+                        placeholder="e.g. Consent Form, Bio / Profile"
+                        value={docTitle}
+                        onChange={e => setDocTitle(e.target.value)}
+                        className="text-xs h-8"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-foreground mb-1">Format</label>
+                      <select
+                        value={docType}
+                        onChange={e => setDocType(e.target.value as any)}
+                        className="w-full text-xs h-8 px-2 rounded-lg border border-input bg-background text-foreground"
+                      >
+                        <option value="Google Docs">Google Docs</option>
+                        <option value="Google Sheets">Google Sheets</option>
+                        <option value="Google Drive">Google Drive Folder</option>
+                        <option value="PDF / File">PDF / File</option>
+                        <option value="Cloud Link">Cloud Link</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-foreground mb-1">External URL *</label>
+                    <Input
+                      type="url"
+                      required
+                      placeholder="https://docs.google.com/document/d/... or cloud link"
+                      value={docUrl}
+                      onChange={e => {
+                        setDocUrl(e.target.value);
+                        if (docUrlError) setDocUrlError(null);
+                      }}
+                      className={`text-xs h-8 ${docUrlError ? 'border-rose-500' : ''}`}
+                    />
+                    {docUrlError && (
+                      <p className="text-[10px] text-rose-600 mt-1">{docUrlError}</p>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowAddDocForm(false)}
+                      className="text-xs h-7"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="crimson"
+                      size="sm"
+                      className="text-xs h-7 font-semibold"
+                    >
+                      Attach Document
+                    </Button>
+                  </div>
+                </motion.form>
+              )}
 
               {personDocs.length === 0 ? (
                 <div className="p-8 text-center border border-dashed border-border rounded-2xl bg-muted/10">

@@ -22,7 +22,8 @@ import {
   TrendingUp,
   Layers,
   Info,
-  Zap
+  Zap,
+  Lock
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -56,6 +57,7 @@ import { Button, Badge, Card, Tabs, TabsList, TabsTrigger, TabsContent } from '.
 import { SuggestionsCenterView } from '../intelligence/SuggestionsCenterView';
 import { PrintableIntelligenceReport } from '../reports/PrintableIntelligenceReport';
 import { ErrorBoundary } from '../common/ErrorBoundary';
+import { Permissions } from '../../lib/permissions';
 
 // TIP Design Tokens
 const TIP_COLORS = {
@@ -152,6 +154,11 @@ export const IntelligenceView: React.FC = () => {
     }
   ]);
 
+  const canView = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'view');
+  const canCreate = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'create');
+  const canManage = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'manage');
+  const canExport = currentUser.roleId === 'super_admin' || hasPermission('intelligence', 'export') || hasPermission('reports', 'export');
+
   // Handle Loading a pre-seeded demo dataset
   const handleLoadDemoDataset = (demo: DemoDatasetInfo) => {
     setDatasetName(demo.filename);
@@ -230,6 +237,10 @@ export const IntelligenceView: React.FC = () => {
 
   // 2. On-Demand Gemini AI Insights Call (Invoked only on explicit user click, Section 47)
   const handleGenerateAiInsights = async () => {
+    if (!canCreate) {
+      alert(Permissions.getDisabledReason(currentUser, 'intelligence', 'create'));
+      return;
+    }
     if (!analyticsResult) return;
     setAiLoading(true);
     setHasAiInsightsBeenRequested(true);
@@ -280,6 +291,10 @@ export const IntelligenceView: React.FC = () => {
 
   // Handle Natural Language "Ask Your Data" Query (Section 26-29)
   const handleAskData = async (queryText?: string) => {
+    if (!canCreate) {
+      alert(Permissions.getDisabledReason(currentUser, 'intelligence', 'create'));
+      return;
+    }
     const q = queryText || userQuery;
     if (!q.trim() || queryLoading) return;
     setQueryLoading(true);
@@ -335,6 +350,10 @@ export const IntelligenceView: React.FC = () => {
 
   // Export Clean CSV
   const handleExportCleanCsv = () => {
+    if (!canExport) {
+      alert(Permissions.getDisabledReason(currentUser, 'intelligence', 'export'));
+      return;
+    }
     if (!rawRows.length) return;
     const csvContent = 'data:text/csv;charset=utf-8,' + [
       headers.join(','),
@@ -351,8 +370,30 @@ export const IntelligenceView: React.FC = () => {
 
   // Export Printable Report / PDF
   const handlePrintReport = () => {
+    if (!canExport) {
+      alert(Permissions.getDisabledReason(currentUser, 'intelligence', 'export'));
+      return;
+    }
     setIsPrintReportOpen(true);
   };
+
+  if (!canView) {
+    return (
+      <div className="bg-white rounded-2xl border border-zinc-200 p-8 sm:p-12 text-center max-w-lg mx-auto my-12 shadow-xs">
+        <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto mb-4">
+          <ShieldAlert className="w-6 h-6" />
+        </div>
+        <h3 className="text-lg font-bold text-zinc-900 mb-2">Restricted Access: AI & Suggestions</h3>
+        <p className="text-sm text-zinc-500 mb-6 leading-relaxed">
+          {Permissions.getDisabledReason(currentUser, 'intelligence', 'view')}
+        </p>
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-100 text-xs font-medium text-zinc-600">
+          <span>Current Role:</span>
+          <strong className="text-zinc-900">{currentUser.roleId || 'User'}</strong>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
@@ -710,20 +751,24 @@ export const IntelligenceView: React.FC = () => {
                   <Button
                     type="button"
                     variant="outline"
+                    disabled={!canExport}
                     onClick={handleExportCleanCsv}
-                    className="text-xs py-1.5 px-3 flex items-center gap-1.5 cursor-pointer"
+                    title={!canExport ? Permissions.getDisabledReason(currentUser, 'intelligence', 'export') : undefined}
+                    className={`text-xs py-1.5 px-3 flex items-center gap-1.5 ${canExport ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed'}`}
                   >
-                    <Download className="w-3.5 h-3.5" />
+                    {!canExport ? <Lock className="w-3.5 h-3.5 text-zinc-400" /> : <Download className="w-3.5 h-3.5" />}
                     <span>Cleaned CSV</span>
                   </Button>
 
                   <Button
                     type="button"
                     variant="outline"
+                    disabled={!canExport}
                     onClick={handlePrintReport}
-                    className="text-xs py-1.5 px-3 flex items-center gap-1.5 cursor-pointer"
+                    title={!canExport ? Permissions.getDisabledReason(currentUser, 'intelligence', 'export') : undefined}
+                    className={`text-xs py-1.5 px-3 flex items-center gap-1.5 ${canExport ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed'}`}
                   >
-                    <Printer className="w-3.5 h-3.5" />
+                    {!canExport ? <Lock className="w-3.5 h-3.5 text-zinc-400" /> : <Printer className="w-3.5 h-3.5" />}
                     <span>Print / PDF</span>
                   </Button>
 
@@ -778,10 +823,20 @@ export const IntelligenceView: React.FC = () => {
                   <Button
                     type="button"
                     onClick={handleGenerateAiInsights}
-                    disabled={aiLoading}
-                    className="bg-[#140a8e] hover:bg-[#0f076e] text-white text-xs py-2 px-4 rounded-xl flex items-center gap-2 shrink-0 cursor-pointer shadow-sm"
+                    disabled={aiLoading || !canCreate}
+                    title={!canCreate ? Permissions.getDisabledReason(currentUser, 'intelligence', 'create') : undefined}
+                    className={`text-xs py-2 px-4 rounded-xl flex items-center gap-2 shrink-0 shadow-sm ${
+                      canCreate 
+                        ? 'bg-[#140a8e] hover:bg-[#0f076e] text-white cursor-pointer' 
+                        : 'bg-zinc-100 border border-zinc-200 text-zinc-400 cursor-not-allowed opacity-75'
+                    }`}
                   >
-                    {aiLoading ? (
+                    {!canCreate ? (
+                      <>
+                        <Lock className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>AI Generation Restricted</span>
+                      </>
+                    ) : aiLoading ? (
                       <>
                         <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                         <span>Generating AI Insights...</span>
@@ -1102,18 +1157,35 @@ export const IntelligenceView: React.FC = () => {
                 <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
                 <input
                   type="text"
+                  disabled={!canCreate || queryLoading}
                   value={userQuery}
                   onChange={(e) => setUserQuery(e.target.value)}
-                  placeholder="e.g., Which program has the highest attendance? What was our total recorded funding?"
-                  className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#140a8e]/10 focus:border-[#140a8e] transition-colors"
+                  placeholder={
+                    !canCreate 
+                      ? "AI querying is restricted. Permission from Super Admin required." 
+                      : "e.g., Which program has the highest attendance? What was our total recorded funding?"
+                  }
+                  className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#140a8e]/10 focus:border-[#140a8e] transition-colors disabled:bg-zinc-100 disabled:cursor-not-allowed"
                 />
               </div>
               <Button
                 type="submit"
-                disabled={queryLoading || !userQuery.trim()}
-                className="bg-[#140a8e] hover:bg-[#140a8e]/90 text-white text-xs px-5 py-2.5 rounded-xl cursor-pointer shadow-xs"
+                disabled={queryLoading || !userQuery.trim() || !canCreate}
+                title={!canCreate ? Permissions.getDisabledReason(currentUser, 'intelligence', 'create') : undefined}
+                className={`text-xs px-5 py-2.5 rounded-xl shadow-xs ${
+                  canCreate 
+                    ? 'bg-[#140a8e] hover:bg-[#140a8e]/90 text-white cursor-pointer' 
+                    : 'bg-zinc-100 border border-zinc-200 text-zinc-400 cursor-not-allowed opacity-60'
+                }`}
               >
-                {queryLoading ? 'Calculating...' : 'Ask'}
+                {!canCreate ? (
+                  <span className="flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Restricted</span>
+                  </span>
+                ) : (
+                  queryLoading ? 'Calculating...' : 'Ask'
+                )}
               </Button>
             </form>
 
@@ -1130,11 +1202,18 @@ export const IntelligenceView: React.FC = () => {
                   <button
                     key={idx}
                     type="button"
+                    disabled={!canCreate}
+                    title={!canCreate ? Permissions.getDisabledReason(currentUser, 'intelligence', 'create') : undefined}
                     onClick={() => {
+                      if (!canCreate) return;
                       setUserQuery(q);
                       handleAskData(q);
                     }}
-                    className="text-xs px-3 py-1.5 rounded-lg border border-zinc-200 bg-white hover:border-[#140a8e]/50 hover:bg-zinc-50 text-zinc-700 transition-colors cursor-pointer text-left"
+                    className={`text-xs px-3 py-1.5 rounded-lg border text-left transition-colors ${
+                      canCreate
+                        ? 'border-zinc-200 bg-white hover:border-[#140a8e]/50 hover:bg-zinc-50 text-zinc-700 cursor-pointer'
+                        : 'border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed opacity-60'
+                    }`}
                   >
                     "{q}"
                   </button>

@@ -72,7 +72,7 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
       }
 
       // 2. Resolve active Supabase user identity (from newly exchanged callback session or existing session)
-      let supabaseUser: { id: string; email: string; fullName: string; avatarUrl?: string } | null = null;
+      let supabaseUser: { id: string; email: string; fullName?: string; avatarUrl?: string } | null = null;
       if (callbackResult.session?.user) {
         supabaseUser = callbackResult.session.user;
       } else {

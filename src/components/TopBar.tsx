@@ -142,22 +142,24 @@ export const TopBar: React.FC<TopBarProps> = ({
         </button>
 
         {/* TIP Intelligence Companion Trigger */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setIsAiDrawerOpen(!isAiDrawerOpen)}
-          id="btn-tip-intelligence-trigger"
-          className="flex items-center gap-1.5 bg-[#140a8e]/5 hover:bg-[#140a8e]/10 border-[#140a8e]/25 text-[#140a8e] font-semibold transition-all shadow-2xs"
-          title="Open TIP Intelligence Work Companion"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-[#140a8e]" />
-          <span className="hidden sm:inline">TIP Intelligence</span>
-          {activeAiSuggestionsCount > 0 && (
-            <span className="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-[#140a8e] text-white">
-              {activeAiSuggestionsCount}
-            </span>
-          )}
-        </Button>
+        {hasPermission('intelligence', 'view') && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsAiDrawerOpen(!isAiDrawerOpen)}
+            id="btn-tip-intelligence-trigger"
+            className="flex items-center gap-1.5 bg-[#140a8e]/5 hover:bg-[#140a8e]/10 border-[#140a8e]/25 text-[#140a8e] font-semibold transition-all shadow-2xs"
+            title="Open TIP Intelligence Work Companion"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#140a8e]" />
+            <span className="hidden sm:inline">TIP Intelligence</span>
+            {activeAiSuggestionsCount > 0 && (
+              <span className="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-[#140a8e] text-white">
+                {activeAiSuggestionsCount}
+              </span>
+            )}
+          </Button>
+        )}
 
         {/* Ask Data AI Assistant Button (Section 26) */}
         {onNavigate && hasPermission('intelligence', 'view') && (

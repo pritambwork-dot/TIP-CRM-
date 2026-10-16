@@ -153,6 +153,10 @@ export interface UserProfile {
   responsibilities?: string[];
   permissionsOverride?: Record<string, boolean>;
   dataScope: UserDataScope;
+  emailSentAt?: string;
+  emailSentFrom?: string;
+  emailDeliveryStatus?: string;
+  emailPreviewHtml?: string;
   createdAt: string;
   updatedAt?: string;
   lastLogin?: string;
@@ -261,6 +265,16 @@ export type EventRecord = EventItem;
 
 export type FundingStatus = 'Received' | 'Pledged' | 'Pending Review' | 'Approved' | 'Applied' | 'Prospective';
 
+export interface EventInstructionLog {
+  id: string;
+  text: string;
+  loggedBy: string;
+  authorName: string;
+  authorRole: string;
+  timestamp: string;
+  category?: 'General' | 'Setup' | 'Run of Show' | 'Accessibility' | 'Logistics' | 'Safety';
+}
+
 export interface EventItem {
   id: string;
   name: string;
@@ -279,6 +293,8 @@ export interface EventItem {
   capacity: number;
   description?: string;
   notes?: string;
+  instructions?: string;
+  instructionLogs?: EventInstructionLog[];
   participants?: ParticipantRecord[];
   createdAt: string;
 }
@@ -368,8 +384,10 @@ export interface PostResponsibility {
   id: string;
   postId: string;
   name: string; // e.g. "Manage program activities", "Coordinate participants"
-  description: string;
-  priority: 'High' | 'Normal' | 'Low';
+  description?: string;
+  priority?: 'High' | 'Normal' | 'Low';
+  defaultPriority?: 'High' | 'Normal' | 'Low';
+  isActive?: boolean;
 }
 
 export interface UserPost {
@@ -871,11 +889,12 @@ export interface AiActionRecord {
 }
 
 export interface AiUserSettings {
-  aiEnabled: boolean;
+  aiEnabled?: boolean;
   suggestionsEnabled: boolean;
   dailyBriefEnabled: boolean;
   workflowSuggestionsEnabled: boolean;
   taskSuggestionsEnabled: boolean;
+  notificationsThreshold?: string;
 }
 
 export type NavTab = 
@@ -890,5 +909,45 @@ export type NavTab =
   | 'documents' 
   | 'intelligence'
   | 'settings';
+
+export interface UserSessionRecord {
+  id: string;
+  sessionId: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userRole: string;
+  loginAt: string;
+  logoutAt?: string;
+  lastActiveAt: string;
+  durationSeconds: number;
+  durationFormatted: string;
+  status: 'active' | 'logged_out' | 'terminated';
+  ipAddress?: string;
+  deviceInfo?: string;
+}
+
+export interface UserSessionSummary {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userRole: string;
+  avatarUrl?: string;
+  totalSessions: number;
+  totalDurationSeconds: number;
+  totalDurationFormatted: string;
+  lastLoginAt: string;
+  lastLogoutAt?: string;
+  status: 'active' | 'offline';
+  averageSessionFormatted: string;
+}
+
+export interface UserSessionStats {
+  activeUsersCount: number;
+  totalSessionsCount: number;
+  totalDurationSeconds: number;
+  totalDurationFormatted: string;
+  averageDurationFormatted: string;
+}
 
 

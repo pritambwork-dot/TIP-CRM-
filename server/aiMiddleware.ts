@@ -54,6 +54,20 @@ import {
   isDebugModeEnabled,
   validateEnvironment
 } from './lib/environment.ts';
+import {
+  sendWelcomeEmail,
+  getSentEmails,
+  CRM_SENDER_EMAIL,
+  generateInclusionProjectWelcomeEmailHtml
+} from './lib/emailService.ts';
+import {
+  recordUserLogin,
+  recordUserHeartbeat,
+  recordUserLogout,
+  endUserSessionAdmin,
+  getUserSessions,
+  formatDurationHoursMinutes
+} from './lib/userSessionTracker.ts';
 
 // Run initial environment validation check on startup
 validateEnvironment();
@@ -585,6 +599,16 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
           ipAddress: clientIp
         });
 
+        recordUserLogin({
+          sessionId: sessionData.sessionId,
+          userId: user.id,
+          userName: user.name,
+          userEmail: user.email,
+          userRole: user.role,
+          ipAddress: clientIp,
+          deviceInfo: (req.headers['user-agent'] as string) || 'Google OAuth Client'
+        });
+
         sendJson(res, 200, {
           success: true,
           sessionToken,
@@ -713,6 +737,16 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
         ipAddress: clientIp
       });
 
+      recordUserLogin({
+        sessionId: sessionData.sessionId,
+        userId: matchedUser.id,
+        userName: matchedUser.name,
+        userEmail: matchedUser.email,
+        userRole: matchedUser.role,
+        ipAddress: clientIp,
+        deviceInfo: (req.headers['user-agent'] as string) || 'Desktop Browser'
+      });
+
       sendJson(res, 200, {
         success: true,
         sessionToken,
@@ -738,6 +772,13 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
       if (token) {
         revokeSession(token);
       }
+
+      recordUserLogout({
+        sessionId: token,
+        userId: actor.id,
+        actorId: actor.id,
+        actorRole: actor.role
+      });
 
       res.setHeader('Set-Cookie', buildClearSessionCookie());
 
@@ -2124,6 +2165,194 @@ Rules:
         mustChangePassword: true,
         resetAt: new Date().toISOString(),
         message: 'Temporary password generated. User must change password upon next login.'
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 11b. POST /api/auth/send-welcome-email — Welcome Email with Credentials
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/send-welcome-email' && req.method === 'POST') {
+      const body = await parseRequestBody(req);
+      const { name, email, tempPassword, postTitle, roles, appUrl } = body || {};
+      const correlationId = body?.correlationId || (req.headers['x-correlation-id'] as string) || undefined;
+      const actor = getRequestActor(req, body);
+      const clientIp = getClientIp(req);
+
+      if (actor.sessionError || !actor.authenticated || actor.role === 'unauthenticated') {
+        sendSafeError(res, 401, actor.sessionError ? `Unauthorized: ${actor.sessionError}` : 'Unauthorized: Active administrator session required.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      if (actor.role !== 'super_admin' && actor.role !== 'staff_manager') {
+        recordAuditEvent({
+          actorId: actor.id || 'anonymous',
+          actorName: actor.name || 'Anonymous User',
+          actorRole: actor.role || 'unauthenticated',
+          action: 'AUTH_WELCOME_EMAIL_DENIED',
+          resourceType: 'UserCredential',
+          resourceId: email,
+          outcome: 'FAILURE',
+          description: `Unauthorized attempt to send account credentials email by role: ${actor.role}.`,
+          ipAddress: clientIp
+        });
+        sendSafeError(res, 403, 'Forbidden: Only administrators can dispatch account credential emails.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      if (!name || !email || !tempPassword) {
+        sendSafeError(res, 400, 'Bad Request: name, email, and temporary password are required.', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      const emailResult = await sendWelcomeEmail({
+        name,
+        email,
+        tempPassword,
+        postTitle,
+        roles,
+        appUrl,
+        actorId: actor.id,
+        actorRole: actor.role,
+        correlationId
+      });
+
+      sendJson(res, 200, {
+        success: true,
+        sentFrom: emailResult.sentFrom,
+        recipient: emailResult.recipient,
+        messageId: emailResult.messageId,
+        provider: emailResult.provider,
+        timestamp: emailResult.timestamp,
+        previewHtml: emailResult.previewHtml,
+        message: `Welcome email with login credentials successfully dispatched to ${email} from ${emailResult.sentFrom}.`
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 11c. GET /api/auth/sent-emails — View Sent Onboarding Emails
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/sent-emails' && req.method === 'GET') {
+      const actor = getRequestActor(req, {});
+      if (actor.sessionError || !actor.authenticated || actor.role === 'unauthenticated') {
+        sendSafeError(res, 401, actor.sessionError ? `Unauthorized: ${actor.sessionError}` : 'Unauthorized: Active administrator session required.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+      if (actor.role !== 'super_admin') {
+        sendSafeError(res, 403, 'Forbidden: Only Super Admins can view sent email audit logs.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+      const sent = getSentEmails(50);
+      sendJson(res, 200, {
+        success: true,
+        count: sent.length,
+        emails: sent
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 11d. GET /api/auth/user-sessions — User Login/Logout History & CRM Usage Duration
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/user-sessions' && req.method === 'GET') {
+      const actor = getRequestActor(req, {});
+      if (actor.sessionError || !actor.authenticated || actor.role === 'unauthenticated') {
+        sendSafeError(res, 401, actor.sessionError ? `Unauthorized: ${actor.sessionError}` : 'Unauthorized: Active administrator session required.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+      if (actor.role !== 'super_admin' && actor.role !== 'staff_manager') {
+        sendSafeError(res, 403, 'Forbidden: Administrator privileges required to view user session duration and login logs.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      const queryString = (req.url || '').split('?')[1] || '';
+      const params = new URLSearchParams(queryString);
+      const userId = params.get('userId') || undefined;
+      const userRole = params.get('role') || undefined;
+      const status = params.get('status') || undefined;
+      const limit = params.get('limit') ? Number(params.get('limit')) : undefined;
+
+      const sessionData = getUserSessions({ userId, userRole, status, limit });
+      sendJson(res, 200, {
+        success: true,
+        ...sessionData
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 11e. POST /api/auth/heartbeat — Track Continuous Active CRM Usage Duration
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/heartbeat' && req.method === 'POST') {
+      const actor = getRequestActor(req, {});
+      if (actor.sessionError || !actor.authenticated || actor.role === 'unauthenticated') {
+        sendSafeError(res, 401, 'Unauthorized: Active session required for activity heartbeat.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      const cookieHeader = req.headers['cookie'];
+      const cookies = parseCookies(typeof cookieHeader === 'string' ? cookieHeader : undefined);
+      const authHeader = req.headers['authorization'];
+      const bearerToken = typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')
+        ? authHeader.slice(7).trim()
+        : undefined;
+      const token = cookies[SESSION_COOKIE_NAME] || cookies['session'] || bearerToken;
+
+      const updated = recordUserHeartbeat({
+        sessionId: token,
+        userId: actor.id
+      });
+
+      sendJson(res, 200, {
+        success: true,
+        durationFormatted: updated?.durationFormatted || '1m',
+        durationSeconds: updated?.durationSeconds || 60,
+        status: updated?.status || 'active'
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 11f. POST /api/auth/terminate-session — Force End Active User Session
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/terminate-session' && req.method === 'POST') {
+      const body = await parseRequestBody(req);
+      const actor = getRequestActor(req, body);
+
+      if (actor.sessionError || !actor.authenticated || actor.role === 'unauthenticated') {
+        sendSafeError(res, 401, 'Unauthorized: Active administrator session required.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      if (actor.role !== 'super_admin') {
+        sendSafeError(res, 403, 'Forbidden: Only Super Administrators can terminate user sessions.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      const { sessionId } = body || {};
+      if (!sessionId) {
+        sendSafeError(res, 400, 'Bad Request: sessionId is required.', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      const result = endUserSessionAdmin({
+        sessionId,
+        adminId: actor.id,
+        adminRole: actor.role
+      });
+
+      if (!result.success) {
+        sendSafeError(res, 404, result.error || 'Session not found.', ERROR_CODES.NOT_FOUND);
+        return true;
+      }
+
+      revokeSession(sessionId);
+
+      sendJson(res, 200, {
+        success: true,
+        message: `Session terminated. User logged out after using the CRM for ${result.session?.durationFormatted}.`,
+        session: result.session
       });
       return true;
     }

@@ -8,14 +8,18 @@ import {
   Download, 
   UserPlus, 
   ExternalLink, 
-  FileText,
-  Clock,
-  Video,
-  Trash2,
-  Lock
+  FileText, 
+  Clock, 
+  Video, 
+  Trash2, 
+  Lock,
+  ClipboardList,
+  Send,
+  Edit3,
+  Tag
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
-import { ParticipantStatus } from '../../types';
+import { ParticipantStatus, EventInstructionLog } from '../../types';
 import { ProtectedAction } from '../common/ProtectedAction';
 import { exportToCsv } from '../../lib/csvExport';
 import { sanitizeExternalUrl } from '../../lib/safeUrls';
@@ -47,15 +51,25 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
     updateParticipantStatus,
     addParticipant,
     deleteEvent,
+    updateEvent,
+    addEventInstructionLog,
     people, 
     programs,
     documents,
+    currentUser,
+    isSuperAdmin,
     hasPermission,
     Permissions
   } = useCrm();
 
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [selectedPersonIdToAdd, setSelectedPersonIdToAdd] = useState('');
+
+  // Event Instructions & Instruction Log state
+  const [instructionText, setInstructionText] = useState('');
+  const [instructionCategory, setInstructionCategory] = useState<NonNullable<EventInstructionLog['category']>>('Run of Show');
+  const [isEditingInstructions, setIsEditingInstructions] = useState(false);
+  const [overallInstructions, setOverallInstructions] = useState('');
 
   const canEditEvent = hasPermission('events', 'edit');
   const canDeleteEvent = hasPermission('events', 'delete');
@@ -110,8 +124,48 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
         p.attendedAt || ''
       ])
     ];
+    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map(e => e.join(',')).join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `${event.name.replace(/\s+/g, '_')}_attendance.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
-    exportToCsv(`TIP_${event.name.replace(/\s+/g, '_')}_Attendance.csv`, rows);
+  // Synchronize standing instructions
+  React.useEffect(() => {
+    if (event?.instructions) {
+      setOverallInstructions(event.instructions);
+    } else {
+      setOverallInstructions('');
+    }
+  }, [event?.id, event?.instructions]);
+
+  const handleLogInstruction = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!instructionText.trim()) return;
+
+    addEventInstructionLog(event.id, {
+      text: instructionText.trim(),
+      category: instructionCategory,
+      authorName: currentUser.name,
+      authorRole: currentUser.roleId
+    });
+
+    setInstructionText('');
+  };
+
+  const handleSaveOverallInstructions = () => {
+    updateEvent(event.id, { instructions: overallInstructions.trim() });
+    setIsEditingInstructions(false);
+  };
+
+  const handleDeleteInstructionLog = (logId: string) => {
+    const current = event.instructionLogs || [];
+    const updated = current.filter(l => l.id !== logId);
+    updateEvent(event.id, { instructionLogs: updated });
   };
 
   return (
@@ -224,6 +278,183 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
             </p>
             <div className="mt-2 text-xs text-zinc-500">
               Facilitator / Speakers: <strong className="text-zinc-800">{event.facilitator}</strong>
+            </div>
+          </div>
+
+          {/* Section: Event Instructions & Run-of-Show Log */}
+          <div className="space-y-4 pt-4 border-t border-zinc-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ClipboardList className="w-4 h-4 text-rose-600" />
+                  <h4 className="text-sm font-bold text-zinc-900">Event Instructions & Run of Show Log</h4>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+                    Team Operational Log
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  Facilitator prep instructions, run-of-show cues, and real-time instruction logs for this event.
+                </p>
+              </div>
+
+              {canEditEvent && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingInstructions(!isEditingInstructions)}
+                  className="text-xs font-semibold text-zinc-700 hover:text-zinc-900 px-2.5 py-1 rounded-md border border-zinc-200 hover:bg-zinc-50 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>{isEditingInstructions ? 'Cancel' : 'Edit Main Instructions'}</span>
+                </button>
+              )}
+            </div>
+
+            {/* Main Operational Instructions Box */}
+            {isEditingInstructions ? (
+              <div className="p-3.5 bg-zinc-50 rounded-xl border border-zinc-200 space-y-2">
+                <label className="text-xs font-semibold text-zinc-700 block">
+                  Event Prep & Standing Instructions
+                </label>
+                <textarea
+                  rows={3}
+                  value={overallInstructions}
+                  onChange={e => setOverallInstructions(e.target.value)}
+                  placeholder="Enter standing facilitator instructions, room configuration, tech checklist, or run-of-show..."
+                  className="w-full text-xs p-2.5 rounded-lg border border-zinc-300 bg-white text-zinc-900 focus:ring-1 focus:ring-zinc-900 focus:outline-hidden"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingInstructions(false)}
+                    className="px-3 py-1.5 text-xs text-zinc-600 hover:text-zinc-800 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveOverallInstructions}
+                    className="px-3 py-1.5 bg-zinc-900 hover:bg-black text-white text-xs font-semibold rounded-lg cursor-pointer"
+                  >
+                    Save Instructions
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-xl bg-amber-50/50 border border-amber-200/70 text-xs text-zinc-800 space-y-1">
+                <span className="font-bold text-[11px] text-amber-900 uppercase tracking-wider block">
+                  Standing Instructions & Facilitator Guidelines:
+                </span>
+                <p className="leading-relaxed whitespace-pre-wrap">
+                  {event.instructions || 'No standing instructions entered yet. Admins and team members can log specific instructions below.'}
+                </p>
+              </div>
+            )}
+
+            {/* Instruction Logger Form */}
+            <form onSubmit={handleLogInstruction} className="p-3.5 bg-zinc-50 rounded-xl border border-zinc-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-800 flex items-center gap-1.5">
+                  <Send className="w-3.5 h-3.5 text-zinc-600" />
+                  <span>Log a New Event Instruction</span>
+                </span>
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-zinc-500 text-[11px]">Category:</span>
+                  <select
+                    value={instructionCategory}
+                    onChange={e => setInstructionCategory(e.target.value as any)}
+                    className="text-xs px-2 py-1 rounded border border-zinc-300 bg-white font-medium text-zinc-800"
+                  >
+                    <option value="Run of Show">Run of Show</option>
+                    <option value="Setup">Setup</option>
+                    <option value="Accessibility">Accessibility</option>
+                    <option value="Logistics">Logistics</option>
+                    <option value="Safety">Safety</option>
+                    <option value="General">General</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={instructionText}
+                  onChange={e => setInstructionText(e.target.value)}
+                  placeholder="e.g. Set up breakout room audio by 1:30 PM, verify Zoom transcription enabled..."
+                  className="flex-1 text-xs px-3 py-2 rounded-lg border border-zinc-300 bg-white text-zinc-900 placeholder:text-zinc-400 focus:ring-1 focus:ring-zinc-900 focus:outline-hidden"
+                />
+                <button
+                  type="submit"
+                  disabled={!instructionText.trim()}
+                  className="px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-black text-white text-xs font-semibold disabled:opacity-50 transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+                >
+                  <Send className="w-3 h-3" />
+                  <span>Log Instruction</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Chronological Instruction Log List */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-zinc-500 font-medium">
+                <span>Logged Event Instructions ({event.instructionLogs?.length || 0})</span>
+                <span className="text-[11px]">Logged by Admins & Team Members</span>
+              </div>
+
+              {event.instructionLogs && event.instructionLogs.length > 0 ? (
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                  {event.instructionLogs.map(log => {
+                    const categoryColors: Record<string, string> = {
+                      'Run of Show': 'bg-indigo-50 text-indigo-700 border-indigo-200',
+                      'Setup': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                      'Accessibility': 'bg-purple-50 text-purple-700 border-purple-200',
+                      'Logistics': 'bg-amber-50 text-amber-700 border-amber-200',
+                      'Safety': 'bg-rose-50 text-rose-700 border-rose-200',
+                      'General': 'bg-zinc-100 text-zinc-700 border-zinc-200'
+                    };
+                    const badgeClass = categoryColors[log.category || 'General'] || categoryColors.General;
+                    const canDelete = isSuperAdmin || log.loggedBy === currentUser.id;
+
+                    return (
+                      <div 
+                        key={log.id} 
+                        className="p-3 rounded-lg border border-zinc-200 bg-white hover:border-zinc-300 transition-colors flex items-start justify-between gap-3 text-xs"
+                      >
+                        <div className="space-y-1 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeClass}`}>
+                              {log.category || 'General'}
+                            </span>
+                            <span className="font-semibold text-zinc-900">
+                              {log.authorName}
+                            </span>
+                            <span className="text-[10px] text-zinc-400 font-mono">
+                              {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {new Date(log.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                            </span>
+                          </div>
+                          <p className="text-zinc-700 leading-relaxed font-normal">
+                            {log.text}
+                          </p>
+                        </div>
+
+                        {canDelete && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteInstructionLog(log.id)}
+                            className="p-1 text-zinc-400 hover:text-rose-600 rounded transition-colors cursor-pointer shrink-0"
+                            title="Remove instruction"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-4 rounded-lg border border-dashed border-zinc-200 text-center text-xs text-zinc-400 bg-zinc-50/50">
+                  No instruction log entries recorded yet. Enter an instruction above to log setup, run-of-show, or accessibility notes.
+                </div>
+              )}
             </div>
           </div>
 
