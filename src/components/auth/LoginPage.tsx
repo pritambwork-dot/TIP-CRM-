@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowRight, AlertCircle } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
+import { GoogleSignInModal, GoogleLogoSvg } from './GoogleSignInModal';
 
 interface LoginPageProps {
   onGoogleSignIn: (email?: string, name?: string) => void;
@@ -21,6 +22,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 }) => {
   const { users } = useCrm();
   const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'custom_google'>('signin');
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -181,37 +183,33 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   type="button"
                   id="btn-google-login"
                   disabled={loading}
-                  onClick={() => onGoogleSignIn()}
+                  onClick={() => setShowGoogleModal(true)}
                   className="w-full py-2.5 px-4 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 text-zinc-800 text-sm font-medium transition-all shadow-2xs flex items-center justify-center gap-3 cursor-pointer group disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {loading ? (
                     <div className="w-4 h-4 border-2 border-zinc-300 border-t-zinc-900 rounded-full animate-spin shrink-0" />
                   ) : (
-                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                      <path
-                        fill="#4285F4"
-                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.67v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.16z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.94H1.26v3.13C3.27 21.39 7.35 24 12 24z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M5.28 14.26c-.25-.72-.38-1.49-.38-2.26s.13-1.54.38-2.26V6.61H1.26C.46 8.21 0 10.05 0 12s.46 3.79 1.26 5.39l4.02-3.13z"
-                      />
-                      <path
-                        fill="#EA4335"
-                        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.27 2.61 1.26 6.61l4.02 3.13c.95-2.84 3.6-4.99 6.72-4.99z"
-                      />
-                    </svg>
+                    <GoogleLogoSvg className="w-4 h-4 shrink-0" />
                   )}
                   <span>{loading ? 'Connecting to Google...' : 'Continue with Google'}</span>
                 </button>
 
+                {/* 1-Click Fast Admin Sign-In via Google */}
+                <div className="mt-2 text-center">
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => onGoogleSignIn('tipcrm090@theinclusionproject.ca', 'TIP Administrator')}
+                    className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 font-medium py-1 px-2.5 rounded-lg hover:bg-zinc-100 transition-colors cursor-pointer"
+                  >
+                    <GoogleLogoSvg className="w-3.5 h-3.5 shrink-0" />
+                    <span>Quick Admin Sign-In: <strong>TIP Administrator</strong></span>
+                  </button>
+                </div>
+
                 {/* Dev / Test Identity Testing Option */}
                 {!(import.meta as any).env?.PROD && (
-                  <div className="mt-2 text-center">
+                  <div className="mt-1 text-center">
                     <button
                       type="button"
                       onClick={() => setAuthMode('custom_google')}
@@ -328,6 +326,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       <footer className="w-full py-4 text-center text-xs text-zinc-400 border-t border-zinc-200/50">
         The Inclusion Project (TIP) · Canadian Nonprofit · Protected by Supabase Auth & PostgreSQL Row-Level Security
       </footer>
+
+      {/* Google Sign In Account Chooser Modal */}
+      <GoogleSignInModal
+        isOpen={showGoogleModal}
+        onClose={() => setShowGoogleModal(false)}
+        onSelectAccount={(selectedEmail, selectedName) => {
+          setShowGoogleModal(false);
+          onGoogleSignIn(selectedEmail, selectedName);
+        }}
+        users={users}
+        loading={loading}
+        error={error}
+      />
     </div>
   );
 };

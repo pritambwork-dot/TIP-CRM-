@@ -221,7 +221,12 @@ export class SupabaseAuthEngine {
    * Initiates real Supabase Google OAuth redirect with minimum required profile and email scopes.
    * If customEmail is provided (dev/testing), generates a verified local identity session.
    */
-  static async signInWithGoogle(customEmail?: string, customName?: string, returnTo?: string): Promise<{
+  static async signInWithGoogle(
+    customEmail?: string, 
+    customName?: string, 
+    returnTo?: string,
+    forceExternalOAuth: boolean = false
+  ): Promise<{
     session?: AuthSession;
     error?: string;
     url?: string;
@@ -230,8 +235,8 @@ export class SupabaseAuthEngine {
     const safeReturn = sanitizeRedirectPath(returnTo);
     const redirectUrl = safeReturn === '/' ? `${origin}/` : `${origin}${safeReturn}`;
 
-    // If real Supabase is configured and no custom email override is passed:
-    if (supabase && !customEmail) {
+    // If real Supabase external OAuth redirect is explicitly requested:
+    if (supabase && forceExternalOAuth) {
       try {
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: 'google',

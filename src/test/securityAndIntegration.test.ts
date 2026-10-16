@@ -4121,6 +4121,69 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
   }
 
   // --------------------------------------------------------------------------
+  // Test Suite 33: Google Sign-In Integration, Modal Account Chooser, & Super Admin Binding
+  // --------------------------------------------------------------------------
+  console.log('\nTest Suite 33: Google Sign-In Integration, Modal Account Chooser, & Super Admin Binding');
+  {
+    // A. signInWithGoogle default behavior (safe 1-click admin sign in)
+    const defaultGoogleLogin = await SupabaseAuthEngine.signInWithGoogle();
+    assert(defaultGoogleLogin.session !== undefined, 'signInWithGoogle without arguments returns valid session');
+    assert(defaultGoogleLogin.session?.user.email === 'tipcrm090@theinclusionproject.ca', 'Default Google login assigns primary admin email');
+    assert(defaultGoogleLogin.session?.user.provider === 'google', 'Default Google session has provider = google');
+    assert(defaultGoogleLogin.session?.user.emailVerified === true, 'Google session email is verified');
+
+    // B. Explicit Admin Google Login via admin alias
+    const aliasGoogleLogin = await SupabaseAuthEngine.signInWithGoogle('admin@theinclusionproject.ca', 'TIP Administrator');
+    assert(aliasGoogleLogin.session !== undefined, 'Admin alias Google login returns valid session');
+    assert(aliasGoogleLogin.session?.user.email === 'admin@theinclusionproject.ca', 'Admin alias matches session email');
+    assert(aliasGoogleLogin.session?.user.fullName === 'TIP Administrator', 'Admin alias fullName matches TIP Administrator');
+
+    // C. Staff Manager Google Login
+    const staffGoogleLogin = await SupabaseAuthEngine.signInWithGoogle('sarah.t@theinclusionproject.ca', 'Sarah Thompson');
+    assert(staffGoogleLogin.session !== undefined, 'Staff Manager Google login returns valid session');
+    assert(staffGoogleLogin.session?.user.email === 'sarah.t@theinclusionproject.ca', 'Staff Manager session email matches');
+    assert(staffGoogleLogin.session?.user.fullName === 'Sarah Thompson', 'Staff Manager fullName matches');
+
+    // D. Custom Google Workspace / Gmail Identity
+    const customGoogleLogin = await SupabaseAuthEngine.signInWithGoogle('volunteer.test@gmail.com', 'Alex Rivera');
+    assert(customGoogleLogin.session !== undefined, 'Custom Google login returns valid session');
+    assert(customGoogleLogin.session?.user.email === 'volunteer.test@gmail.com', 'Custom Google session email matches');
+    assert(customGoogleLogin.session?.user.provider === 'google', 'Custom Google session provider is google');
+
+    // E. Verify GoogleSignInModal component source
+    const googleModalPath = path.resolve(process.cwd(), 'src/components/auth/GoogleSignInModal.tsx');
+    assert(fs.existsSync(googleModalPath), 'GoogleSignInModal.tsx file exists');
+    const googleModalContent = fs.readFileSync(googleModalPath, 'utf-8');
+    assert(googleModalContent.includes('export const GoogleSignInModal'), 'GoogleSignInModal component exported');
+    assert(googleModalContent.includes('export const GoogleLogoSvg'), 'GoogleLogoSvg component exported');
+    assert(googleModalContent.includes('tipcrm090@theinclusionproject.ca'), 'Google modal includes TIP Administrator preset');
+    assert(googleModalContent.includes('sarah.t@theinclusionproject.ca'), 'Google modal includes Staff Manager preset');
+    assert(googleModalContent.includes('marcus.c@theinclusionproject.ca'), 'Google modal includes Volunteer preset');
+    assert(googleModalContent.includes('Use another Google account'), 'Google modal includes custom account option');
+
+    // F. Verify LandingPage Google Sign-In Integration
+    const landingPath = path.resolve(process.cwd(), 'src/components/landing/LandingPage.tsx');
+    const landingContent = fs.readFileSync(landingPath, 'utf-8');
+    assert(landingContent.includes('onGoogleSignIn'), 'LandingPage accepts onGoogleSignIn prop');
+    assert(landingContent.includes('Sign in with Google'), 'LandingPage renders Sign in with Google buttons');
+    assert(landingContent.includes('GoogleLogoSvg'), 'LandingPage renders GoogleLogoSvg icon');
+
+    // G. Verify LoginPage Google Sign-In Integration
+    const loginPagePath = path.resolve(process.cwd(), 'src/components/auth/LoginPage.tsx');
+    const loginContent = fs.readFileSync(loginPagePath, 'utf-8');
+    assert(loginContent.includes('GoogleSignInModal'), 'LoginPage integrates GoogleSignInModal');
+    assert(loginContent.includes('setShowGoogleModal(true)'), 'LoginPage btn-google-login opens Google modal');
+    assert(loginContent.includes('Quick Admin Sign-In:'), 'LoginPage renders 1-click Quick Admin Sign-In option');
+    assert(loginContent.includes('tipcrm090@theinclusionproject.ca'), 'LoginPage Quick Admin references primary admin email');
+
+    // H. Verify App.tsx AuthGate Google Modal Integration
+    const appPath = path.resolve(process.cwd(), 'src/App.tsx');
+    const appContent = fs.readFileSync(appPath, 'utf-8');
+    assert(appContent.includes('GoogleSignInModal'), 'App.tsx lazy loads GoogleSignInModal');
+    assert(appContent.includes('showGoogleModal'), 'App.tsx manages showGoogleModal state');
+  }
+
+  // --------------------------------------------------------------------------
   // Summary
   // --------------------------------------------------------------------------
   console.log('\n=============================================================');

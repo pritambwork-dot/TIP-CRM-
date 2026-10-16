@@ -6,6 +6,7 @@ import { NavTab } from './types';
 import { TopBar } from './components/TopBar';
 import type { QuickActionType } from './components/QuickActionModal';
 import { LoginPage } from './components/auth/LoginPage';
+import { GoogleSignInModal } from './components/auth/GoogleSignInModal';
 import { SupabaseAuthEngine } from './lib/supabase';
 import { clearUserOfflineCache } from './lib/offlineStorage';
 import { ErrorBoundary, ViewLoadingSkeleton } from './components/common';
@@ -54,6 +55,7 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [initialCheckDone, setInitialCheckDone] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
 
   // Check for existing session or OAuth callback on mount
   useEffect(() => {
@@ -374,7 +376,21 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
             <div className="w-6 h-6 border-2 border-zinc-300 border-t-zinc-900 rounded-full animate-spin" />
           </div>
         }>
-          <LandingPage onOpenLogin={() => setShowLogin(true)} />
+          <LandingPage 
+            onOpenLogin={() => setShowLogin(true)} 
+            onGoogleSignIn={() => setShowGoogleModal(true)}
+          />
+          <GoogleSignInModal
+            isOpen={showGoogleModal}
+            onClose={() => setShowGoogleModal(false)}
+            onSelectAccount={(selectedEmail, selectedName) => {
+              setShowGoogleModal(false);
+              handleGoogleSignIn(selectedEmail, selectedName);
+            }}
+            users={users}
+            loading={authLoading}
+            error={authError}
+          />
         </React.Suspense>
       );
     }
