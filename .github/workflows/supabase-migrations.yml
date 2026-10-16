@@ -22,8 +22,15 @@ jobs:
         with:
           version: latest
 
-      - name: Push Database Migrations
-        if: env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_DB_PASSWORD != ''
+      - name: Push Database Migrations via Direct Database URL
+        if: env.DATABASE_URL != ''
+        run: |
+          supabase db push --db-url "${{ secrets.DATABASE_URL }}"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Push Database Migrations via Project Link
+        if: env.DATABASE_URL == '' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_DB_PASSWORD != ''
         run: |
           supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID || 'osbsacgmjkqyfkjdeten' }}
           supabase db push
