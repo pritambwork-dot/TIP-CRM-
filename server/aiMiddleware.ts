@@ -626,9 +626,6 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
       }
 
       const isTipAdmin = cleanEmail === 'tipcrm090' || cleanEmail === 'tipcrm090@theinclusionproject.ca' || cleanEmail === 'admin@theinclusionproject.ca';
-      const isSarah = cleanEmail === 'sarah@theinclusionproject.ca';
-      const isMarcus = cleanEmail === 'marcus@theinclusionproject.ca';
-      const isElena = cleanEmail === 'elena@theinclusionproject.ca';
 
       let matchedUser: SessionUser | null = null;
       let validPassword = false;
@@ -642,33 +639,6 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
           assignedRoleIds: ['super_admin']
         };
         validPassword = (password === 'CRM090');
-      } else if (isSarah) {
-        matchedUser = {
-          id: 'u-2',
-          email: cleanEmail,
-          name: 'Sarah Jenkins',
-          role: 'staff_manager',
-          assignedRoleIds: ['staff_manager']
-        };
-        validPassword = (password === 'rkumar07' || password.length >= 6);
-      } else if (isMarcus) {
-        matchedUser = {
-          id: 'u-3',
-          email: cleanEmail,
-          name: 'Marcus Vance',
-          role: 'staff_member',
-          assignedRoleIds: ['staff_member']
-        };
-        validPassword = (password === 'rkumar07' || password.length >= 6);
-      } else if (isElena) {
-        matchedUser = {
-          id: 'u-4',
-          email: cleanEmail,
-          name: 'Elena Rostova',
-          role: 'volunteer',
-          assignedRoleIds: ['volunteer']
-        };
-        validPassword = (password === 'rkumar07' || password.length >= 6);
       } else if (body.syntheticUser && password === 'ValidPassword123!') {
         if (isProduction()) {
           sendSafeError(

@@ -44,6 +44,7 @@ import {
   UserSessionSummary,
   UserSessionStats
 } from '../types';
+import { hashPassword } from '../lib/passwordSecurity';
 import { 
   checkUserPermission, 
   filterPeopleByScope, 
@@ -425,6 +426,7 @@ function normalizeUser(rawUser: any): UserProfile {
     onboardingCompleted: isAdmin ? true : (rawUser.onboardingCompleted !== undefined ? Boolean(rawUser.onboardingCompleted) : true),
     tempPassword: rawUser.tempPassword,
     passwordHash: rawUser.passwordHash,
+    password: rawUser.password,
     dataScope: isAdmin ? {
       people: 'GLOBAL',
       programs: 'ALL',
@@ -509,11 +511,28 @@ function saveToStorage<T>(key: string, value: T, immediate = false, userId?: str
 }
 
 export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const DEMO_EMAILS_TO_PURGE = new Set([
+    'sarah.thompson@inclusionproject.ca',
+    'sarah@theinclusionproject.ca',
+    'sarah.t@theinclusionproject.ca',
+    'marcus.chen@inclusionproject.ca',
+    'marcus@theinclusionproject.ca',
+    'marcus.c@theinclusionproject.ca',
+    'elena.rostova@gmail.com',
+    'elena@theinclusionproject.ca',
+    'david.kalu@gmail.com',
+    'alex.mercer@gmail.com',
+    'chloe.vance@inclusionproject.ca',
+    'jordan.volunteer@inclusionproject.ca'
+  ]);
+
   const [users, setUsers] = useState<UserProfile[]>(() => {
     const loaded = loadFromStorage<any[]>('crm_users', INITIAL_USERS);
-    const list = Array.isArray(loaded) && loaded.length > 0 ? loaded.map(normalizeUser) : [...INITIAL_USERS];
+    const rawList = Array.isArray(loaded) && loaded.length > 0 ? loaded.map(normalizeUser) : [...INITIAL_USERS];
+    // Filter out legacy demo mock identities so only real / provisioned accounts exist
+    const list = rawList.filter(u => !DEMO_EMAILS_TO_PURGE.has(u.email?.toLowerCase().trim()));
     
-    // Ensure demo seed users (such as u-8 Chloe Vance) exist in list if not already present
+    // Ensure seed users exist in list if not already present
     INITIAL_USERS.forEach(seedUser => {
       if (!list.some(u => u.id === seedUser.id)) {
         list.push(seedUser);
@@ -554,6 +573,10 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const loaded = loadFromStorage<any>('current_user', null);
     if (!loaded) return INITIAL_USERS[0];
     const user = normalizeUser(loaded);
+    // If saved user was a purged demo account, reset to admin
+    if (DEMO_EMAILS_TO_PURGE.has(user.email?.toLowerCase().trim())) {
+      return INITIAL_USERS[0];
+    }
     // If the saved user is the Administrator, ensure roleId is super_admin
     if (user.id === 'u-admin-090' || user.id === 'u-1' || user.name === 'TIP Administrator' || user.email === 'tipcrm090@theinclusionproject.ca') {
       return {
@@ -928,7 +951,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...currentUser,
         mustChangePassword: false,
         passwordChangedAt: new Date().toISOString(),
-        tempPassword: undefined
+        tempPassword: undefined,
+        passwordHash: hashPassword(newPassword),
+        password: newPassword
       };
 
       setCurrentUser(updatedUser);
@@ -1104,7 +1129,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUsers(prev => prev.map(u => u.id === userId ? {
       ...u,
       mustChangePassword: true,
-      tempPassword: finalTemp
+      tempPassword: finalTemp,
+      password: undefined,
+      passwordHash: undefined
     } : u));
 
     logAction('Password Reset', 'Security', target.name, `Admin reset password and generated temporary credentials`);

@@ -8,6 +8,7 @@ import type { QuickActionType } from './components/QuickActionModal';
 import { LoginPage } from './components/auth/LoginPage';
 import { GoogleSignInModal } from './components/auth/GoogleSignInModal';
 import { SupabaseAuthEngine } from './lib/supabase';
+import { verifyPassword } from './lib/passwordSecurity';
 import { clearUserOfflineCache } from './lib/offlineStorage';
 import { ErrorBoundary, ViewLoadingSkeleton } from './components/common';
 import { MobileBottomNav } from './components/navigation/MobileBottomNav';
@@ -241,13 +242,19 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
           setAuthLoading(false);
           return;
         }
-      } else {
-        // Standard password length validation
-        if (password.length < 4) {
-          setAuthError('Password must be at least 4 characters.');
+      } else if (matchedUser.passwordHash || matchedUser.password) {
+        // Strict verification of permanent password or hash
+        const isMatch = verifyPassword(password, matchedUser.passwordHash || matchedUser.password);
+        if (!isMatch) {
+          setAuthError('Invalid email or password.');
           setAuthLoading(false);
           return;
         }
+      } else {
+        // Account has no credentials configured — strictly blocked
+        setAuthError('Invalid email or password. Please contact your CRM Administrator.');
+        setAuthLoading(false);
+        return;
       }
 
       // Successful login

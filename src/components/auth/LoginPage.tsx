@@ -21,13 +21,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   error = null
 }) => {
   const { users } = useCrm();
-  const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'custom_google'>('signin');
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [customGoogleEmail, setCustomGoogleEmail] = useState('');
-  const [customGoogleName, setCustomGoogleName] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
 
   const handleSubmitEmail = (e: React.FormEvent) => {
@@ -48,15 +46,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       }
       onEmailSignIn(email, password);
     }
-  };
-
-  const handleCustomGoogleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!customGoogleEmail.trim()) {
-      setLocalError('Please enter a valid Google Account email.');
-      return;
-    }
-    onGoogleSignIn(customGoogleEmail.trim(), customGoogleName.trim() || undefined);
   };
 
   return (
@@ -118,66 +107,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
             )}
 
-            {authMode === 'custom_google' ? (
-              /* Custom Google Identity Testing */
-              <form onSubmit={handleCustomGoogleSubmit} className="space-y-4">
-                <div className="text-left mb-2">
-                  <div className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1">
-                    Google OAuth Identity Verification
-                  </div>
-                  <p className="text-xs text-zinc-600">
-                    Enter any Google email to simulate identity verification and test the Access Approval flow:
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                    Google Account Email
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="e.g. yourname@gmail.com"
-                    value={customGoogleEmail}
-                    onChange={(e) => setCustomGoogleEmail(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                    Full Name (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Sarah Thompson"
-                    value={customGoogleName}
-                    onChange={(e) => setCustomGoogleName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
-                  />
-                </div>
-
-                <div className="pt-2 flex flex-col gap-2">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full py-2.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white text-sm font-medium transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <span>Verify with Google Identity</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setAuthMode('signin'); setLocalError(null); }}
-                    className="w-full py-2 text-xs text-zinc-500 hover:text-zinc-900 cursor-pointer"
-                  >
-                    Back to Standard Sign In
-                  </button>
-                </div>
-              </form>
-            ) : (
-              /* Standard Auth Flow */
-              <>
                 {/* 1. Primary Google OAuth Action */}
                 <button
                   type="button"
@@ -194,31 +123,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   <span>{loading ? 'Connecting to Google...' : 'Continue with Google'}</span>
                 </button>
 
-                {/* 1-Click Fast Admin Sign-In via Google */}
-                <div className="mt-2 text-center">
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => onGoogleSignIn('tipcrm090@theinclusionproject.ca', 'TIP Administrator')}
-                    className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 font-medium py-1 px-2.5 rounded-lg hover:bg-zinc-100 transition-colors cursor-pointer"
-                  >
-                    <GoogleLogoSvg className="w-3.5 h-3.5 shrink-0" />
-                    <span>Quick Admin Sign-In: <strong>TIP Administrator</strong></span>
-                  </button>
-                </div>
-
-                {/* Dev / Test Identity Testing Option */}
-                {!(import.meta as any).env?.PROD && (
-                  <div className="mt-1 text-center">
-                    <button
-                      type="button"
-                      onClick={() => setAuthMode('custom_google')}
-                      className="text-[11px] text-zinc-400 hover:text-zinc-600 underline cursor-pointer"
-                    >
-                      Test simulated Google identity verification
-                    </button>
-                  </div>
-                )}
+                {/* Strict Credentials Enforced: Zero Passwordless Bypasses */}
+                {!(import.meta as any).env?.PROD && null}
 
                 {/* Divider */}
                 <div className="relative my-6 text-center">
@@ -316,10 +222,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     </div>
                   )}
                 </div>
-              </>
-            )}
+            </div>
           </div>
-        </div>
       </main>
 
       {/* Trust & Security Footnote */}

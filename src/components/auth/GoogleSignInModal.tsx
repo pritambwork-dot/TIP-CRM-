@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, Shield, User, ArrowRight, AlertCircle, ExternalLink, Mail } from 'lucide-react';
+import { X, Lock, ArrowRight, AlertCircle, ExternalLink, ShieldCheck, Mail } from 'lucide-react';
 import { UserProfile } from '../../types';
+import { verifyPassword } from '../../lib/passwordSecurity';
 
 export const GoogleLogoSvg: React.FC<{ className?: string }> = ({ className = 'w-5 h-5 shrink-0' }) => (
   <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
@@ -42,6 +43,9 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
   error = null,
   users = []
 }) => {
+  const [selectedEmail, setSelectedEmail] = useState<string>('tipcrm090@theinclusionproject.ca');
+  const [selectedName, setSelectedName] = useState<string>('TIP Administrator');
+  const [password, setPassword] = useState<string>('');
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customEmail, setCustomEmail] = useState('');
   const [customName, setCustomName] = useState('');
@@ -60,47 +64,67 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Preset verified Google accounts
+  // Primary Super Admin Profile
   const adminUser = users.find(u => u.id === 'u-admin-090' || u.roleId === 'super_admin' || u.email === 'tipcrm090@theinclusionproject.ca');
+  const adminEmail = adminUser?.email || 'tipcrm090@theinclusionproject.ca';
+  const adminName = adminUser?.name || 'TIP Administrator';
 
-  const defaultAccounts = [
-    {
-      name: adminUser?.name || 'TIP Administrator',
-      email: adminUser?.email || 'tipcrm090@theinclusionproject.ca',
-      initials: 'TA',
-      badge: 'Super Admin',
-      badgeColor: 'bg-zinc-900 text-white',
-      avatarBg: 'bg-zinc-900 text-amber-400',
-      description: 'Executive Director & Super Admin'
-    },
-    {
-      name: 'Sarah Thompson',
-      email: 'sarah.t@theinclusionproject.ca',
-      initials: 'ST',
-      badge: 'Staff Manager',
-      badgeColor: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-      avatarBg: 'bg-emerald-600 text-white',
-      description: 'Director of Programs & Events'
-    },
-    {
-      name: 'Marcus Chen',
-      email: 'marcus.c@theinclusionproject.ca',
-      initials: 'MC',
-      badge: 'Volunteer',
-      badgeColor: 'bg-blue-50 text-blue-700 border border-blue-200',
-      avatarBg: 'bg-blue-600 text-white',
-      description: 'Community Engagement Volunteer'
-    }
-  ];
-
-  const handleCustomSubmit = (e: React.FormEvent) => {
+  const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setLocalError(null);
-    if (!customEmail.trim() || !customEmail.includes('@')) {
+
+    const targetEmail = (showCustomInput ? customEmail : selectedEmail).trim().toLowerCase();
+    const targetName = showCustomInput ? (customName.trim() || undefined) : selectedName;
+
+    if (!targetEmail) {
       setLocalError('Please enter a valid Google Account email.');
       return;
     }
-    onSelectAccount(customEmail.trim().toLowerCase(), customName.trim() || undefined);
+
+    if (!password.trim()) {
+      setLocalError('Please enter your CRM password to authorize Google account sign-in.');
+      return;
+    }
+
+    // Verify Password against primary administrator or provisioned user profile
+    const isAdmin = targetEmail === 'tipcrm090' || 
+                         targetEmail === 'tipcrm090@theinclusionproject.ca' || 
+                         targetEmail === 'admin@theinclusionproject.ca';
+
+    if (isAdmin) {
+      if (password !== 'CRM090') {
+        setLocalError('Incorrect password for TIP Administrator.');
+        return;
+      }
+    } else {
+      const user = users.find(u => u.email.toLowerCase() === targetEmail || u.id === targetEmail);
+      if (!user) {
+        setLocalError(`No approved account found for ${targetEmail}. Please check your credentials or contact your administrator.`);
+        return;
+      }
+      if (user.status === 'disabled' || user.isActive === false) {
+        setLocalError('Your account has been deactivated. Please contact your CRM Administrator.');
+        return;
+      }
+      if (user.mustChangePassword && user.tempPassword) {
+        if (password !== user.tempPassword) {
+          setLocalError('Incorrect temporary password. Please enter the temporary password provided by your admin.');
+          return;
+        }
+      } else if (user.passwordHash || user.password) {
+        const isMatch = verifyPassword(password, user.passwordHash || user.password);
+        if (!isMatch) {
+          setLocalError('Invalid email or password.');
+          return;
+        }
+      } else {
+        setLocalError('Invalid email or password. Please contact your CRM Administrator.');
+        return;
+      }
+    }
+
+    // Password verified: Proceed with authenticated sign-in
+    onSelectAccount(targetEmail, targetName);
   };
 
   return (
@@ -122,7 +146,7 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
                 Sign in with Google
               </h2>
               <p className="text-xs text-zinc-500 mt-0.5">
-                Choose an account to continue to TIP CRM
+                Authorized access to The Inclusion Project CRM
               </p>
             </div>
           </div>
@@ -138,6 +162,12 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
 
         {/* Content Body */}
         <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+          {/* Security Banner */}
+          <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px]">
+            <ShieldCheck className="w-4 h-4 shrink-0 text-amber-700" />
+            <span>Strict Security Active: Proper password verification required to authenticate.</span>
+          </div>
+
           {/* Error Message */}
           {(error || localError) && (
             <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-start gap-2.5">
@@ -146,126 +176,123 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
             </div>
           )}
 
-          {!showCustomInput ? (
-            <>
-              {/* Account List */}
-              <div className="space-y-2">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 px-1">
-                  Verified Google Identities
-                </div>
-                {defaultAccounts.map((account) => (
-                  <button
-                    key={account.email}
-                    type="button"
-                    disabled={loading}
-                    onClick={() => onSelectAccount(account.email, account.name)}
-                    className="w-full p-3 rounded-xl border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50/80 transition-all text-left flex items-center justify-between group cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-9 h-9 rounded-full ${account.avatarBg} font-medium text-xs flex items-center justify-center shrink-0 shadow-2xs`}>
-                        {account.initials}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-zinc-900 truncate">
-                            {account.name}
-                          </span>
-                          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${account.badgeColor}`}>
-                            {account.badge}
-                          </span>
-                        </div>
-                        <div className="text-xs text-zinc-500 truncate">
-                          {account.email}
-                        </div>
-                      </div>
+          <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            {!showCustomInput ? (
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  Authorized Administrator Account
+                </label>
+                <div className="p-3 rounded-xl border border-zinc-200 bg-zinc-50 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-zinc-900 text-amber-400 font-medium text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                      TA
                     </div>
-                    <ArrowRight className="w-4 h-4 text-zinc-400 group-hover:text-zinc-700 group-hover:translate-x-0.5 transition-all shrink-0 ml-2" />
-                  </button>
-                ))}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-zinc-900">{adminName}</span>
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-zinc-900 text-white">
+                          Super Admin
+                        </span>
+                      </div>
+                      <div className="text-xs text-zinc-500">{adminEmail}</div>
+                    </div>
+                  </div>
+                </div>
               </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-700 mb-1">
+                    Google Account Email
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    autoFocus
+                    placeholder="name@theinclusionproject.ca or name@gmail.com"
+                    value={customEmail}
+                    onChange={(e) => setCustomEmail(e.target.value)}
+                    className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-700 mb-1">
+                    Full Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Registered User Name"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
+                  />
+                </div>
+              </div>
+            )}
 
-              {/* Action Buttons */}
-              <div className="pt-2 space-y-2">
+            {/* Password Verification Field (Mandatory) */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-medium text-zinc-700">
+                  CRM Account Password
+                </label>
+                <span className="text-[10px] text-zinc-400 font-mono">Password required</span>
+              </div>
+              <div className="relative">
+                <input
+                  type="password"
+                  required
+                  placeholder="Enter your account password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-3.5 pr-10 py-2.5 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
+                />
+                <Lock className="w-4 h-4 text-zinc-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+              </div>
+            </div>
+
+            {/* Submit Button */}
+            <div className="pt-2 flex flex-col gap-2">
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white text-sm font-medium transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <GoogleLogoSvg className="w-4 h-4" />
+                <span>{loading ? 'Authenticating...' : 'Verify Password & Sign In'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center justify-between pt-1">
                 <button
                   type="button"
-                  onClick={() => setShowCustomInput(true)}
-                  className="w-full py-2.5 px-3.5 rounded-xl border border-dashed border-zinc-300 hover:border-zinc-400 bg-white hover:bg-zinc-50/80 text-xs font-medium text-zinc-700 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  onClick={() => {
+                    setShowCustomInput(!showCustomInput);
+                    setLocalError(null);
+                    setPassword('');
+                  }}
+                  className="text-xs text-zinc-500 hover:text-zinc-900 font-medium underline cursor-pointer"
                 >
-                  <Mail className="w-3.5 h-3.5 text-zinc-500" />
-                  <span>Use another Google account</span>
+                  {showCustomInput ? '← Use Primary Administrator' : 'Use another Google account'}
                 </button>
 
                 {onDirectOAuth && (
                   <button
                     type="button"
-                    disabled={loading}
                     onClick={onDirectOAuth}
-                    className="w-full py-2 px-3 text-[11px] text-zinc-500 hover:text-zinc-800 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                    className="text-[11px] text-zinc-400 hover:text-zinc-700 flex items-center gap-1 cursor-pointer"
                   >
-                    <ExternalLink className="w-3 h-3 text-zinc-400" />
-                    <span>Initiate external Supabase OAuth browser redirect</span>
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Browser OAuth</span>
                   </button>
                 )}
               </div>
-            </>
-          ) : (
-            /* Custom Google Email Form */
-            <form onSubmit={handleCustomSubmit} className="space-y-3.5">
-              <div className="text-xs text-zinc-600 bg-zinc-50 p-3 rounded-xl border border-zinc-200/80">
-                Sign in using your Google Workspace or Gmail account:
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1">
-                  Google Account Email
-                </label>
-                <input
-                  type="email"
-                  required
-                  autoFocus
-                  placeholder="name@theinclusionproject.ca or name@gmail.com"
-                  value={customEmail}
-                  onChange={(e) => setCustomEmail(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1">
-                  Full Name (Optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Jane Doe"
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"
-                />
-              </div>
-
-              <div className="pt-2 flex flex-col gap-2">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-2.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white text-sm font-medium transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <GoogleLogoSvg className="w-4 h-4" />
-                  <span>{loading ? 'Verifying with Google...' : 'Continue with this Google Account'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowCustomInput(false); setLocalError(null); }}
-                  className="w-full py-1.5 text-xs text-zinc-500 hover:text-zinc-900 cursor-pointer"
-                >
-                  ← Back to Verified Accounts
-                </button>
-              </div>
-            </form>
-          )}
+            </div>
+          </form>
 
           {/* Privacy Note */}
           <div className="pt-3 border-t border-zinc-100 text-[11px] text-zinc-400 text-center leading-relaxed">
-            To continue, Google will share your verified name, email address, and profile credentials with The Inclusion Project CRM.
+            The Inclusion Project CRM requires cryptographic verification. Unverified access is strictly denied.
           </div>
         </div>
       </div>

@@ -18,6 +18,7 @@ import {
   mapToSafeErrorMessage, 
   clientSafeLogger 
 } from '../lib/safeErrors.ts';
+import { hashPassword, verifyPassword } from '../lib/passwordSecurity.ts';
 import { 
   extractAndParseJson, 
   getGeminiApiKey 
@@ -4157,9 +4158,10 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     assert(googleModalContent.includes('export const GoogleSignInModal'), 'GoogleSignInModal component exported');
     assert(googleModalContent.includes('export const GoogleLogoSvg'), 'GoogleLogoSvg component exported');
     assert(googleModalContent.includes('tipcrm090@theinclusionproject.ca'), 'Google modal includes TIP Administrator preset');
-    assert(googleModalContent.includes('sarah.t@theinclusionproject.ca'), 'Google modal includes Staff Manager preset');
-    assert(googleModalContent.includes('marcus.c@theinclusionproject.ca'), 'Google modal includes Volunteer preset');
+    assert(!googleModalContent.includes('sarah.t@theinclusionproject.ca'), 'Demo account Sarah Thompson removed from Google modal');
+    assert(!googleModalContent.includes('marcus.c@theinclusionproject.ca'), 'Demo account Marcus Chen removed from Google modal');
     assert(googleModalContent.includes('Use another Google account'), 'Google modal includes custom account option');
+    assert(googleModalContent.includes('verifyPassword'), 'Google modal enforces password verification before authorizing sign-in');
 
     // F. Verify LandingPage Google Sign-In Integration
     const landingPath = path.resolve(process.cwd(), 'src/components/landing/LandingPage.tsx');
@@ -4168,19 +4170,88 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     assert(landingContent.includes('Sign in with Google'), 'LandingPage renders Sign in with Google buttons');
     assert(landingContent.includes('GoogleLogoSvg'), 'LandingPage renders GoogleLogoSvg icon');
 
-    // G. Verify LoginPage Google Sign-In Integration
+    // G. Verify LoginPage Google Sign-In Integration & Removal of 1-Click Bypass
     const loginPagePath = path.resolve(process.cwd(), 'src/components/auth/LoginPage.tsx');
     const loginContent = fs.readFileSync(loginPagePath, 'utf-8');
     assert(loginContent.includes('GoogleSignInModal'), 'LoginPage integrates GoogleSignInModal');
     assert(loginContent.includes('setShowGoogleModal(true)'), 'LoginPage btn-google-login opens Google modal');
-    assert(loginContent.includes('Quick Admin Sign-In:'), 'LoginPage renders 1-click Quick Admin Sign-In option');
-    assert(loginContent.includes('tipcrm090@theinclusionproject.ca'), 'LoginPage Quick Admin references primary admin email');
+    assert(!loginContent.includes('Quick Admin Sign-In:'), '1-click Quick Admin Sign-In bypass removed from LoginPage');
 
-    // H. Verify App.tsx AuthGate Google Modal Integration
+    // H. Verify App.tsx AuthGate Google Modal Integration & Strict Password Enforcement
     const appPath = path.resolve(process.cwd(), 'src/App.tsx');
     const appContent = fs.readFileSync(appPath, 'utf-8');
     assert(appContent.includes('GoogleSignInModal'), 'App.tsx lazy loads GoogleSignInModal');
     assert(appContent.includes('showGoogleModal'), 'App.tsx manages showGoogleModal state');
+    assert(appContent.includes('verifyPassword(password'), 'App.tsx enforces strict verifyPassword check');
+  }
+
+  // --------------------------------------------------------------------------
+  // Test Suite 34: Strict Zero-Bypass Password Authentication & Purged Demo Accounts
+  // --------------------------------------------------------------------------
+  console.log('\nTest Suite 34: Strict Zero-Bypass Password Authentication & Purged Demo Accounts');
+  {
+    // A. Password Security Engine (PBKDF2 Hashing & Salted Verification)
+    const adminRawPass = 'CRM090';
+    const hashedPass = hashPassword(adminRawPass);
+    assert(hashedPass.startsWith('tip_hash_'), 'hashPassword produces salted cryptographic hash');
+    assert(verifyPassword(adminRawPass, hashedPass) === true, 'verifyPassword validates correct raw password against salted hash');
+    assert(verifyPassword('WrongPassword123', hashedPass) === false, 'verifyPassword rejects incorrect password');
+    assert(verifyPassword('crm090', hashedPass) === false, 'verifyPassword enforces case sensitivity');
+    assert(verifyPassword('', hashedPass) === false, 'verifyPassword rejects empty password');
+    assert(verifyPassword(adminRawPass, adminRawPass) === true, 'verifyPassword validates plaintext password comparison');
+    assert(verifyPassword('wrong', adminRawPass) === false, 'verifyPassword rejects wrong password on plaintext comparison');
+    assert(verifyPassword('any', undefined) === false, 'verifyPassword rejects undefined stored credential');
+    assert(verifyPassword('any', '') === false, 'verifyPassword rejects empty stored credential');
+
+    // B. App.tsx Strict Password Verification (No Wildcards, No Bypass)
+    const appPath = path.resolve(process.cwd(), 'src/App.tsx');
+    const appContent = fs.readFileSync(appPath, 'utf-8');
+    assert(!appContent.includes('password.length < 4'), 'Wildcard password length check (< 4) removed from App.tsx');
+    assert(appContent.includes("password !== 'CRM090'"), 'App.tsx requires exact CRM090 password for TIPCRM090');
+    assert(appContent.includes('matchedUser.mustChangePassword && matchedUser.tempPassword'), 'App.tsx requires exact tempPassword for provisioned users');
+
+    // C. Server Middleware Zero-Bypass Verification (/api/auth/login)
+    // 1. Admin login with wrong password rejected with 401
+    const srvAdminFailRes = createMockRes();
+    const srvAdminFailReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'content-type': 'application/json' },
+      body: { email: 'tipcrm090@theinclusionproject.ca', password: 'WrongAdminPassword!' }
+    });
+    await aiMiddlewareHandler(srvAdminFailReq, srvAdminFailRes.res);
+    assert(srvAdminFailRes.getStatusCode() === 401, 'Server rejects Admin login with wrong password (401 Unauthorized)');
+
+    // 2. Admin login with correct password CRM090 succeeds with 200
+    const srvAdminSuccessRes = createMockRes();
+    const srvAdminSuccessReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'content-type': 'application/json' },
+      body: { email: 'tipcrm090@theinclusionproject.ca', password: 'CRM090' }
+    });
+    await aiMiddlewareHandler(srvAdminSuccessReq, srvAdminSuccessRes.res);
+    assert(srvAdminSuccessRes.getStatusCode() === 200, 'Server accepts Admin login with exact CRM090 password');
+    assert(srvAdminSuccessRes.getData()?.user?.role === 'super_admin', 'Admin session bound with super_admin role');
+
+    // 3. Removed demo email (sarah@theinclusionproject.ca) rejected
+    const srvDemoFailRes = createMockRes();
+    const srvDemoFailReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'content-type': 'application/json' },
+      body: { email: 'sarah@theinclusionproject.ca', password: 'ValidPassword123!' }
+    });
+    await aiMiddlewareHandler(srvDemoFailReq, srvDemoFailRes.res);
+    assert(srvDemoFailRes.getStatusCode() === 401, 'Server rejects removed demo account sarah@theinclusionproject.ca');
+
+    // 4. Server aiMiddleware has no demo password length wildcard
+    const aiMiddlewarePath = path.resolve(process.cwd(), 'server/aiMiddleware.ts');
+    const aiMiddlewareContent = fs.readFileSync(aiMiddlewarePath, 'utf-8');
+    assert(!aiMiddlewareContent.includes('isSarah'), 'isSarah demo bypass removed from aiMiddleware.ts');
+    assert(!aiMiddlewareContent.includes('isMarcus'), 'isMarcus demo bypass removed from aiMiddleware.ts');
+    assert(!aiMiddlewareContent.includes('isElena'), 'isElena demo bypass removed from aiMiddleware.ts');
+    assert(!aiMiddlewareContent.includes('password.length >= 6'), 'Wildcard password.length >= 6 bypass removed from aiMiddleware.ts');
   }
 
   // --------------------------------------------------------------------------

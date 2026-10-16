@@ -141,6 +141,7 @@ export interface UserProfile {
   onboardingCompleted?: boolean;
   tempPassword?: string;
   passwordHash?: string;
+  password?: string;
   approvedBy?: string;
   approvedAt?: string;
   rejectionReason?: string;
