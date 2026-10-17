@@ -163,12 +163,12 @@ export class FundingService {
   }
 
   static async create(funding: Omit<FundingRecord, 'id' | 'createdAt'>, creatorId?: string): Promise<ServiceResult<FundingRecord>> {
-    if (!supabase) return err('Supabase client not configured', 'NOT_CONFIGURED', 503);
     const donor = (funding.donorOrFunder || funding.funderName || '').trim();
     if (!donor) return err('Donor / Funder name is required', 'VALIDATION_ERROR', 400);
     if (funding.amountCad === undefined || Number(funding.amountCad) <= 0) {
       return err('A positive funding amount is required', 'VALIDATION_ERROR', 400);
     }
+    if (!supabase) return err('Supabase client not configured', 'NOT_CONFIGURED', 503);
 
     try {
       const dbPayload = mapFundingToDb(funding, creatorId);

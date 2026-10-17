@@ -27,8 +27,8 @@ jobs:
       - name: TypeScript Compilation Check
         run: npm run lint
 
-      - name: Security & Integration Tests
-        run: npm run test:security
-
       - name: Production Vite Build
         run: npm run build
+
+      - name: Security & Integration Tests
+        run: npm run test:security

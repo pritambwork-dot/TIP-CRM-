@@ -175,8 +175,6 @@ export class PeopleService {
    * Insert a new person record
    */
   static async create(person: Omit<Person, 'id' | 'createdAt'>, actorUserId?: string): Promise<ServiceResult<Person>> {
-    if (!supabase) return err('Supabase client not configured', 'NOT_CONFIGURED', 503);
-
     // Validation
     if (!person.name || person.name.trim().length === 0) {
       return err('Contact name is required', 'VALIDATION_ERROR', 400);
@@ -184,6 +182,8 @@ export class PeopleService {
     if (!person.email || !person.email.includes('@')) {
       return err('Valid email address is required', 'VALIDATION_ERROR', 400);
     }
+
+    if (!supabase) return err('Supabase client not configured', 'NOT_CONFIGURED', 503);
 
     try {
       const dbPayload = mapPersonToDb(person, actorUserId);
