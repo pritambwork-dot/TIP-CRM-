@@ -1,7 +1,6 @@
 import React from 'react';
 import { ArrowRight } from 'lucide-react';
 import { BoomerangVideoBg } from './BoomerangVideoBg';
-import { GoogleLogoSvg } from '../auth/GoogleSignInModal';
 
 interface LandingPageProps {
   onOpenLogin: () => void;
@@ -78,15 +77,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenLogin, onGoogleS
         <div className="flex items-center gap-2 sm:gap-3">
           <button
             type="button"
-            onClick={() => onGoogleSignIn ? onGoogleSignIn() : onOpenLogin()}
-            className="px-3.5 sm:px-4 py-2 bg-white border border-zinc-200/90 text-zinc-800 text-xs sm:text-sm font-medium rounded-lg hover:bg-zinc-50 hover:border-zinc-300 transition-all duration-200 cursor-pointer shadow-2xs flex items-center gap-2"
-          >
-            <GoogleLogoSvg className="w-3.5 sm:w-4 h-3.5 sm:h-4 shrink-0" />
-            <span className="hidden xs:inline">Sign in with Google</span>
-            <span className="xs:hidden">Google</span>
-          </button>
-          <button
-            type="button"
             onClick={onOpenLogin}
             className="px-4 sm:px-5 py-2 sm:py-2.5 bg-[#191919] text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-[#191919]/90 transition-colors duration-200 cursor-pointer shadow-xs flex items-center gap-1.5"
           >
@@ -132,7 +122,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenLogin, onGoogleS
             The Inclusion Project (TIP) actively engages partners and decision-makers through evidence-based research, racial and gender data analytics, and community frameworks — charting new pathways for equity across Canadian society.
           </p>
 
-          {/* Primary Action Buttons */}
+          {/* Primary Action Button */}
           <div className="mt-6 sm:mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-md sm:max-w-none">
             <button
               type="button"
@@ -141,14 +131,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenLogin, onGoogleS
             >
               <span>Sign In to CRM Portal</span>
               <ArrowRight className="w-4 h-4 text-white/70 group-hover:translate-x-1 group-hover:text-white transition-all duration-200" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onGoogleSignIn ? onGoogleSignIn() : onOpenLogin()}
-              className="w-full sm:w-auto px-6 sm:px-7 py-3 sm:py-3.5 bg-white text-zinc-800 border border-zinc-200/90 text-sm sm:text-base font-medium rounded-lg hover:bg-zinc-50 hover:border-zinc-300 transition-all duration-200 cursor-pointer shadow-2xs flex items-center justify-center gap-2.5"
-            >
-              <GoogleLogoSvg className="w-4 h-4 shrink-0" />
-              <span>Sign in with Google</span>
             </button>
           </div>
         </div>

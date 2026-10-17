@@ -4180,9 +4180,8 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     // F. Verify LandingPage Google Sign-In Integration
     const landingPath = path.resolve(process.cwd(), 'src/components/landing/LandingPage.tsx');
     const landingContent = fs.readFileSync(landingPath, 'utf-8');
-    assert(landingContent.includes('onGoogleSignIn'), 'LandingPage accepts onGoogleSignIn prop');
-    assert(landingContent.includes('Sign in with Google'), 'LandingPage renders Sign in with Google buttons');
-    assert(landingContent.includes('GoogleLogoSvg'), 'LandingPage renders GoogleLogoSvg icon');
+    assert(landingContent.includes('Sign In to CRM Portal'), 'LandingPage renders primary portal sign in CTA');
+    assert(!landingContent.includes('GoogleLogoSvg'), 'LandingPage public hero keeps clean portal branding without raw external Google button');
 
     // G. Verify LoginPage Google Sign-In Integration & Removal of 1-Click Bypass
     const loginPagePath = path.resolve(process.cwd(), 'src/components/auth/LoginPage.tsx');
