@@ -255,6 +255,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
       alert('Security Invariant: The Primary Super Administrator role is protected and cannot be modified or demoted.');
       return;
     }
+    if (newRoleId === 'super_admin') {
+      alert('Security Policy: Only the designated Primary Super Administrator can hold the Super Admin role. Additional users cannot be promoted to Super Admin.');
+      return;
+    }
     if (!isAdministrator) {
       alert('Access Denied: Only administrators can configure user roles and data scopes.');
       return;
@@ -386,9 +390,9 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
       ? newUserAssignedRoles 
       : [newUserRole];
 
-    // Privilege restriction: non-super-admin cannot create super-admin
-    if (!isSuperAdmin && rolesToAssign.includes('super_admin')) {
-      alert('Only the Super Admin can assign the Super Administrator role.');
+    // Security Policy: Only the designated Primary Super Admin can be Super Admin
+    if (rolesToAssign.includes('super_admin') || newUserRole === 'super_admin') {
+      alert('Security Policy: Only the designated Primary Super Administrator can hold the Super Admin role. Additional Super Admin accounts cannot be created.');
       return;
     }
 
@@ -472,6 +476,14 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
     }
     const target = users.find(u => u.id === userId);
     if (!target) return;
+    if (isPrimarySuperAdmin ? isPrimarySuperAdmin(target) : (userId === 'u-admin-090' || target.email === 'theinclusionproject.crm@gmail.com')) {
+      alert('Security Policy: The Primary Super Administrator roles are permanent and cannot be modified.');
+      return;
+    }
+    if (roleId === 'super_admin') {
+      alert('Security Policy: Only the designated Primary Super Administrator can hold the Super Admin role. Additional users cannot be assigned Super Admin.');
+      return;
+    }
     const currentRoles = target.assignedRoleIds || [target.roleId];
     let nextRoles: RoleId[];
     if (currentRoles.includes(roleId)) {
@@ -913,8 +925,8 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                     </span>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {(['super_admin', 'staff_manager', 'staff_member', 'volunteer'] as RoleId[]).map(roleKey => {
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {(['staff_manager', 'staff_member', 'volunteer'] as RoleId[]).map(roleKey => {
                       const rDef = ROLE_DEFINITIONS[roleKey];
                       const isCurrentRole = selectedUser.roleId === roleKey;
                       return (
@@ -968,7 +980,6 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                     { id: 'staff_member' as RoleId, label: 'Staff Member' },
                     { id: 'staff_manager' as RoleId, label: 'Staff Manager' },
                     { id: 'volunteer' as RoleId, label: 'Volunteer' },
-                    { id: 'super_admin' as RoleId, label: 'Super Admin' },
                   ]).map(r => {
                     const assigned = (selectedUser.assignedRoleIds || [selectedUser.roleId]).includes(r.id);
                     const isActive = (selectedUser.activeRoleId || selectedUser.roleId) === r.id;
@@ -2523,7 +2534,6 @@ CREATE POLICY people_scoped_view ON people
                     { id: 'staff_member' as RoleId, label: 'Staff Member' },
                     { id: 'staff_manager' as RoleId, label: 'Staff Manager' },
                     { id: 'volunteer' as RoleId, label: 'Volunteer' },
-                    { id: 'super_admin' as RoleId, label: 'Super Admin' },
                   ]).map(r => {
                     const isChecked = newUserAssignedRoles.includes(r.id);
                     return (

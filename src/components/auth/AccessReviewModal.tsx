@@ -44,10 +44,12 @@ export const AccessReviewModal: React.FC<AccessReviewModalProps> = ({
   const roleDef = ROLE_DEFINITIONS[selectedRole];
 
   const handleRoleChange = (newRole: RoleId) => {
-    setSelectedRole(newRole);
     if (newRole === 'super_admin') {
-      setSelectedScope('GLOBAL');
-    } else if (newRole === 'staff_manager') {
+      alert('Security Policy: Only the designated Primary Super Administrator can hold the Super Admin role.');
+      return;
+    }
+    setSelectedRole(newRole);
+    if (newRole === 'staff_manager') {
       setSelectedScope('GLOBAL');
     } else {
       setSelectedScope('ASSIGNED');
@@ -170,8 +172,8 @@ export const AccessReviewModal: React.FC<AccessReviewModalProps> = ({
                 <label className="block text-xs font-medium text-zinc-700 uppercase tracking-wider mb-2">
                   Assign System Role
                 </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(['staff_member', 'staff_manager', 'volunteer', 'super_admin'] as RoleId[]).map((roleId) => {
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {(['staff_member', 'staff_manager', 'volunteer'] as RoleId[]).map((roleId) => {
                     const def = ROLE_DEFINITIONS[roleId];
                     const isSelected = selectedRole === roleId;
                     return (

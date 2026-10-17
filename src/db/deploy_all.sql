@@ -1412,6 +1412,13 @@ REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 CREATE OR REPLACE FUNCTION public.protect_primary_super_admin()
 RETURNS TRIGGER AS $$
 BEGIN
+  -- Prevent creating or promoting any non-primary account to super_admin
+  IF TG_OP = 'INSERT' OR TG_OP = 'UPDATE' THEN
+    IF NEW.role_id = 'super_admin' AND NEW.email <> 'theinclusionproject.crm@gmail.com' THEN
+      RAISE EXCEPTION 'CRITICAL SECURITY VIOLATION: Only the Primary Super Administrator (theinclusionproject.crm@gmail.com) can hold role_id = super_admin. Additional Super Administrators cannot be created.';
+    END IF;
+  END IF;
+
   -- Prevent deletion of Primary Super Admin
   IF TG_OP = 'DELETE' THEN
     IF OLD.email = 'theinclusionproject.crm@gmail.com' OR OLD.auth_user_id = 'auth-tipcrm090' THEN
@@ -1436,13 +1443,13 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  RETURN NULL;
+  RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 DROP TRIGGER IF EXISTS trg_protect_primary_super_admin ON public.users;
 CREATE TRIGGER trg_protect_primary_super_admin
-BEFORE UPDATE OR DELETE ON public.users
+BEFORE INSERT OR UPDATE OR DELETE ON public.users
 FOR EACH ROW
 EXECUTE FUNCTION public.protect_primary_super_admin();
 
@@ -1453,7 +1460,23 @@ DECLARE
   v_is_primary BOOLEAN;
   v_super_admin_count INT;
 BEGIN
-  IF TG_OP = 'DELETE' OR TG_OP = 'UPDATE' THEN
+  -- Prevent assigning super_admin to anyone other than Primary Super Admin
+  IF TG_OP = 'INSERT' OR TG_OP = 'UPDATE' THEN
+    IF NEW.role_id = 'super_admin' THEN
+      SELECT EXISTS (
+        SELECT 1 FROM public.users 
+        WHERE id = NEW.user_id 
+          AND (email = 'theinclusionproject.crm@gmail.com' OR auth_user_id = 'auth-tipcrm090')
+      ) INTO v_is_primary;
+
+      IF NOT v_is_primary THEN
+        RAISE EXCEPTION 'CRITICAL SECURITY VIOLATION: Only the Primary Super Administrator (theinclusionproject.crm@gmail.com) can be assigned the super_admin role. Additional Super Administrators cannot be created.';
+      END IF;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
     -- Check if user is Primary Super Admin
     SELECT EXISTS (
       SELECT 1 FROM public.users 
@@ -1480,7 +1503,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 DROP TRIGGER IF EXISTS trg_protect_primary_super_admin_roles ON public.user_roles;
 CREATE TRIGGER trg_protect_primary_super_admin_roles
-BEFORE UPDATE OR DELETE ON public.user_roles
+BEFORE INSERT OR UPDATE OR DELETE ON public.user_roles
 FOR EACH ROW
 EXECUTE FUNCTION public.protect_primary_super_admin_roles();
 

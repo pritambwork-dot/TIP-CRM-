@@ -4641,6 +4641,42 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     const aiMiddlewareSrc = fs.readFileSync(path.resolve(process.cwd(), 'server/aiMiddleware.ts'), 'utf-8');
     assert(aiMiddlewareSrc.includes("deliveryStatus !== 'SENT'"), 'aiMiddleware validates email deliveryStatus in production');
     assert(aiMiddlewareSrc.includes('502'), 'aiMiddleware returns 502 Bad Gateway when email delivery fails in production');
+
+    // 9. Strict Single Super Admin Invariant: super_admin option hidden in all user management UI
+    assert(usersViewSrc.includes("{(['staff_manager', 'staff_member', 'volunteer'] as RoleId[])"), 'UsersAndAccessView excludes super_admin from role change buttons');
+    assert(!usersViewSrc.includes("{ id: 'super_admin' as RoleId, label: 'Super Admin' }"), 'UsersAndAccessView excludes super_admin from Add User and multi-role lists');
+
+    const accessReviewSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/components/auth/AccessReviewModal.tsx'), 'utf-8');
+    assert(!accessReviewSrc.includes("(['staff_member', 'staff_manager', 'volunteer', 'super_admin']"), 'AccessReviewModal excludes super_admin from assignable roles');
+
+    // 10. Single Super Admin Invariant in CrmContext and Database
+    assert(crmContextSrc.includes('Only the Primary Super Administrator account can hold the Super Admin role'), 'CrmContext blocks provisioning super_admin role');
+    assert(crmContextSrc.includes('Only one user can be Super Admin'), 'CrmContext blocks promoting any user to super_admin');
+
+    const deploySqlSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/db/deploy_all.sql'), 'utf-8');
+    assert(deploySqlSrc.includes('Only the Primary Super Administrator (theinclusionproject.crm@gmail.com) can hold role_id = super_admin'), 'deploy_all.sql triggers block non-primary role_id = super_admin');
+    assert(deploySqlSrc.includes('Only the Primary Super Administrator (theinclusionproject.crm@gmail.com) can be assigned the super_admin role'), 'deploy_all.sql triggers block non-primary user_roles = super_admin');
+
+    // 11. API Rejection of non-primary elevation to super_admin
+    const nonAdminElevateReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/switch-role',
+      headers: {
+        'content-type': 'application/json',
+        'x-user-id': 'u-volunteer-1',
+        'x-user-role': 'volunteer',
+        'x-user-email': 'volunteer@theinclusionproject.ca',
+        'x-csrf-token': generateCsrfToken('u-volunteer-1')
+      },
+      body: {
+        userId: 'u-volunteer-1',
+        targetRoleId: 'super_admin',
+        assignedRoleIds: ['volunteer', 'super_admin']
+      }
+    });
+    const nonAdminElevateRes = createMockRes();
+    await aiMiddlewareHandler(nonAdminElevateReq, nonAdminElevateRes.res);
+    assert(nonAdminElevateRes.getStatusCode() === 403, 'API blocks non-primary user from elevating to super_admin (403 Forbidden)');
   }
 
   // --------------------------------------------------------------------------

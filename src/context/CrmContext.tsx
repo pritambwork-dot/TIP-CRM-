@@ -888,6 +888,11 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       clientSafeLogger.warn('Security Invariant: Protected Primary Super Admin role is immutable and cannot be demoted.');
       return;
     }
+    // Invariant: Only Primary Super Admin can hold super_admin role
+    if (!isPrimarySuperAdmin(currentUser) && roleId === 'super_admin') {
+      clientSafeLogger.warn('Security Invariant: Only the Primary Super Administrator can hold the Super Admin role.');
+      return;
+    }
     const roleDef = ROLE_DEFINITIONS[roleId] || ROLE_DEFINITIONS.staff_member;
     setCurrentUser(prev => {
       const updated: UserProfile = {
@@ -923,6 +928,11 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Invariant: Protected Primary Super Admin cannot demote themselves or switch to a non-super_admin role
     if (isPrimarySuperAdmin(currentUser) && roleId !== 'super_admin') {
       clientSafeLogger.warn('Security Invariant: Protected Primary Super Admin role is immutable and cannot be demoted.');
+      return false;
+    }
+    // Invariant: Only Primary Super Admin can hold super_admin role
+    if (!isPrimarySuperAdmin(currentUser) && roleId === 'super_admin') {
+      clientSafeLogger.warn('Security Invariant: Only the Primary Super Administrator can hold the Super Admin role.');
       return false;
     }
 
@@ -1039,9 +1049,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       throw new Error(`An account with email "${cleanEmail}" already exists in the CRM.`);
     }
 
-    // Security Check: Only Super Admin can assign the super_admin role
-    if (currentUser.roleId !== 'super_admin' && params.assignedRoleIds.includes('super_admin')) {
-      throw new Error('Only the Super Admin can assign the Super Administrator role.');
+    // Security Invariant: Only ONE user can be Super Admin (the Primary Super Admin)
+    if (params.assignedRoleIds.includes('super_admin')) {
+      throw new Error('Security Invariant: Only the Primary Super Administrator account can hold the Super Admin role. Additional Super Admin accounts cannot be created.');
     }
 
     const primaryRoleId = params.assignedRoleIds[0] || 'staff_member';
@@ -1341,9 +1351,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    // Invariant 3: Staff Manager cannot create, assign, or promote Super Administrator accounts
-    if (currentUser.roleId !== 'super_admin' && (updates.roleId === 'super_admin' || updates.assignedRoleIds?.includes('super_admin'))) {
-      clientSafeLogger.warn('Security Invariant: Only Super Administrators can grant Super Administrator role.');
+    // Invariant 3: Only the Primary Super Admin can be Super Admin; no other user can ever be assigned or promoted to Super Admin
+    if (!targetIsPrimaryAdmin && (updates.roleId === 'super_admin' || updates.assignedRoleIds?.includes('super_admin'))) {
+      clientSafeLogger.warn('Security Invariant: Only one user can be Super Admin. Additional Super Administrator accounts cannot be created or promoted.');
       return;
     }
 

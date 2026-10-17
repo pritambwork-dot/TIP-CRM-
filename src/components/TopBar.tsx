@@ -73,6 +73,12 @@ export const TopBar: React.FC<TopBarProps> = ({
       setShowRoleSwitcher(false);
       return;
     }
+    if (!isPrimary && targetRole === 'super_admin') {
+      setRoleToast('Security Policy: Only the Primary Super Administrator can hold the Super Admin role.');
+      setTimeout(() => setRoleToast(null), 3500);
+      setShowRoleSwitcher(false);
+      return;
+    }
     const success = await switchActiveRole(targetRole);
     setShowRoleSwitcher(false);
     if (success) {
@@ -332,7 +338,9 @@ export const TopBar: React.FC<TopBarProps> = ({
                   </div>
 
                   <div className="space-y-1 pt-1">
-                    {currentUser.assignedRoleIds.map(roleId => {
+                    {(currentUser.assignedRoleIds || [])
+                      .filter(roleId => roleId !== 'super_admin' || currentUser.id === 'u-admin-090' || currentUser.email === 'theinclusionproject.crm@gmail.com')
+                      .map(roleId => {
                       const def = ROLE_DEFINITIONS[roleId] || ROLE_DEFINITIONS.staff_member;
                       const isSelected = roleId === (currentUser.activeRoleId || currentUser.roleId);
                       return (

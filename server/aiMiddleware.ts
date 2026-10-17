@@ -1895,6 +1895,28 @@ Rules:
         return true;
       }
 
+      // Security Invariant: Only Primary Super Admin can hold the super_admin role
+      if (targetRoleId === 'super_admin' && !isPrimaryAdmin) {
+        recordAuditEvent({
+          actorId: userId || actor.id,
+          actorName: actor.name,
+          actorRole: actor.role,
+          action: 'AUTH_ROLE_ELEVATION_DENIED',
+          resourceType: 'UserRole',
+          resourceId: userId || actor.id,
+          outcome: 'FAILURE',
+          description: 'Blocked unauthorized promotion to super_admin. Only the Primary Super Admin identity can hold this role.',
+          ipAddress: clientIp
+        });
+        sendSafeError(
+          res,
+          403,
+          'Forbidden: Only the Primary Super Administrator can hold the Super Admin role. Additional Super Admins cannot be created or assigned.',
+          ERROR_CODES.FORBIDDEN
+        );
+        return true;
+      }
+
       // Check user account status
       if (userStatus && userStatus !== 'approved') {
         recordAuditEvent({
@@ -2200,9 +2222,12 @@ Rules:
         return true;
       }
 
-      // Privilege restriction: staff_manager cannot invite a super_admin
-      if (actor.role !== 'super_admin' && Array.isArray(roles) && roles.some((r: string) => r.toLowerCase().includes('super_admin') || r.toLowerCase().includes('super admin'))) {
-        sendSafeError(res, 403, 'Forbidden: Only the Super Admin can provision or invite Super Administrator accounts.', ERROR_CODES.FORBIDDEN);
+      // Invariant: Only ONE user can be Super Admin (the designated Primary Super Admin). No additional Super Admin accounts can be created or invited.
+      const roleStr = typeof body?.role === 'string' ? body.role : (typeof body?.roleId === 'string' ? body.roleId : '');
+      const hasSuperAdminRole = (Boolean(roleStr) && (roleStr.toLowerCase().includes('super_admin') || roleStr.toLowerCase().includes('super admin'))) ||
+                               (Array.isArray(roles) && roles.some((r: string) => r.toLowerCase().includes('super_admin') || r.toLowerCase().includes('super admin')));
+      if (hasSuperAdminRole) {
+        sendSafeError(res, 403, 'Forbidden: Only the Primary Super Administrator can hold the Super Admin role. Additional Super Admin accounts cannot be created or invited.', ERROR_CODES.FORBIDDEN);
         return true;
       }
 
