@@ -40,3 +40,4 @@ server/audit_logs.jsonl
 server/sent_emails.jsonl
 server/user_sessions.jsonl
 brag-output/
+.env*
