@@ -330,7 +330,7 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     setAuthError(null);
 
     try {
-      const res = await SupabaseAuthEngine.signInWithGoogle(email, name);
+      const res = await SupabaseAuthEngine.signInWithGoogle(email, name, '/', true);
       if (res.error) {
         setAuthError(res.error);
         setAuthLoading(false);

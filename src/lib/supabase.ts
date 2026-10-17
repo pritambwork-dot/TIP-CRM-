@@ -235,8 +235,8 @@ export class SupabaseAuthEngine {
     const safeReturn = sanitizeRedirectPath(returnTo);
     const redirectUrl = safeReturn === '/' ? `${origin}/` : `${origin}${safeReturn}`;
 
-    // If real Supabase external OAuth redirect is explicitly requested:
-    if (supabase && forceExternalOAuth) {
+    // If real Supabase external OAuth redirect is explicitly requested or in browser without mock customEmail:
+    if (supabase && (forceExternalOAuth || (typeof window !== 'undefined' && !customEmail))) {
       try {
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: 'google',

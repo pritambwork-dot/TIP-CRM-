@@ -113,7 +113,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   type="button"
                   id="btn-google-login"
                   disabled={loading}
-                  onClick={() => setShowGoogleModal(true)}
+                  onClick={() => onGoogleSignIn()}
                   className="w-full py-2.5 px-4 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 text-zinc-800 text-sm font-medium transition-all shadow-2xs flex items-center justify-center gap-3 cursor-pointer group disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {loading ? (

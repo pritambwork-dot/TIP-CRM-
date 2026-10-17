@@ -4186,8 +4186,8 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     // G. Verify LoginPage Google Sign-In Integration & Removal of 1-Click Bypass
     const loginPagePath = path.resolve(process.cwd(), 'src/components/auth/LoginPage.tsx');
     const loginContent = fs.readFileSync(loginPagePath, 'utf-8');
-    assert(loginContent.includes('GoogleSignInModal'), 'LoginPage integrates GoogleSignInModal');
-    assert(loginContent.includes('setShowGoogleModal(true)'), 'LoginPage btn-google-login opens Google modal');
+    assert(loginContent.includes('GoogleLogoSvg'), 'LoginPage integrates GoogleLogoSvg');
+    assert(loginContent.includes('onGoogleSignIn()'), 'LoginPage btn-google-login triggers direct Google OAuth');
     assert(!loginContent.includes('Quick Admin Sign-In:'), '1-click Quick Admin Sign-In bypass removed from LoginPage');
     assert(loginContent.includes('Email or Super Admin ID'), 'LoginPage references Super Admin ID');
 
