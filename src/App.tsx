@@ -50,7 +50,7 @@ interface AuthGateProps {
  * On successful login, stores session in localStorage so refresh preserves login.
  */
 const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
-  const { users, currentUser, switchUser, completeFirstLoginPasswordChange, completeOnboarding } = useCrm();
+  const { users, currentUser, switchUser, completeFirstLoginPasswordChange, completeOnboarding, activateProvisionedUser } = useCrm();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -74,7 +74,14 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
 
         if (action === 'activate' && actEmail) {
           const targetEmail = actEmail.trim().toLowerCase();
-          const targetUser = users.find(u => u.email.trim().toLowerCase() === targetEmail);
+          let targetUser = users.find(u => u.email.trim().toLowerCase() === targetEmail);
+
+          if (!targetUser) {
+            const activationResult = await activateProvisionedUser(targetEmail, actToken || undefined);
+            if (activationResult.success && activationResult.user) {
+              targetUser = activationResult.user;
+            }
+          }
 
           if (!targetUser) {
             setAuthError(`No registered TIP CRM account found for ${targetEmail}. Please contact your administrator.`);
@@ -153,6 +160,13 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
             targetEmail === 'admin@theinclusionproject.ca'
           )) {
             matchedUser = users.find(u => u.id === 'u-admin-090' || u.id === 'u-1') || users[0];
+          }
+
+          if (!matchedUser) {
+            const activationResult = await activateProvisionedUser(targetEmail);
+            if (activationResult.success && activationResult.user) {
+              matchedUser = activationResult.user;
+            }
           }
 
           if (!matchedUser) {
@@ -244,92 +258,96 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   }, [users, currentUser?.id, switchUser]);
 
 
-  const handleEmailSignIn = useCallback((input: string, password: string) => {
+  const handleEmailSignIn = useCallback(async (input: string, password: string) => {
     setAuthLoading(true);
     setAuthError(null);
 
-    // Simulate async auth check
-    setTimeout(() => {
-      const normalizedInput = input.toLowerCase().trim();
-      const isAdminLogin = normalizedInput === 'theinclusionproject.crm@gmail.com' ||
-                           normalizedInput === 'theinclusionproject.crm' ||
-                           normalizedInput === 'tipcrm090' ||
-                           normalizedInput === 'tipcrm090@theinclusionproject.ca' ||
-                           normalizedInput === 'admin@theinclusionproject.ca';
+    const normalizedInput = input.toLowerCase().trim();
+    const isAdminLogin = normalizedInput === 'theinclusionproject.crm@gmail.com' ||
+                         normalizedInput === 'theinclusionproject.crm' ||
+                         normalizedInput === 'tipcrm090' ||
+                         normalizedInput === 'tipcrm090@theinclusionproject.ca' ||
+                         normalizedInput === 'admin@theinclusionproject.ca';
 
-      let matchedUser = users.find(u => 
-        u.email.toLowerCase().trim() === normalizedInput || 
-        u.id.toLowerCase() === normalizedInput
-      );
+    let matchedUser = users.find(u => 
+      u.email.toLowerCase().trim() === normalizedInput || 
+      u.id.toLowerCase() === normalizedInput
+    );
 
-      // Explicitly bind authorized administrator credentials to Super Admin
-      if (isAdminLogin) {
-        matchedUser = users.find(u => u.id === 'u-admin-090' || u.id === 'u-1' || u.email === 'theinclusionproject.crm@gmail.com' || u.email === 'tipcrm090@theinclusionproject.ca') || users[0];
+    // Explicitly bind authorized administrator credentials to Super Admin
+    if (isAdminLogin) {
+      matchedUser = users.find(u => u.id === 'u-admin-090' || u.id === 'u-1' || u.email === 'theinclusionproject.crm@gmail.com' || u.email === 'tipcrm090@theinclusionproject.ca') || users[0];
+    }
+
+    if (!matchedUser && !isAdminLogin) {
+      const activationResult = await activateProvisionedUser(normalizedInput);
+      if (activationResult.success && activationResult.user) {
+        matchedUser = activationResult.user;
       }
+    }
 
-      if (!matchedUser) {
-        setAuthError('No account found with that email. Please check your credentials or contact your administrator.');
-        setAuthLoading(false);
-        return;
-      }
-
-      // Account Status Checks (Section 29)
-      if (matchedUser.status === 'disabled' || matchedUser.isActive === false) {
-        setAuthError('Your account has been deactivated. Please contact your CRM Administrator.');
-        setAuthLoading(false);
-        return;
-      }
-
-      if (matchedUser.status === 'rejected') {
-        setAuthError('This account request was not approved. Please contact your CRM Administrator.');
-        setAuthLoading(false);
-        return;
-      }
-
-      if (matchedUser.status === 'pending') {
-        setAuthError('Your account is pending activation by an Administrator. Please check back later.');
-        setAuthLoading(false);
-        return;
-      }
-
-      // Exact password check for primary admin
-      if (isAdminLogin) {
-        if (password !== 'CRM090') {
-          const isProd = (import.meta as any).env?.PROD;
-          setAuthError(isProd ? 'Invalid email or password.' : 'Invalid email or password.');
-          setAuthLoading(false);
-          return;
-        }
-      } else if (matchedUser.mustChangePassword && matchedUser.tempPassword) {
-        // Check temporary password for admin-provisioned users
-        if (password !== matchedUser.tempPassword) {
-          setAuthError('Incorrect temporary password. Please enter the temporary password provided by your admin.');
-          setAuthLoading(false);
-          return;
-        }
-      } else if (matchedUser.passwordHash || matchedUser.password) {
-        // Strict verification of permanent password or hash
-        const isMatch = verifyPassword(password, matchedUser.passwordHash || matchedUser.password);
-        if (!isMatch) {
-          setAuthError('Invalid email or password.');
-          setAuthLoading(false);
-          return;
-        }
-      } else {
-        // Account has no credentials configured — strictly blocked
-        setAuthError('Invalid email or password. Please contact your CRM Administrator.');
-        setAuthLoading(false);
-        return;
-      }
-
-      // Successful login
-      switchUser(matchedUser.id);
-      localStorage.setItem(AUTH_STORAGE_KEY, 'active');
-      localStorage.setItem(AUTH_USER_KEY, matchedUser.id);
-      setIsAuthenticated(true);
+    if (!matchedUser) {
+      setAuthError('No account found with that email. Please check your credentials or contact your administrator.');
       setAuthLoading(false);
-    }, 600);
-  }, [users, switchUser]);
+      return;
+    }
+
+    // Account Status Checks (Section 29)
+    if (matchedUser.status === 'disabled' || matchedUser.isActive === false) {
+      setAuthError('Your account has been deactivated. Please contact your CRM Administrator.');
+      setAuthLoading(false);
+      return;
+    }
+
+    if (matchedUser.status === 'rejected') {
+      setAuthError('This account request was not approved. Please contact your CRM Administrator.');
+      setAuthLoading(false);
+      return;
+    }
+
+    if (matchedUser.status === 'pending') {
+      setAuthError('Your account is pending activation by an Administrator. Please check back later.');
+      setAuthLoading(false);
+      return;
+    }
+
+    // Exact password check for primary admin
+    if (isAdminLogin) {
+      if (password !== 'CRM090') {
+        const isProd = (import.meta as any).env?.PROD;
+        setAuthError(isProd ? 'Invalid email or password.' : 'Invalid email or password.');
+        setAuthLoading(false);
+        return;
+      }
+    } else if (matchedUser.mustChangePassword && matchedUser.tempPassword) {
+      // Check temporary password for admin-provisioned users
+      if (password !== matchedUser.tempPassword) {
+        setAuthError('Incorrect temporary password. Please enter the temporary password provided by your admin.');
+        setAuthLoading(false);
+        return;
+      }
+    } else if (matchedUser.passwordHash || matchedUser.password) {
+      // Strict verification of permanent password or hash
+      const isMatch = verifyPassword(password, matchedUser.passwordHash || matchedUser.password);
+      if (!isMatch) {
+        setAuthError('Invalid email or password.');
+        setAuthLoading(false);
+        return;
+      }
+    } else {
+      // Account has no credentials configured — strictly blocked
+      setAuthError('Invalid email or password. Please contact your CRM Administrator.');
+      setAuthLoading(false);
+      return;
+    }
+
+    // Successful login
+    switchUser(matchedUser.id);
+    localStorage.setItem(AUTH_STORAGE_KEY, 'active');
+    localStorage.setItem(AUTH_USER_KEY, matchedUser.id);
+    setIsAuthenticated(true);
+    setAuthLoading(false);
+  }, [users, switchUser, activateProvisionedUser]);
 
   const handleGoogleSignIn = useCallback(async (email?: string, name?: string) => {
     setAuthLoading(true);

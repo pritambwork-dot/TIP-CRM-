@@ -92,11 +92,11 @@ export function maskEmail(email?: string): string {
  * Read current SMTP configuration from environment variables
  */
 export function getSmtpConfig(): SmtpConfig | null {
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const user = (process.env.SMTP_USER || '').trim();
+  const pass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
 
-  if (!host || !user || !pass) {
+  if (!user || !pass) {
     return null;
   }
 
@@ -130,7 +130,7 @@ export function getSmtpReplyCode(buffer: string): number {
 /**
  * Native Node.js SMTP Transport Client (Supports Gmail STARTTLS & Port 465 SSL)
  */
-export async function sendViaSmtp(options: {
+async function executeSingleSmtpAttempt(options: {
   host: string;
   port: number;
   user?: string;
@@ -246,13 +246,13 @@ export async function sendViaSmtp(options: {
                 host: options.host,
                 minVersion: 'TLSv1.2',
                 servername: options.host
+              }, () => {
+                state = 'EHLO_POST_TLS';
+                sendLine('EHLO tip-crm.local');
               });
 
               currentSocket = secureSocket;
               attachListeners(secureSocket);
-
-              state = 'EHLO_POST_TLS';
-              sendLine('EHLO tip-crm.local');
             }
             break;
 
@@ -373,9 +373,37 @@ export async function sendViaSmtp(options: {
 }
 
 /**
+ * Robust SMTP delivery with automated Port 465 direct SSL fallback for Gmail
+ */
+export async function sendViaSmtp(options: {
+  host: string;
+  port: number;
+  user?: string;
+  pass?: string;
+  secure?: boolean;
+  from: string;
+  fromName?: string;
+  to: string;
+  subject: string;
+  html?: string;
+  text?: string;
+  timeoutMs?: number;
+}): Promise<{ messageId: string; response: string }> {
+  try {
+    return await executeSingleSmtpAttempt(options);
+  } catch (err: any) {
+    if (!options.secure && options.port !== 465 && (options.host.includes('gmail') || options.host.includes('google'))) {
+      safeLogger.warn(`SMTP 587 delivery attempt failed (${err?.message || 'Connection error'}). Retrying via direct SMTPS on port 465...`);
+      return await executeSingleSmtpAttempt({ ...options, port: 465, secure: true });
+    }
+    throw err;
+  }
+}
+
+/**
  * Verify SMTP connectivity and credentials without sending an email
  */
-export async function verifySmtpConnection(overrideConfig?: Partial<SmtpConfig>): Promise<{
+async function executeVerifySmtpAttempt(overrideConfig?: Partial<SmtpConfig>): Promise<{
   configured: boolean;
   connected: boolean;
   host?: string;
@@ -496,13 +524,13 @@ export async function verifySmtpConnection(overrideConfig?: Partial<SmtpConfig>)
                 host: config.host,
                 minVersion: 'TLSv1.2',
                 servername: config.host
+              }, () => {
+                state = 'EHLO_POST_TLS';
+                sendLine('EHLO tip-crm.local');
               });
 
               currentSocket = secureSocket;
               attachListeners(secureSocket);
-
-              state = 'EHLO_POST_TLS';
-              sendLine('EHLO tip-crm.local');
             }
             break;
 
@@ -576,6 +604,31 @@ export async function verifySmtpConnection(overrideConfig?: Partial<SmtpConfig>)
 
     attachListeners(currentSocket);
   });
+}
+
+/**
+ * Robust SMTP connection verification with automated Port 465 direct SSL fallback
+ */
+export async function verifySmtpConnection(overrideConfig?: Partial<SmtpConfig>): Promise<{
+  configured: boolean;
+  connected: boolean;
+  host?: string;
+  port?: number;
+  user?: string;
+  error?: string;
+  code?: string;
+}> {
+  const primaryResult = await executeVerifySmtpAttempt(overrideConfig);
+  if (!primaryResult.connected) {
+    const config = overrideConfig ? { ...getSmtpConfig(), ...overrideConfig } : getSmtpConfig();
+    if (config && !config.secure && config.port !== 465 && (config.host?.includes('gmail') || config.host?.includes('google'))) {
+      const fallbackResult = await executeVerifySmtpAttempt({ ...config, port: 465, secure: true });
+      if (fallbackResult.connected) {
+        return fallbackResult;
+      }
+    }
+  }
+  return primaryResult;
 }
 
 /**

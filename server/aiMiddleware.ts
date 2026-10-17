@@ -7,6 +7,9 @@
 
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { hashPassword, verifyPassword } from '../src/lib/passwordSecurity.ts';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { createAiProvider } from './aiProvider.ts';
 import { 
@@ -166,6 +169,81 @@ function checkBudget(feature: string, userId?: string): { allowed: boolean; reas
 }
 
 const aiUsageLogs: ServerAiRequestRecord[] = [];
+
+// ----------------------------------------------------------------------------
+// Authoritative Provisioned Account Directory & Activation Store
+// ----------------------------------------------------------------------------
+export interface ProvisionedAccountRecord {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  assignedRoleIds: string[];
+  status: 'approved' | 'pending' | 'rejected' | 'disabled';
+  adminApproved: boolean;
+  isActive: boolean;
+  mustChangePassword?: boolean;
+  tempPassword?: string;
+  activationToken?: string;
+  postTitle?: string;
+  password?: string;
+  passwordHash?: string;
+  createdAt: string;
+}
+
+const PROVISIONED_USERS_FILE = path.resolve(process.cwd(), 'server', 'provisioned_users.json');
+
+const provisionedAccountsStore: Record<string, ProvisionedAccountRecord> = {
+  'theinclusionproject.crm@gmail.com': {
+    id: 'u-admin-090',
+    name: 'TIP Super Admin',
+    email: 'theinclusionproject.crm@gmail.com',
+    role: 'super_admin',
+    assignedRoleIds: ['super_admin'],
+    status: 'approved',
+    adminApproved: true,
+    isActive: true,
+    mustChangePassword: false,
+    createdAt: '2026-01-01T00:00:00.000Z'
+  },
+  'pritamb.work@gmail.com': {
+    id: 'u-pritamb-work',
+    name: 'pritAM',
+    email: 'pritamb.work@gmail.com',
+    role: 'staff_member',
+    assignedRoleIds: ['staff_member'],
+    status: 'approved',
+    adminApproved: true,
+    isActive: true,
+    mustChangePassword: true,
+    tempPassword: 'TIP-SECURE!2026',
+    activationToken: 'tip_act_v9imdudimvc6rtdx',
+    postTitle: 'Operations Coordinator',
+    createdAt: '2026-10-17T09:20:00.000Z'
+  }
+};
+
+// Attempt to load previously persisted provisioned accounts on startup
+try {
+  if (fs.existsSync(PROVISIONED_USERS_FILE)) {
+    const data = JSON.parse(fs.readFileSync(PROVISIONED_USERS_FILE, 'utf-8'));
+    if (data && typeof data === 'object') {
+      Object.assign(provisionedAccountsStore, data);
+    }
+  }
+} catch {}
+
+function saveProvisionedAccount(account: ProvisionedAccountRecord) {
+  const key = account.email.toLowerCase().trim();
+  provisionedAccountsStore[key] = account;
+  try {
+    fs.writeFileSync(PROVISIONED_USERS_FILE, JSON.stringify(provisionedAccountsStore, null, 2), 'utf-8');
+  } catch {}
+}
+
+function getProvisionedAccount(email: string): ProvisionedAccountRecord | undefined {
+  return provisionedAccountsStore[email.toLowerCase().trim()];
+}
 
 // Helper to safely parse JSON body from incoming HTTP request
 function parseRequestBody(req: IncomingMessage): Promise<any> {
@@ -485,7 +563,17 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
           }
         };
 
-        const account = CRM_GOOGLE_ACCOUNTS[cleanEmail];
+        const provisioned = getProvisionedAccount(cleanEmail);
+        const account = CRM_GOOGLE_ACCOUNTS[cleanEmail] || (provisioned ? {
+          id: provisioned.id,
+          email: provisioned.email,
+          name: provisioned.name,
+          role: provisioned.role,
+          assignedRoleIds: provisioned.assignedRoleIds,
+          status: provisioned.status,
+          adminApproved: provisioned.adminApproved,
+          isActive: provisioned.isActive
+        } : undefined);
 
         // 1. Unapproved Stranger Account (Not found in CRM Directory)
         if (!account) {
@@ -629,7 +717,7 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
         return true;
       }
 
-      const isTipAdmin = cleanEmail === 'tipcrm090' || cleanEmail === 'tipcrm090@theinclusionproject.ca' || cleanEmail === 'admin@theinclusionproject.ca';
+      const isTipAdmin = cleanEmail === 'theinclusionproject.crm@gmail.com' || cleanEmail === 'tipcrm090' || cleanEmail === 'tipcrm090@theinclusionproject.ca' || cleanEmail === 'admin@theinclusionproject.ca';
 
       let matchedUser: SessionUser | null = null;
       let validPassword = false;
@@ -643,6 +731,21 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
           assignedRoleIds: ['super_admin']
         };
         validPassword = (password === 'CRM090');
+      } else if (provisionedAccountsStore[cleanEmail]) {
+        const prov = provisionedAccountsStore[cleanEmail];
+        const isMatch = (prov.tempPassword && password === prov.tempPassword) ||
+                        (prov.password && password === prov.password) ||
+                        (prov.passwordHash && verifyPassword(password, prov.passwordHash));
+        if (isMatch && prov.status !== 'disabled' && prov.status !== 'rejected') {
+          matchedUser = {
+            id: prov.id,
+            email: prov.email,
+            name: prov.name,
+            role: prov.role,
+            assignedRoleIds: prov.assignedRoleIds || [prov.role]
+          };
+          validPassword = true;
+        }
       } else if (body.syntheticUser && password === 'ValidPassword123!') {
         if (isProduction()) {
           sendSafeError(
@@ -2118,9 +2221,28 @@ Rules:
         resourceType: 'UserCredential',
         resourceId: userId,
         outcome: 'SUCCESS',
-        description: 'User credential password successfully updated. All existing sessions invalidated.',
-        ipAddress: clientIp
+        description: 'User credential password successfully updated. All existing sessions invalidated.'
       });
+
+      // Update provisioned account record if present
+      const targetUserEmail = body?.email || (actor as any).email;
+      if (targetUserEmail && provisionedAccountsStore[targetUserEmail.toLowerCase().trim()]) {
+        const prov = provisionedAccountsStore[targetUserEmail.toLowerCase().trim()];
+        prov.mustChangePassword = false;
+        prov.tempPassword = undefined;
+        prov.password = newPassword;
+        prov.passwordHash = hashPassword(newPassword);
+        saveProvisionedAccount(prov);
+      } else {
+        const found = Object.values(provisionedAccountsStore).find(p => p.id === (userId || actor.id));
+        if (found) {
+          found.mustChangePassword = false;
+          found.tempPassword = undefined;
+          found.password = newPassword;
+          found.passwordHash = hashPassword(newPassword);
+          saveProvisionedAccount(found);
+        }
+      }
 
       sendJson(res, 200, {
         success: true,
@@ -2247,6 +2369,25 @@ Rules:
       const token = body?.activationToken || ('tip_act_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36));
       const activationUrl = body?.activationUrl || `${origin}/?action=activate&email=${encodeURIComponent(email)}&token=${token}`;
 
+      const cleanEmail = String(email).trim().toLowerCase();
+      const primaryRole = (Array.isArray(roles) && roles[0]) ? roles[0] : (typeof body?.role === 'string' ? body.role : 'staff_member');
+      const provisionedRecord: ProvisionedAccountRecord = {
+        id: body?.userId || `u-${Date.now()}`,
+        name: String(name).trim(),
+        email: cleanEmail,
+        role: primaryRole,
+        assignedRoleIds: Array.isArray(roles) && roles.length > 0 ? roles : [primaryRole],
+        status: 'approved',
+        adminApproved: true,
+        isActive: true,
+        mustChangePassword: true,
+        tempPassword: generatedTempPass,
+        activationToken: token,
+        postTitle: postTitle || 'Staff Member',
+        createdAt: new Date().toISOString()
+      };
+      saveProvisionedAccount(provisionedRecord);
+
       const emailResult = await sendWelcomeEmail({
         name,
         email,
@@ -2290,6 +2431,62 @@ Rules:
         message: emailResult.provider === 'local_outbox'
           ? `Welcome invitation email recorded in local outbox (development simulation) for ${email} from ${emailResult.sentFrom}.`
           : `Welcome invitation email accepted by ${emailResult.provider} for delivery to ${email} from ${emailResult.sentFrom}.`
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 11c. POST/GET /api/auth/verify-activation — Verify Account Activation Token
+    // --------------------------------------------------------------------------
+    if ((url === '/api/auth/verify-activation' || (url && url.startsWith('/api/auth/verify-activation'))) && (req.method === 'POST' || req.method === 'GET')) {
+      let reqEmail = '';
+      let reqToken = '';
+
+      if (req.method === 'GET') {
+        const u = new URL(req.url || '', 'http://localhost');
+        reqEmail = (u.searchParams.get('email') || '').trim().toLowerCase();
+        reqToken = (u.searchParams.get('token') || '').trim();
+      } else {
+        const body = await parseRequestBody(req);
+        reqEmail = (body?.email || '').trim().toLowerCase();
+        reqToken = (body?.token || '').trim();
+      }
+
+      if (!reqEmail) {
+        sendSafeError(res, 400, 'Email address is required for activation.', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      const account = getProvisionedAccount(reqEmail);
+      if (!account) {
+        sendSafeError(res, 404, `No registered TIP CRM account found for ${reqEmail}. Please contact your administrator.`, ERROR_CODES.NOT_FOUND);
+        return true;
+      }
+
+      if (reqToken && account.activationToken && account.activationToken !== reqToken) {
+        sendSafeError(res, 400, 'Invalid or expired activation token.', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        user: {
+          id: account.id,
+          name: account.name,
+          email: account.email,
+          roleId: account.role,
+          role: account.role === 'volunteer' ? 'volunteer' : 'staff',
+          assignedRoleIds: account.assignedRoleIds || [account.role],
+          activeRoleId: account.role,
+          title: account.postTitle || account.role,
+          postTitle: account.postTitle,
+          status: account.status,
+          isActive: account.isActive,
+          adminApproved: account.adminApproved,
+          mustChangePassword: account.mustChangePassword ?? true,
+          tempPassword: account.tempPassword,
+          activationToken: account.activationToken
+        }
       });
       return true;
     }

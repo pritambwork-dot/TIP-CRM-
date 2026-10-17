@@ -160,6 +160,7 @@ interface CrmContextType {
   switchUserRole: (roleId: RoleId) => void;
   switchActiveRole: (roleId: RoleId) => Promise<boolean>;
   completeFirstLoginPasswordChange: (currentTempPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  activateProvisionedUser: (email: string, token?: string) => Promise<{ success: boolean; user?: UserProfile; error?: string }>;
   completeOnboarding: () => Promise<void>;
   adminProvisionUser: (params: {
     name: string;
@@ -990,6 +991,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: currentUser.id,
+          email: currentUser.email,
           currentPassword: currentTempPassword,
           newPassword
         })
@@ -1015,6 +1017,51 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err?.message || 'Network error updating password.' };
+    }
+  };
+
+  const activateProvisionedUser = async (email: string, token?: string): Promise<{ success: boolean; user?: UserProfile; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
+    const existing = users.find(u => u.email.trim().toLowerCase() === cleanEmail);
+    if (existing) {
+      return { success: true, user: existing };
+    }
+
+    try {
+      const res = await fetch('/api/auth/verify-activation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, token })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.user) {
+          const verifiedUser: UserProfile = normalizeUser({
+            ...data.user,
+            id: data.user.id || ('u-' + Date.now()),
+            avatarInitials: (data.user.name || 'User')
+              .split(' ')
+              .map((n: string) => n[0])
+              .join('')
+              .toUpperCase()
+              .slice(0, 2) || 'U',
+            createdAt: data.user.createdAt || new Date().toISOString()
+          });
+          setUsers(prev => {
+            const next = prev.filter(u => u.email.toLowerCase().trim() !== cleanEmail);
+            next.push(verifiedUser);
+            try {
+              localStorage.setItem('crm_users', JSON.stringify(next));
+            } catch {}
+            return next;
+          });
+          return { success: true, user: verifiedUser };
+        }
+      }
+      const errData = await res.json().catch(() => ({}));
+      return { success: false, error: errData.error || `No registered TIP CRM account found for ${cleanEmail}.` };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Network error verifying account activation.' };
     }
   };
 
@@ -1105,6 +1152,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          userId: newUser.id,
+          role: primaryRoleId,
           name: newUser.name,
           email: cleanEmail,
           activationUrl,
@@ -1150,6 +1199,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          userId: target.id,
+          role: target.roleId,
           name: target.name,
           email: target.email,
           activationUrl,
@@ -2527,6 +2578,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       switchUserRole,
       switchActiveRole,
       completeFirstLoginPasswordChange,
+      activateProvisionedUser,
       completeOnboarding,
       adminProvisionUser,
       adminResetUserPassword,

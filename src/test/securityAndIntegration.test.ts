@@ -4682,6 +4682,79 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
   }
 
   // --------------------------------------------------------------------------
+  // Test Suite 37: Authoritative Provisioned Account Directory & Cross-Device Activation
+  // --------------------------------------------------------------------------
+  console.log('\nTest Suite 37: Authoritative Provisioned Account Directory & Cross-Device Activation');
+  {
+    // 1. POST /api/auth/verify-activation succeeds with valid token
+    const verifySuccessReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/verify-activation',
+      headers: { 'content-type': 'application/json' },
+      body: {
+        email: 'pritamb.work@gmail.com',
+        token: 'tip_act_v9imdudimvc6rtdx'
+      }
+    });
+    const verifySuccessRes = createMockRes();
+    await aiMiddlewareHandler(verifySuccessReq, verifySuccessRes.res);
+    assert(verifySuccessRes.getStatusCode() === 200, 'POST /api/auth/verify-activation returns 200 for valid token');
+    const verifyData = verifySuccessRes.getData();
+    assert(verifyData?.success === true, 'Activation verification returns success: true');
+    assert(verifyData?.user?.email === 'pritamb.work@gmail.com', 'Verified user has expected email');
+    assert(verifyData?.user?.roleId === 'staff_member', 'Verified user has designated role');
+    assert(verifyData?.user?.mustChangePassword === true, 'Verified user requires first-login password change');
+
+    // 2. GET /api/auth/verify-activation also supported for activation links
+    const verifyGetReq = createMockReq({
+      method: 'GET',
+      url: '/api/auth/verify-activation?email=pritamb.work%40gmail.com&token=tip_act_v9imdudimvc6rtdx'
+    });
+    const verifyGetRes = createMockRes();
+    await aiMiddlewareHandler(verifyGetReq, verifyGetRes.res);
+    assert(verifyGetRes.getStatusCode() === 200, 'GET /api/auth/verify-activation returns 200 for URL activation query');
+
+    // 3. Rejects invalid activation token
+    const verifyInvalidTokenReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/verify-activation',
+      headers: { 'content-type': 'application/json' },
+      body: {
+        email: 'pritamb.work@gmail.com',
+        token: 'invalid_token_12345'
+      }
+    });
+    const verifyInvalidTokenRes = createMockRes();
+    await aiMiddlewareHandler(verifyInvalidTokenReq, verifyInvalidTokenRes.res);
+    assert(verifyInvalidTokenRes.getStatusCode() === 400, 'POST /api/auth/verify-activation rejects invalid token with 400');
+
+    // 4. Rejects non-existent email
+    const verifyNotFoundReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/verify-activation',
+      headers: { 'content-type': 'application/json' },
+      body: {
+        email: 'unknown.stranger@example.com',
+        token: 'tip_act_something'
+      }
+    });
+    const verifyNotFoundRes = createMockRes();
+    await aiMiddlewareHandler(verifyNotFoundReq, verifyNotFoundRes.res);
+    assert(verifyNotFoundRes.getStatusCode() === 404, 'POST /api/auth/verify-activation rejects unknown account with 404');
+
+    // 5. CrmContext exports activateProvisionedUser in type and value
+    const crmContextSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/context/CrmContext.tsx'), 'utf-8');
+    assert(crmContextSrc.includes('activateProvisionedUser: (email: string, token?: string)'), 'CrmContextType declares activateProvisionedUser');
+    assert(crmContextSrc.includes('activateProvisionedUser,'), 'CrmContext exposes activateProvisionedUser in value');
+
+    // 6. App.tsx invokes activateProvisionedUser in activation and Google OAuth flows
+    const appSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf-8');
+    assert(appSrc.includes('activateProvisionedUser(targetEmail, actToken || undefined)'), 'App.tsx calls activateProvisionedUser on activation URL');
+    assert(appSrc.includes('activateProvisionedUser(targetEmail)'), 'App.tsx calls activateProvisionedUser for Google OAuth resolution');
+    assert(appSrc.includes('activateProvisionedUser(normalizedInput)'), 'App.tsx calls activateProvisionedUser for email login hydration');
+  }
+
+  // --------------------------------------------------------------------------
   // Summary
   // --------------------------------------------------------------------------
   console.log('\n=============================================================');

@@ -1,0 +1,67 @@
+{
+  "theinclusionproject.crm@gmail.com": {
+    "id": "u-admin-090",
+    "name": "TIP Super Admin",
+    "email": "theinclusionproject.crm@gmail.com",
+    "role": "super_admin",
+    "assignedRoleIds": [
+      "super_admin"
+    ],
+    "status": "approved",
+    "adminApproved": true,
+    "isActive": true,
+    "mustChangePassword": false,
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  },
+  "pritamb.work@gmail.com": {
+    "id": "u-pritamb-work",
+    "name": "pritAM",
+    "email": "pritamb.work@gmail.com",
+    "role": "staff_member",
+    "assignedRoleIds": [
+      "staff_member"
+    ],
+    "status": "approved",
+    "adminApproved": true,
+    "isActive": true,
+    "mustChangePassword": true,
+    "tempPassword": "TIP-SECURE!2026",
+    "activationToken": "tip_act_v9imdudimvc6rtdx",
+    "postTitle": "Operations Coordinator",
+    "createdAt": "2026-10-17T09:20:00.000Z"
+  },
+  "new.staff@inclusionproject.ca": {
+    "id": "u-1792230634696",
+    "name": "New Staff Member",
+    "email": "new.staff@inclusionproject.ca",
+    "role": "Staff Member",
+    "assignedRoleIds": [
+      "Staff Member"
+    ],
+    "status": "approved",
+    "adminApproved": true,
+    "isActive": true,
+    "mustChangePassword": true,
+    "tempPassword": "TIP-STAFF!456",
+    "activationToken": "tip_act_fthumor1mvc7ug94",
+    "postTitle": "Program Associate",
+    "createdAt": "2026-10-17T09:50:34.696Z"
+  },
+  "claire.ops@theinclusionproject.ca": {
+    "id": "u-1792230634721",
+    "name": "Claire Dupont",
+    "email": "claire.ops@theinclusionproject.ca",
+    "role": "Operations Associate",
+    "assignedRoleIds": [
+      "Operations Associate"
+    ],
+    "status": "approved",
+    "adminApproved": true,
+    "isActive": true,
+    "mustChangePassword": true,
+    "tempPassword": "TIP-L16T!169",
+    "activationToken": "tip_act_refreshed_999",
+    "postTitle": "Operations & Event Lead",
+    "createdAt": "2026-10-17T09:50:34.721Z"
+  }
+}
