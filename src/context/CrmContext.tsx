@@ -1158,9 +1158,17 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const emailResponse = await fetch('/api/auth/send-welcome-email', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id,
+          'x-user-role': currentUser.roleId,
+          'x-user-name': currentUser.name,
+          'x-user-email': currentUser.email
+        },
         body: JSON.stringify({
-          userId: newUser.id,
+          adminUserId: currentUser.id,
+          adminUserRole: currentUser.roleId,
+          targetUserId: newUser.id,
           role: primaryRoleId,
           name: newUser.name,
           email: cleanEmail,
@@ -1173,14 +1181,16 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           accountStatus: newUser.status
         })
       });
-      if (emailResponse.ok) {
-        const emailData = await emailResponse.json();
+      const emailData = await emailResponse.json().catch(() => ({}));
+      if (emailResponse.ok && (emailData.success || emailData.deliveryStatus === 'SENT')) {
         newUser.emailSentAt = emailData.timestamp || new Date().toISOString();
         newUser.emailSentFrom = emailData.sentFrom || 'The Inclusion Project CRM <theinclusionproject.crm@gmail.com>';
         newUser.emailDeliveryStatus = emailData.deliveryStatus || emailData.provider || 'SENT';
         newUser.emailPreviewHtml = emailData.previewHtml;
       } else {
-        newUser.emailDeliveryStatus = 'FAILED';
+        newUser.emailSentFrom = emailData.details?.sentFrom || emailData.sentFrom || 'The Inclusion Project CRM <theinclusionproject.crm@gmail.com>';
+        newUser.emailDeliveryStatus = emailData.details?.deliveryStatus || emailData.deliveryStatus || 'FAILED';
+        newUser.emailPreviewHtml = emailData.details?.previewHtml || emailData.previewHtml;
       }
     } catch (err) {
       newUser.emailDeliveryStatus = 'FAILED';

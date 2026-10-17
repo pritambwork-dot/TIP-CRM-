@@ -31,7 +31,7 @@
     "createdAt": "2026-10-17T09:20:00.000Z"
   },
   "new.staff@inclusionproject.ca": {
-    "id": "u-1792232053662",
+    "id": "u-1792236969605",
     "name": "New Staff Member",
     "email": "new.staff@inclusionproject.ca",
     "role": "Staff Member",
@@ -43,12 +43,12 @@
     "isActive": true,
     "mustChangePassword": true,
     "tempPassword": "TIP-STAFF!456",
-    "activationToken": "tip_act_pfeyr4ftmvc8ov4u",
+    "activationToken": "tip_act_gnk1u2n0mvcbm8at",
     "postTitle": "Program Associate",
-    "createdAt": "2026-10-17T10:14:13.662Z"
+    "createdAt": "2026-10-17T11:36:09.605Z"
   },
   "claire.ops@theinclusionproject.ca": {
-    "id": "u-1792232053688",
+    "id": "u-1792236978099",
     "name": "Claire Dupont",
     "email": "claire.ops@theinclusionproject.ca",
     "role": "Operations Associate",
@@ -59,9 +59,9 @@
     "adminApproved": true,
     "isActive": true,
     "mustChangePassword": true,
-    "tempPassword": "TIP-ILL2!460",
+    "tempPassword": "TIP-60XH!262",
     "activationToken": "tip_act_refreshed_999",
     "postTitle": "Operations & Event Lead",
-    "createdAt": "2026-10-17T10:14:13.688Z"
+    "createdAt": "2026-10-17T11:36:18.099Z"
   }
 }

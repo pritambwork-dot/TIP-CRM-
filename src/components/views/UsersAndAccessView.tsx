@@ -441,8 +441,12 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   };
 
   const handleResendWelcomeEmail = async (userId: string) => {
-    const target = users.find(u => u.id === userId);
-    if (!target) return;
+    const target = users.find(u => u.id === userId) || 
+                   users.find(u => u.email?.toLowerCase().trim() === provisionedNotice?.email?.toLowerCase().trim());
+    if (!target) {
+      alert('Target user record was not found in directory.');
+      return;
+    }
     setIsResendingEmail(true);
     try {
       const res = await resendUserWelcomeEmail(userId);

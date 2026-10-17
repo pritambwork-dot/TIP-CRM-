@@ -94,18 +94,20 @@ export function maskEmail(email?: string): string {
  * Read current SMTP configuration from environment variables
  */
 export function getSmtpConfig(): SmtpConfig | null {
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const user = (process.env.SMTP_USER || '').trim();
-  const pass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
+  const host = (process.env.SMTP_HOST || 'smtp.gmail.com').replace(/^["']|["']$/g, '').trim();
+  const user = (process.env.SMTP_USER || '').replace(/^["']|["']$/g, '').trim();
+  const pass = (process.env.SMTP_PASS || '').replace(/^["']|["']$/g, '').replace(/\s+/g, '');
 
   if (!user || !pass) {
     return null;
   }
 
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
-  const secure = process.env.SMTP_SECURE === 'true' || port === 465;
-  const from = process.env.SMTP_FROM_EMAIL || user || CRM_SENDER_EMAIL;
-  const fromName = process.env.SMTP_FROM_NAME || 'TIP CRM';
+  const portStr = (process.env.SMTP_PORT || '587').replace(/^["']|["']$/g, '').trim();
+  const port = parseInt(portStr, 10);
+  const secureStr = (process.env.SMTP_SECURE || '').replace(/^["']|["']$/g, '').trim();
+  const secure = secureStr === 'true' || port === 465;
+  const from = (process.env.SMTP_FROM_EMAIL || user || CRM_SENDER_EMAIL).replace(/^["']|["']$/g, '').trim();
+  const fromName = (process.env.SMTP_FROM_NAME || 'TIP CRM').replace(/^["']|["']$/g, '').trim();
 
   return { host, port, user, pass, secure, from, fromName };
 }
@@ -391,12 +393,14 @@ export async function sendViaSmtp(options: {
   text?: string;
   timeoutMs?: number;
 }): Promise<{ messageId: string; response: string }> {
+  const isGmail = options.host.includes('gmail') || options.host.includes('google');
+  const attemptTimeout = options.timeoutMs || (isGmail && !options.secure ? 5000 : 12000);
   try {
-    return await executeSingleSmtpAttempt(options);
+    return await executeSingleSmtpAttempt({ ...options, timeoutMs: attemptTimeout });
   } catch (err: any) {
-    if (!options.secure && options.port !== 465 && (options.host.includes('gmail') || options.host.includes('google'))) {
+    if (!options.secure && options.port !== 465 && isGmail) {
       safeLogger.warn(`SMTP 587 delivery attempt failed (${err?.message || 'Connection error'}). Retrying via direct SMTPS on port 465...`);
-      return await executeSingleSmtpAttempt({ ...options, port: 465, secure: true });
+      return await executeSingleSmtpAttempt({ ...options, port: 465, secure: true, timeoutMs: 10000 });
     }
     throw err;
   }
@@ -424,7 +428,8 @@ async function executeVerifySmtpAttempt(overrideConfig?: Partial<SmtpConfig>): P
     };
   }
 
-  const timeoutMs = 8000;
+  const isGmail = config.host?.includes('gmail') || config.host?.includes('google');
+  const timeoutMs = isGmail && !config.secure ? 4000 : 8000;
 
   return new Promise((resolve) => {
     let currentSocket: net.Socket;
