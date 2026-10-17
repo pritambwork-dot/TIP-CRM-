@@ -45,8 +45,8 @@ export const supabase: SupabaseClient | null =
         auth: {
           persistSession: true,
           autoRefreshToken: true,
-          detectSessionInUrl: false,
-          flowType: 'pkce'
+          detectSessionInUrl: true,
+          flowType: 'implicit'
         }
       }) 
     : null;
@@ -157,6 +157,49 @@ export class SupabaseAuthEngine {
       };
     }
 
+    // 1b. Detect tokens in URL hash fragment (implicit flow)
+    const accessToken = hashParams.get('access_token');
+    const refreshToken = hashParams.get('refresh_token');
+    if (accessToken && supabase) {
+      this.callbackHandled = true;
+      try {
+        const { data, error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken || ''
+        });
+        try {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } catch {}
+
+        if (!error && data?.session?.user && data.session.user.email) {
+          const user = data.session.user;
+          const email = user.email!.toLowerCase().trim();
+          const fullName = user.user_metadata?.full_name || 
+                           user.user_metadata?.name || 
+                           email.split('@')[0];
+          const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture;
+
+          const authSession: AuthSession = {
+            user: {
+              id: user.id,
+              email,
+              fullName,
+              avatarUrl,
+              provider: 'google',
+              emailVerified: Boolean(user.email_confirmed_at || user.confirmed_at || true)
+            },
+            accessToken: data.session.access_token,
+            expiresAt: data.session.expires_at ? data.session.expires_at * 1000 : Date.now() + 3600 * 24 * 7 * 1000
+          };
+
+          this.saveSession(authSession);
+          return { session: authSession, error: null, oauthCancelled: false };
+        }
+      } catch (err: any) {
+        clientSafeLogger.warn('Error establishing session from URL hash:', mapToSafeErrorMessage(err));
+      }
+    }
+
     // 2. Detect PKCE authorization code in URL query parameters
     const code = searchParams.get('code');
     if (code && supabase) {
@@ -169,6 +212,44 @@ export class SupabaseAuthEngine {
 
         if (error) {
           clientSafeLogger.warn('Supabase OAuth PKCE exchange error:', mapToSafeErrorMessage(error));
+
+          // Check if session was already established automatically by Supabase client
+          try {
+            const { data: activeSessionData } = await supabase.auth.getSession();
+            if (activeSessionData?.session?.user && activeSessionData.session.user.email) {
+              const user = activeSessionData.session.user;
+              const email = user.email!.toLowerCase().trim();
+              const fullName = user.user_metadata?.full_name || 
+                               user.user_metadata?.name || 
+                               email.split('@')[0];
+              const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture;
+
+              const authSession: AuthSession = {
+                user: {
+                  id: user.id,
+                  email,
+                  fullName,
+                  avatarUrl,
+                  provider: 'google',
+                  emailVerified: Boolean(user.email_confirmed_at || user.confirmed_at || true)
+                },
+                accessToken: activeSessionData.session.access_token,
+                expiresAt: activeSessionData.session.expires_at ? activeSessionData.session.expires_at * 1000 : Date.now() + 3600 * 24 * 7 * 1000
+              };
+
+              this.saveSession(authSession);
+              return { session: authSession, error: null, oauthCancelled: false };
+            }
+          } catch {}
+
+          if (error.message.toLowerCase().includes('code verifier not found')) {
+            return {
+              session: null,
+              error: 'Authentication redirect mismatch: Please click "Continue with Google" once more from this page to complete your login.',
+              oauthCancelled: false
+            };
+          }
+
           return {
             session: null,
             error: `Failed to complete Google authentication: ${error.message}`,
