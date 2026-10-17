@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import type { IncomingMessage, ServerResponse } from 'http';
 import { aiMiddlewareHandler } from '../server/aiMiddleware.ts';
 import { sendSafeError, ERROR_CODES } from '../server/lib/safeErrors.ts';

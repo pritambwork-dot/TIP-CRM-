@@ -7,6 +7,7 @@
 
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+dotenv.config();
 import fs from 'fs';
 import path from 'path';
 import { hashPassword, verifyPassword } from '../src/lib/passwordSecurity.ts';
@@ -351,10 +352,14 @@ function getRequestActor(req: IncomingMessage, body?: any): RequestActor {
   const headerRole = req.headers['x-user-role'] as string;
   const headerName = req.headers['x-user-name'] as string;
 
+  const adminId = headerId || body?.adminUserId || body?.actorId || (body?.actor?.id);
+  const adminRole = headerRole || body?.adminUserRole || body?.adminRole || body?.actorRole || (body?.actor?.role);
+  const adminName = headerName || body?.adminUserName || body?.actorName || (body?.actor?.name);
+
   const bodyUser = body?.user;
-  const id = headerId || bodyUser?.id || body?.userId || body?.adminUserId;
-  const role = headerRole || bodyUser?.roleId || bodyUser?.role;
-  const name = headerName || bodyUser?.name;
+  const id = adminId || bodyUser?.id || (body?.targetUserId ? undefined : body?.userId);
+  const role = adminRole || bodyUser?.roleId || (body?.targetUserId ? undefined : body?.role);
+  const name = adminName || bodyUser?.name;
 
   if (id || role) {
     return {
@@ -2407,12 +2412,17 @@ Rules:
         sendSafeError(
           res,
           502,
-          `Email Delivery Failed: Email gateway (${emailResult.provider}) could not dispatch invitation to ${email}. Check SMTP credentials.`,
+          `Email Delivery Failed: Email gateway (${emailResult.provider}) could not dispatch invitation to ${email}. Share activation link directly.`,
           ERROR_CODES.SERVICE_UNAVAILABLE,
           {
-            deliveryStatus: emailResult.deliveryStatus,
+            deliveryStatus: 'FAILED',
             provider: emailResult.provider,
-            recipient: emailResult.recipient
+            recipient: emailResult.recipient,
+            activationUrl,
+            activationToken: token,
+            tempPassword: generatedTempPass,
+            previewHtml: emailResult.previewHtml,
+            sentFrom: `${CRM_SENDER_NAME} <${CRM_SENDER_EMAIL}>`
           }
         );
         return true;

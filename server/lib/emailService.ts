@@ -11,6 +11,8 @@
  * 4. Simulated Local Outbox (server/sent_emails.jsonl) with authoritative audit logging
  */
 
+import dotenv from 'dotenv';
+dotenv.config();
 import fs from 'fs';
 import path from 'path';
 import net from 'net';

@@ -441,13 +441,25 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   };
 
   const handleResendWelcomeEmail = async (userId: string) => {
+    const target = users.find(u => u.id === userId);
+    if (!target) return;
     setIsResendingEmail(true);
     try {
       const res = await resendUserWelcomeEmail(userId);
+      setProvisionedNotice({
+        name: target.name,
+        email: target.email,
+        tempPass: res.tempPassword || target.tempPassword || 'TIP-SECURE!2026',
+        activationUrl: res.activationUrl || target.activationUrl,
+        previewHtml: res.previewHtml,
+        emailSentFrom: res.sentFrom,
+        emailDeliveryStatus: res.deliveryStatus || (res.success ? 'SENT' : 'FAILED'),
+        userId: target.id
+      });
       setSaveSuccessMessage(res.message);
       setTimeout(() => setSaveSuccessMessage(null), 4500);
     } catch (err: any) {
-      alert(err?.message || 'Failed to resend welcome email.');
+      alert(err?.message || 'Failed to dispatch welcome email.');
     } finally {
       setIsResendingEmail(false);
     }
@@ -1052,14 +1064,44 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                         Last changed: {new Date(selectedUser.passwordChangedAt).toLocaleDateString()}
                       </p>
                     )}
-                    <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 pt-0.5">
-                      <Mail className="w-3.5 h-3.5 text-indigo-500" />
-                      <span>
-                        {selectedUser.emailSentAt 
-                          ? `Credentials emailed from ${selectedUser.emailSentFrom || 'crm@theinclusionproject.ca'}` 
-                          : 'No credentials email recorded yet'}
-                      </span>
+                    <div className="flex items-center gap-1.5 text-[11px] pt-0.5">
+                      {selectedUser.emailDeliveryStatus === 'FAILED' ? (
+                        <div className="flex items-center gap-1.5 text-rose-600 font-medium">
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                          <span>Delivery failed — share activation link below</span>
+                        </div>
+                      ) : selectedUser.emailDeliveryStatus === 'SENT' ? (
+                        <div className="flex items-center gap-1.5 text-emerald-700 font-medium">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Credentials emailed from {selectedUser.emailSentFrom || 'theinclusionproject.crm@gmail.com'}</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-zinc-500">
+                          <Mail className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                          <span>
+                            {selectedUser.emailSentAt 
+                              ? `Credentials emailed from ${selectedUser.emailSentFrom || 'theinclusionproject.crm@gmail.com'}` 
+                              : 'No credentials email recorded yet'}
+                          </span>
+                        </div>
+                      )}
                     </div>
+                    {selectedUser.activationUrl && (
+                      <div className="flex items-center justify-between bg-zinc-100/90 px-2.5 py-1.5 rounded-lg border border-zinc-200 font-mono text-[11px] text-zinc-700 gap-2 mt-1">
+                        <span className="truncate">{selectedUser.activationUrl}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(selectedUser.activationUrl!);
+                            setCopiedKey(`act_${selectedUser.id}`);
+                            setTimeout(() => setCopiedKey(null), 2000);
+                          }}
+                          className="text-indigo-600 hover:text-indigo-800 font-sans text-xs font-semibold shrink-0 cursor-pointer"
+                        >
+                          {copiedKey === `act_${selectedUser.id}` ? 'Copied!' : 'Copy Link'}
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {canManageUsers && (
@@ -1069,9 +1111,13 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                         disabled={isResendingEmail}
                         onClick={() => handleResendWelcomeEmail(selectedUser.id)}
                         className="px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-900 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
-                        title="Resend account credentials email with The Inclusion Project template"
+                        title="Dispatch official account credentials email with activation link"
                       >
-                        <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                        {isResendingEmail ? (
+                          <RefreshCw className="w-3.5 h-3.5 text-indigo-600 animate-spin" />
+                        ) : (
+                          <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                        )}
                         <span>{isResendingEmail ? 'Sending...' : 'Send Welcome Email'}</span>
                       </button>
                       <button

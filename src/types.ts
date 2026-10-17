@@ -141,6 +141,7 @@ export interface UserProfile {
   onboardingCompleted?: boolean;
   tempPassword?: string;
   activationToken?: string;
+  activationUrl?: string;
   activationExpiresAt?: string;
   passwordHash?: string;
   password?: string;

@@ -173,7 +173,15 @@ interface CrmContextType {
     sendInviteEmail?: boolean;
   }) => Promise<UserProfile>;
   adminResetUserPassword: (userId: string, customTempPassword?: string) => Promise<{ tempPassword: string }>;
-  resendUserWelcomeEmail: (userId: string) => Promise<{ success: boolean; message: string; previewHtml?: string }>;
+  resendUserWelcomeEmail: (userId: string) => Promise<{
+    success: boolean;
+    message: string;
+    previewHtml?: string;
+    activationUrl?: string;
+    deliveryStatus?: string;
+    sentFrom?: string;
+    tempPassword?: string;
+  }>;
   setUserRole: (role: UserRole) => void;
   addUser: (user: Omit<UserProfile, 'id' | 'createdAt'>) => UserProfile;
   updateUser: (id: string, updates: Partial<UserProfile>) => void;
@@ -1184,7 +1192,15 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newUser;
   };
 
-  const resendUserWelcomeEmail = async (userId: string): Promise<{ success: boolean; message: string; previewHtml?: string }> => {
+  const resendUserWelcomeEmail = async (userId: string): Promise<{
+    success: boolean;
+    message: string;
+    previewHtml?: string;
+    activationUrl?: string;
+    deliveryStatus?: string;
+    sentFrom?: string;
+    tempPassword?: string;
+  }> => {
     const target = users.find(u => u.id === userId);
     if (!target) throw new Error('User not found');
 
@@ -1194,12 +1210,26 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const activationToken = target.activationToken || ('tip_act_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36));
     const activationUrl = `${origin}/?action=activate&email=${encodeURIComponent(target.email)}&token=${activationToken}`;
 
+    let deliveryStatus = 'PENDING';
+    let previewHtml = target.emailPreviewHtml;
+    let sentFrom = 'The Inclusion Project CRM <theinclusionproject.crm@gmail.com>';
+    let success = false;
+    let message = '';
+
     try {
       const emailResponse = await fetch('/api/auth/send-welcome-email', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id,
+          'x-user-role': currentUser.roleId,
+          'x-user-name': currentUser.name,
+          'x-user-email': currentUser.email
+        },
         body: JSON.stringify({
-          userId: target.id,
+          adminUserId: currentUser.id,
+          adminUserRole: currentUser.roleId,
+          targetUserId: target.id,
           role: target.roleId,
           name: target.name,
           email: target.email,
@@ -1212,31 +1242,58 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           accountStatus: target.status
         })
       });
-      if (emailResponse.ok) {
-        const emailData = await emailResponse.json();
-        const updatedUser: UserProfile = {
-          ...target,
-          tempPassword: tempPass,
-          activationToken,
-          emailSentAt: emailData.timestamp || new Date().toISOString(),
-          emailSentFrom: emailData.sentFrom || 'The Inclusion Project CRM <crm@theinclusionproject.ca>',
-          emailDeliveryStatus: emailData.deliveryStatus || emailData.provider || 'SENT',
-          emailPreviewHtml: emailData.previewHtml
-        };
-        setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
-        logAction('Email Dispatched', 'User Management', target.name, `Resent welcome onboarding email with credentials to ${target.email} from ${emailData.sentFrom || 'crm@theinclusionproject.ca'}`);
-        return {
-          success: true,
-          message: `Welcome invitation email sent to ${target.email} from ${emailData.sentFrom || 'crm@theinclusionproject.ca'}.`,
-          previewHtml: emailData.previewHtml
-        };
+
+      const emailData = await emailResponse.json().catch(() => ({}));
+
+      if (emailResponse.ok && emailData.success) {
+        success = true;
+        deliveryStatus = emailData.deliveryStatus || 'SENT';
+        sentFrom = emailData.sentFrom || sentFrom;
+        previewHtml = emailData.previewHtml || previewHtml;
+        message = `Welcome invitation email dispatched to ${target.email} from ${sentFrom}.`;
+      } else {
+        success = false;
+        deliveryStatus = 'FAILED';
+        sentFrom = emailData.details?.sentFrom || emailData.sentFrom || sentFrom;
+        previewHtml = emailData.details?.previewHtml || previewHtml;
+        message = emailData.error || `SMTP delivery failed. Share secure activation link below.`;
       }
-    } catch (err) {
+    } catch (err: any) {
+      success = false;
+      deliveryStatus = 'FAILED';
+      message = err?.message || 'Network error reaching email dispatch gateway.';
       clientSafeLogger.warn('Error resending welcome email:', err);
     }
+
+    const updatedUser: UserProfile = {
+      ...target,
+      tempPassword: tempPass,
+      activationToken,
+      activationUrl,
+      emailSentAt: new Date().toISOString(),
+      emailSentFrom: sentFrom,
+      emailDeliveryStatus: deliveryStatus as any,
+      emailPreviewHtml: previewHtml
+    };
+
+    setUsers(prev => {
+      const next = prev.map(u => u.id === userId ? updatedUser : u);
+      try {
+        localStorage.setItem('crm_users', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    logAction('Email Dispatched', 'User Management', target.name, `${success ? 'Successfully sent' : 'Attempted dispatch of'} welcome onboarding email to ${target.email} (Status: ${deliveryStatus})`);
+
     return {
-      success: true,
-      message: `Welcome email queued for delivery to ${target.email} from crm@theinclusionproject.ca.`
+      success,
+      message,
+      previewHtml,
+      activationUrl,
+      deliveryStatus,
+      sentFrom,
+      tempPassword: tempPass
     };
   };
 
