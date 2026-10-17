@@ -157,12 +157,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                      {authMode === 'signup' ? 'Email address' : 'Email or Super Admin ID'}
+                      Email address
                     </label>
                     <input
-                      type={authMode === 'signup' ? 'email' : 'text'}
+                      type="email"
                       required
-                      placeholder={authMode === 'signup' ? 'name@inclusionproject.ca' : 'Email or Super Admin ID (e.g. TIPCRM090)'}
+                      placeholder="name@theinclusionproject.ca"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-colors"

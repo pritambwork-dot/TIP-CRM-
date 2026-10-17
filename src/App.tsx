@@ -268,7 +268,7 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
       }
 
       if (!matchedUser) {
-        setAuthError('No account found with that email or ID. Please check your credentials or contact your administrator.');
+        setAuthError('No account found with that email. Please check your credentials or contact your administrator.');
         setAuthLoading(false);
         return;
       }
@@ -292,11 +292,11 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
         return;
       }
 
-      // Exact password check for TIPCRM090 / primary admin
+      // Exact password check for primary admin
       if (isAdminLogin) {
         if (password !== 'CRM090') {
           const isProd = (import.meta as any).env?.PROD;
-          setAuthError(isProd ? 'Invalid email or password.' : 'Incorrect password. For TIPCRM090, please enter password: CRM090');
+          setAuthError(isProd ? 'Invalid email or password.' : 'Invalid email or password.');
           setAuthLoading(false);
           return;
         }

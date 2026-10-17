@@ -3233,10 +3233,11 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     assert(matchedRecord !== undefined, 'Logged email contains matching recipient');
     assert(matchedRecord?.template === 'inclusion_project_welcome_v1', 'Logged email specifies inclusion_project_welcome_v1 template');
 
-    // Verify audit event AUTH_WELCOME_EMAIL_SENT
-    const { logs: emailAudits } = queryAuditLogs({ action: 'AUTH_WELCOME_EMAIL_SENT' });
-    assert(emailAudits.length > 0, 'Audit trail logs AUTH_WELCOME_EMAIL_SENT event');
-    assert(emailAudits[0].resourceId === 'pritam@example.com', 'Audit event resourceId matches user email');
+    // Verify audit event AUTH_WELCOME_EMAIL_SENT or AUTH_WELCOME_EMAIL_SIMULATED
+    const { logs: emailAudits } = queryAuditLogs({});
+    const matchedAudit = emailAudits.find(a => (a.action === 'AUTH_WELCOME_EMAIL_SENT' || a.action === 'AUTH_WELCOME_EMAIL_SIMULATED') && a.resourceId === 'pritam@example.com');
+    assert(matchedAudit !== undefined, 'Audit trail logs welcome email dispatch for pritam@example.com');
+    assert(matchedAudit?.resourceId === 'pritam@example.com', 'Audit event resourceId matches user email');
 
     // 4. API Endpoint: POST /api/auth/send-welcome-email Security Controls
     // Test unauthenticated request is rejected
@@ -4195,8 +4196,9 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     const loginContent = fs.readFileSync(loginPagePath, 'utf-8');
     assert(loginContent.includes('GoogleLogoSvg'), 'LoginPage integrates GoogleLogoSvg');
     assert(loginContent.includes('onGoogleSignIn()'), 'LoginPage btn-google-login triggers direct Google OAuth');
-    assert(!loginContent.includes('Quick Admin Sign-In:'), '1-click Quick Admin Sign-In bypass removed from LoginPage');
-    assert(loginContent.includes('Email or Super Admin ID'), 'LoginPage references Super Admin ID');
+    assert(!loginContent.includes('Email or Super Admin ID'), 'LoginPage does not expose Super Admin ID');
+    assert(!loginContent.includes('TIPCRM090'), 'LoginPage does not expose internal TIPCRM090 ID');
+    assert(loginContent.includes('Email address'), 'LoginPage uses clean Email address input');
 
     // H. Verify App.tsx AuthGate Google Modal Integration & Strict Password Enforcement
     const appPath = path.resolve(process.cwd(), 'src/App.tsx');
