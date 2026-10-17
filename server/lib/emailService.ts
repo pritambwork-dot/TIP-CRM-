@@ -1,25 +1,33 @@
 /**
  * TIP CRM — Official Email Transmission & Onboarding Service
  *
- * Dispatches branded welcome emails with login credentials (User ID & Temporary Password)
+ * Dispatches branded welcome emails with secure activation links and login credentials
  * using The Inclusion Project official email template.
  *
- * Sender: crm@theinclusionproject.ca (or CRM_SENDER_EMAIL)
- * Multi-provider support: Resend, SendGrid, SMTP, or local simulated outbox with audit logging.
+ * Multi-provider support:
+ * 1. Dedicated Gmail SMTP / Custom SMTP (smtp.gmail.com:587 STARTTLS or 465 SSL)
+ * 2. Resend API
+ * 3. SendGrid API
+ * 4. Simulated Local Outbox (server/sent_emails.jsonl) with authoritative audit logging
  */
 
 import fs from 'fs';
 import path from 'path';
+import net from 'net';
+import tls from 'tls';
 import { recordAuditEvent } from './auditLogger.ts';
 import { safeLogger } from './ai/gemini.ts';
 
 export interface WelcomeEmailParams {
   name: string;
   email: string;
-  tempPassword: string;
+  tempPassword?: string;
+  activationUrl?: string;
+  activationToken?: string;
   postTitle?: string;
   roles?: string[];
   appUrl?: string;
+  accountStatus?: string;
   actorId?: string;
   actorRole?: string;
   correlationId?: string;
@@ -33,7 +41,7 @@ export interface SentEmailRecord {
   subject: string;
   template: string;
   status: 'SENT' | 'SIMULATED_LOCAL' | 'FAILED';
-  provider: 'resend' | 'sendgrid' | 'smtp' | 'local_outbox';
+  provider: 'smtp' | 'resend' | 'sendgrid' | 'local_outbox';
   messageId: string;
   metadata: {
     userName: string;
@@ -41,15 +49,533 @@ export interface SentEmailRecord {
     roles: string[];
     postTitle?: string;
     appUrl: string;
+    activationUrl?: string;
+    accountStatus?: string;
   };
   html: string;
 }
 
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  user?: string;
+  pass?: string;
+  secure?: boolean;
+  from?: string;
+  fromName?: string;
+}
+
 const SENT_EMAILS_PATH = path.resolve(process.cwd(), 'server', 'sent_emails.jsonl');
 
-export const CRM_SENDER_EMAIL = process.env.CRM_SENDER_EMAIL || 'crm@theinclusionproject.ca';
-export const CRM_SENDER_NAME = 'The Inclusion Project CRM';
+export const CRM_SENDER_EMAIL = process.env.CRM_SENDER_EMAIL || process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER || 'crm@theinclusionproject.ca';
+export const CRM_SENDER_NAME = process.env.SMTP_FROM_NAME || 'The Inclusion Project CRM';
 export const DEFAULT_APP_URL = process.env.APP_URL || 'http://localhost:3000';
+
+/**
+ * Mask an email address or username for safe logging
+ * e.g. "tipcrm090@theinclusionproject.ca" -> "ti***090@theinclusionproject.ca"
+ */
+export function maskEmail(email?: string): string {
+  if (!email) return 'not_configured';
+  const parts = email.split('@');
+  if (parts.length !== 2) return '***';
+  const name = parts[0];
+  const domain = parts[1];
+  if (name.length <= 3) {
+    return `${name[0]}***@${domain}`;
+  }
+  return `${name.slice(0, 2)}***${name.slice(-2)}@${domain}`;
+}
+
+/**
+ * Read current SMTP configuration from environment variables
+ */
+export function getSmtpConfig(): SmtpConfig | null {
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+
+  if (!host || !user || !pass) {
+    return null;
+  }
+
+  const port = parseInt(process.env.SMTP_PORT || '587', 10);
+  const secure = process.env.SMTP_SECURE === 'true' || port === 465;
+  const from = process.env.SMTP_FROM_EMAIL || user || CRM_SENDER_EMAIL;
+  const fromName = process.env.SMTP_FROM_NAME || 'TIP CRM';
+
+  return { host, port, user, pass, secure, from, fromName };
+}
+
+/**
+ * Detect whether an SMTP multiline or single-line reply is complete (RFC 5321)
+ */
+export function isSmtpReplyComplete(buffer: string): boolean {
+  const lines = buffer.trimEnd().split('\r\n');
+  if (lines.length === 0) return false;
+  const lastLine = lines[lines.length - 1];
+  return /^\d{3} /.test(lastLine);
+}
+
+/**
+ * Extract 3-digit reply code from SMTP buffer
+ */
+export function getSmtpReplyCode(buffer: string): number {
+  const lines = buffer.trimEnd().split('\r\n');
+  const lastLine = lines[lines.length - 1] || '';
+  return parseInt(lastLine.slice(0, 3), 10) || 0;
+}
+
+/**
+ * Native Node.js SMTP Transport Client (Supports Gmail STARTTLS & Port 465 SSL)
+ */
+export async function sendViaSmtp(options: {
+  host: string;
+  port: number;
+  user?: string;
+  pass?: string;
+  secure?: boolean;
+  from: string;
+  fromName?: string;
+  to: string;
+  subject: string;
+  html?: string;
+  text?: string;
+  timeoutMs?: number;
+}): Promise<{ messageId: string; response: string }> {
+  const timeoutMs = options.timeoutMs || 15000;
+  const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+
+  return new Promise((resolve, reject) => {
+    let currentSocket: net.Socket;
+    let timer: NodeJS.Timeout;
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      if (currentSocket) {
+        currentSocket.removeAllListeners();
+        currentSocket.destroy();
+      }
+    };
+
+    timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`SMTP connection to ${options.host}:${options.port} timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+
+    let responseBuffer = '';
+    let state: 
+      | 'BANNER' 
+      | 'EHLO_INIT' 
+      | 'STARTTLS_SENT' 
+      | 'EHLO_POST_TLS' 
+      | 'AUTH_LOGIN' 
+      | 'AUTH_USER' 
+      | 'AUTH_PASS' 
+      | 'MAIL_FROM' 
+      | 'RCPT_TO' 
+      | 'DATA_CMD' 
+      | 'DATA_BODY' 
+      | 'QUIT' = 'BANNER';
+
+    const sendLine = (line: string) => {
+      currentSocket.write(line + '\r\n');
+    };
+
+    const attachListeners = (s: net.Socket) => {
+      s.on('error', (err) => {
+        cleanup();
+        reject(new Error(`SMTP socket error (${options.host}:${options.port}): ${err.message}`));
+      });
+
+      s.on('data', (chunk) => {
+        responseBuffer += chunk.toString('utf-8');
+        if (!isSmtpReplyComplete(responseBuffer)) {
+          return;
+        }
+
+        const code = getSmtpReplyCode(responseBuffer);
+        const fullResponse = responseBuffer;
+        responseBuffer = '';
+
+        if (code >= 400) {
+          cleanup();
+          const cleanErr = fullResponse.trim();
+          if (code === 535) {
+            return reject(new Error(`SMTP Authentication failed (535): Invalid username or Google App Password. Please check 2-Step Verification.`));
+          }
+          if (code === 550 || code === 551 || code === 553) {
+            return reject(new Error(`SMTP Recipient rejected (${code}): Mailbox unavailable or rejected by host.`));
+          }
+          return reject(new Error(`SMTP server rejected command (${code}): ${cleanErr}`));
+        }
+
+        switch (state) {
+          case 'BANNER':
+            if (code === 220) {
+              state = 'EHLO_INIT';
+              sendLine('EHLO tip-crm.local');
+            }
+            break;
+
+          case 'EHLO_INIT':
+            if (code === 250) {
+              if (!options.secure && (options.port === 587 || options.port === 25)) {
+                state = 'STARTTLS_SENT';
+                sendLine('STARTTLS');
+              } else if (options.user && options.pass) {
+                state = 'AUTH_LOGIN';
+                sendLine('AUTH LOGIN');
+              } else {
+                state = 'MAIL_FROM';
+                sendLine(`MAIL FROM:<${options.from}>`);
+              }
+            }
+            break;
+
+          case 'STARTTLS_SENT':
+            if (code === 220) {
+              // Upgrade plain socket to TLS
+              const raw = currentSocket;
+              raw.removeAllListeners('data');
+              raw.removeAllListeners('error');
+
+              const secureSocket = tls.connect({
+                socket: raw,
+                host: options.host,
+                minVersion: 'TLSv1.2',
+                servername: options.host
+              });
+
+              currentSocket = secureSocket;
+              attachListeners(secureSocket);
+
+              state = 'EHLO_POST_TLS';
+              sendLine('EHLO tip-crm.local');
+            }
+            break;
+
+          case 'EHLO_POST_TLS':
+            if (code === 250) {
+              if (options.user && options.pass) {
+                state = 'AUTH_LOGIN';
+                sendLine('AUTH LOGIN');
+              } else {
+                state = 'MAIL_FROM';
+                sendLine(`MAIL FROM:<${options.from}>`);
+              }
+            }
+            break;
+
+          case 'AUTH_LOGIN':
+            if (code === 334) {
+              state = 'AUTH_USER';
+              sendLine(Buffer.from(options.user || '').toString('base64'));
+            }
+            break;
+
+          case 'AUTH_USER':
+            if (code === 334) {
+              state = 'AUTH_PASS';
+              sendLine(Buffer.from(options.pass || '').toString('base64'));
+            }
+            break;
+
+          case 'AUTH_PASS':
+            if (code === 235) {
+              state = 'MAIL_FROM';
+              sendLine(`MAIL FROM:<${options.from}>`);
+            } else {
+              cleanup();
+              return reject(new Error(`SMTP Authentication failed: ${fullResponse.trim()}`));
+            }
+            break;
+
+          case 'MAIL_FROM':
+            if (code === 250) {
+              state = 'RCPT_TO';
+              sendLine(`RCPT TO:<${options.to}>`);
+            }
+            break;
+
+          case 'RCPT_TO':
+            if (code === 250) {
+              state = 'DATA_CMD';
+              sendLine('DATA');
+            }
+            break;
+
+          case 'DATA_CMD':
+            if (code === 354) {
+              state = 'DATA_BODY';
+              const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+              const senderHeader = options.fromName ? `"${options.fromName}" <${options.from}>` : options.from;
+              const subjectEncoded = `=?UTF-8?B?${Buffer.from(options.subject).toString('base64')}?=`;
+
+              const emailLines: string[] = [
+                `Date: ${new Date().toUTCString()}`,
+                `From: ${senderHeader}`,
+                `To: ${options.to}`,
+                `Subject: ${subjectEncoded}`,
+                `Message-ID: <${messageId}@tipcrm>`,
+                'MIME-Version: 1.0',
+                `Content-Type: multipart/alternative; boundary="${boundary}"`,
+                '',
+                `--${boundary}`,
+                'Content-Type: text/plain; charset=utf-8',
+                'Content-Transfer-Encoding: base64',
+                '',
+                Buffer.from(options.text || '').toString('base64'),
+                '',
+                `--${boundary}`,
+                'Content-Type: text/html; charset=utf-8',
+                'Content-Transfer-Encoding: base64',
+                '',
+                Buffer.from(options.html || '').toString('base64'),
+                '',
+                `--${boundary}--`,
+                '.'
+              ];
+              currentSocket.write(emailLines.join('\r\n') + '\r\n');
+            }
+            break;
+
+          case 'DATA_BODY':
+            if (code === 250) {
+              state = 'QUIT';
+              sendLine('QUIT');
+              cleanup();
+              resolve({ messageId, response: fullResponse.trim() });
+            }
+            break;
+
+          case 'QUIT':
+            cleanup();
+            break;
+        }
+      });
+    };
+
+    if (options.secure) {
+      currentSocket = tls.connect({
+        host: options.host,
+        port: options.port,
+        minVersion: 'TLSv1.2',
+        servername: options.host
+      });
+    } else {
+      currentSocket = net.createConnection({ host: options.host, port: options.port });
+    }
+
+    attachListeners(currentSocket);
+  });
+}
+
+/**
+ * Verify SMTP connectivity and credentials without sending an email
+ */
+export async function verifySmtpConnection(overrideConfig?: Partial<SmtpConfig>): Promise<{
+  configured: boolean;
+  connected: boolean;
+  host?: string;
+  port?: number;
+  user?: string;
+  error?: string;
+  code?: string;
+}> {
+  const config = overrideConfig ? { ...getSmtpConfig(), ...overrideConfig } : getSmtpConfig();
+
+  if (!config || !config.host || !config.user || !config.pass) {
+    return {
+      configured: false,
+      connected: false,
+      error: 'SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) are not configured.'
+    };
+  }
+
+  const timeoutMs = 8000;
+
+  return new Promise((resolve) => {
+    let currentSocket: net.Socket;
+    let timer: NodeJS.Timeout;
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      if (currentSocket) {
+        currentSocket.removeAllListeners();
+        currentSocket.destroy();
+      }
+    };
+
+    timer = setTimeout(() => {
+      cleanup();
+      resolve({
+        configured: true,
+        connected: false,
+        host: config.host,
+        port: config.port,
+        user: maskEmail(config.user),
+        error: `Connection to SMTP server ${config.host}:${config.port} timed out after ${timeoutMs}ms.`,
+        code: 'SMTP_TIMEOUT'
+      });
+    }, timeoutMs);
+
+    let responseBuffer = '';
+    let state: 'BANNER' | 'EHLO_INIT' | 'STARTTLS_SENT' | 'EHLO_POST_TLS' | 'AUTH_LOGIN' | 'AUTH_USER' | 'AUTH_PASS' | 'QUIT' = 'BANNER';
+
+    const sendLine = (line: string) => {
+      currentSocket.write(line + '\r\n');
+    };
+
+    const attachListeners = (s: net.Socket) => {
+      s.on('error', (err) => {
+        cleanup();
+        resolve({
+          configured: true,
+          connected: false,
+          host: config.host,
+          port: config.port,
+          user: maskEmail(config.user),
+          error: `SMTP connection error: ${err.message}`,
+          code: 'SMTP_SOCKET_ERROR'
+        });
+      });
+
+      s.on('data', (chunk) => {
+        responseBuffer += chunk.toString('utf-8');
+        if (!isSmtpReplyComplete(responseBuffer)) return;
+
+        const code = getSmtpReplyCode(responseBuffer);
+        const fullResponse = responseBuffer;
+        responseBuffer = '';
+
+        if (code >= 400) {
+          cleanup();
+          return resolve({
+            configured: true,
+            connected: false,
+            host: config.host,
+            port: config.port,
+            user: maskEmail(config.user),
+            error: code === 535
+              ? 'SMTP Authentication Failed (535): Invalid username or Google App Password.'
+              : `SMTP server error (${code}): ${fullResponse.trim()}`,
+            code: code === 535 ? 'SMTP_AUTH_FAILED' : 'SMTP_SERVER_ERROR'
+          });
+        }
+
+        switch (state) {
+          case 'BANNER':
+            if (code === 220) {
+              state = 'EHLO_INIT';
+              sendLine('EHLO tip-crm.local');
+            }
+            break;
+
+          case 'EHLO_INIT':
+            if (code === 250) {
+              if (!config.secure && (config.port === 587 || config.port === 25)) {
+                state = 'STARTTLS_SENT';
+                sendLine('STARTTLS');
+              } else {
+                state = 'AUTH_LOGIN';
+                sendLine('AUTH LOGIN');
+              }
+            }
+            break;
+
+          case 'STARTTLS_SENT':
+            if (code === 220) {
+              const raw = currentSocket;
+              raw.removeAllListeners('data');
+              raw.removeAllListeners('error');
+
+              const secureSocket = tls.connect({
+                socket: raw,
+                host: config.host,
+                minVersion: 'TLSv1.2',
+                servername: config.host
+              });
+
+              currentSocket = secureSocket;
+              attachListeners(secureSocket);
+
+              state = 'EHLO_POST_TLS';
+              sendLine('EHLO tip-crm.local');
+            }
+            break;
+
+          case 'EHLO_POST_TLS':
+            if (code === 250) {
+              state = 'AUTH_LOGIN';
+              sendLine('AUTH LOGIN');
+            }
+            break;
+
+          case 'AUTH_LOGIN':
+            if (code === 334) {
+              state = 'AUTH_USER';
+              sendLine(Buffer.from(config.user || '').toString('base64'));
+            }
+            break;
+
+          case 'AUTH_USER':
+            if (code === 334) {
+              state = 'AUTH_PASS';
+              sendLine(Buffer.from(config.pass || '').toString('base64'));
+            }
+            break;
+
+          case 'AUTH_PASS':
+            if (code === 235) {
+              state = 'QUIT';
+              sendLine('QUIT');
+              cleanup();
+              resolve({
+                configured: true,
+                connected: true,
+                host: config.host,
+                port: config.port,
+                user: maskEmail(config.user)
+              });
+            } else {
+              cleanup();
+              resolve({
+                configured: true,
+                connected: false,
+                host: config.host,
+                port: config.port,
+                user: maskEmail(config.user),
+                error: `Authentication failed: ${fullResponse.trim()}`,
+                code: 'SMTP_AUTH_FAILED'
+              });
+            }
+            break;
+
+          case 'QUIT':
+            cleanup();
+            break;
+        }
+      });
+    };
+
+    const targetHost = config.host || 'smtp.gmail.com';
+    const targetPort = config.port || (config.secure ? 465 : 587);
+
+    if (config.secure) {
+      currentSocket = tls.connect({
+        host: targetHost,
+        port: targetPort,
+        minVersion: 'TLSv1.2',
+        servername: targetHost
+      });
+    } else {
+      currentSocket = net.createConnection({ host: targetHost, port: targetPort });
+    }
+
+    attachListeners(currentSocket);
+  });
+}
 
 /**
  * Generate The Inclusion Project Official HTML Email Template
@@ -57,21 +583,30 @@ export const DEFAULT_APP_URL = process.env.APP_URL || 'http://localhost:3000';
 export function generateInclusionProjectWelcomeEmailHtml(params: {
   name: string;
   email: string;
-  tempPassword: string;
+  tempPassword?: string;
+  activationUrl?: string;
+  activationToken?: string;
   postTitle?: string;
   roles?: string[];
   appUrl?: string;
+  accountStatus?: string;
 }): string {
   const appUrl = params.appUrl || DEFAULT_APP_URL;
   const rolesText = (params.roles && params.roles.length > 0) ? params.roles.join(', ') : 'Staff Member';
   const postText = params.postTitle || 'Designated Operational Post';
+  const isPending = params.accountStatus === 'pending' || params.accountStatus === 'Inactive';
+  const activationUrl = params.activationUrl || (
+    params.activationToken 
+      ? `${appUrl}/?action=activate&email=${encodeURIComponent(params.email)}&token=${params.activationToken}`
+      : `${appUrl}/?action=activate&email=${encodeURIComponent(params.email)}`
+  );
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Welcome to The Inclusion Project CRM</title>
+  <title>Your TIP CRM Account Invitation — The Inclusion Project</title>
   <style>
     body {
       margin: 0;
@@ -148,57 +683,47 @@ export function generateInclusionProjectWelcomeEmailHtml(params: {
     }
     p {
       margin: 0 0 16px 0;
-      color: #334155;
       font-size: 15px;
+      color: #334155;
     }
     .credentials-card {
-      background-color: #f8fafc;
+      background-color: #f1f5f9;
       border: 1px solid #cbd5e1;
       border-radius: 12px;
-      padding: 24px;
+      padding: 20px;
       margin: 24px 0;
     }
     .credential-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 10px 0;
+      padding: 8px 0;
       border-bottom: 1px solid #e2e8f0;
       font-size: 14px;
     }
     .credential-row:last-child {
       border-bottom: none;
-      padding-bottom: 0;
-    }
-    .credential-row:first-child {
-      padding-top: 0;
     }
     .credential-label {
-      font-weight: 600;
       color: #64748b;
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
+      font-weight: 600;
     }
     .credential-value {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-weight: 700;
       color: #0f172a;
-      font-size: 14px;
-      text-align: right;
     }
     .password-badge {
-      background-color: #fee2e2;
-      color: #991b1b;
-      padding: 4px 10px;
+      background-color: #fef08a;
+      color: #854d0e;
+      padding: 3px 8px;
       border-radius: 6px;
-      border: 1px solid #fecaca;
-      font-size: 15px;
-      letter-spacing: 0.04em;
+      border: 1px solid #fde047;
+      letter-spacing: 0.05em;
     }
     .btn-container {
       text-align: center;
-      margin: 32px 0 24px 0;
+      margin: 32px 0;
     }
     .btn-primary {
       display: inline-block;
@@ -209,32 +734,27 @@ export function generateInclusionProjectWelcomeEmailHtml(params: {
       font-size: 15px;
       padding: 14px 32px;
       border-radius: 10px;
-      box-shadow: 0 4px 14px rgba(234, 5, 67, 0.35);
+      box-shadow: 0 4px 14px rgba(234, 5, 67, 0.3);
     }
     .security-notice {
-      background-color: #fef3c7;
-      border-left: 4px solid #f59e0b;
-      padding: 16px;
+      background-color: #eff6ff;
+      border-left: 4px solid #3b82f6;
+      padding: 14px 16px;
       border-radius: 0 8px 8px 0;
-      margin: 24px 0;
       font-size: 13px;
-      color: #92400e;
-    }
-    .security-notice strong {
-      display: block;
-      margin-bottom: 4px;
-      color: #78350f;
+      color: #1e40af;
+      margin: 24px 0;
     }
     .footer {
-      background-color: #f1f5f9;
+      background-color: #f8fafc;
       padding: 24px 36px;
+      border-top: 1px solid #e2e8f0;
       text-align: center;
       font-size: 12px;
-      color: #64748b;
-      border-top: 1px solid #e2e8f0;
+      color: #94a3b8;
     }
     .footer a {
-      color: #140a8e;
+      color: #64748b;
       text-decoration: none;
     }
   </style>
@@ -255,8 +775,9 @@ export function generateInclusionProjectWelcomeEmailHtml(params: {
 
       <div class="body-content">
         <h1>Welcome to the Team, ${escapeHtml(params.name)}!</h1>
-        <p>Your official administrative user account for <strong>The Inclusion Project CRM</strong> has been created by the Super Admin.</p>
-        <p>You can now sign in to your dashboard to access your role-assigned tasks, programs, participants, and operational tools.</p>
+        <p>Hello ${escapeHtml(params.name)},</p>
+        <p>You have been invited to use <strong>The Inclusion Project's CRM platform</strong>.</p>
+        <p>Your account details are:</p>
 
         <div class="credentials-card">
           <div class="credential-row">
@@ -264,13 +785,15 @@ export function generateInclusionProjectWelcomeEmailHtml(params: {
             <span class="credential-value"><a href="${appUrl}" style="color: #140a8e; text-decoration: none;">${appUrl}</a></span>
           </div>
           <div class="credential-row">
-            <span class="credential-label">Login ID (Email)</span>
+            <span class="credential-label">Login Email</span>
             <span class="credential-value">${escapeHtml(params.email)}</span>
           </div>
+          ${params.tempPassword ? `
           <div class="credential-row">
             <span class="credential-label">Temporary Password</span>
             <span class="credential-value"><span class="password-badge">${escapeHtml(params.tempPassword)}</span></span>
           </div>
+          ` : ''}
           <div class="credential-row">
             <span class="credential-label">Primary Post</span>
             <span class="credential-value">${escapeHtml(postText)}</span>
@@ -281,17 +804,39 @@ export function generateInclusionProjectWelcomeEmailHtml(params: {
           </div>
         </div>
 
+        <p>To activate your account and set your password, please use the secure link below.</p>
+
         <div class="btn-container">
-          <a href="${appUrl}" class="btn-primary" target="_blank">Sign In to TIP CRM →</a>
+          <a href="${activationUrl}" class="btn-primary" target="_blank">Activate Your TIP CRM Account →</a>
         </div>
 
+        <div style="text-align: center; margin-bottom: 24px; font-size: 13px; color: #64748b; word-break: break-all;">
+          Or use this direct secure link:<br/>
+          <a href="${activationUrl}" style="color: #140a8e; font-weight: 600;">${activationUrl}</a>
+        </div>
+
+        <p>After completing account setup, you can sign in using your registered email address.</p>
+
+        ${isPending ? `
+        <div class="security-notice" style="background-color: #fef3c7; border-color: #f59e0b; color: #92400e;">
+          <strong>⏳ Administrator Approval Notice:</strong>
+          If your account requires administrator approval, access will remain restricted until the required approval is completed.
+        </div>
+        ` : `
         <div class="security-notice">
           <strong>🔒 Security & Password Requirement:</strong>
-          For your security, you will be required to change this temporary password immediately upon your first sign in. Never share your credentials with anyone.
+          ${params.tempPassword ? 'For your security, you will be required to change this temporary password immediately upon your first sign in.' : 'Please establish your private password upon initial account activation.'} Never share your credentials with anyone.
         </div>
+        `}
 
         <p style="font-size: 13px; color: #64748b; margin-top: 24px;">
-          If you were not expecting this invitation or believe it was sent in error, please immediately contact our system administration team at <a href="mailto:${CRM_SENDER_EMAIL}" style="color: #ea0543;">${CRM_SENDER_EMAIL}</a>.
+          If you were not expecting this invitation, please contact the TIP CRM administrator at <a href="mailto:${CRM_SENDER_EMAIL}" style="color: #ea0543;">${CRM_SENDER_EMAIL}</a>.
+        </p>
+
+        <p style="font-size: 14px; color: #334155; margin-top: 20px;">
+          Kind regards,<br/>
+          <strong>TIP CRM Team</strong><br/>
+          The Inclusion Project
         </p>
       </div>
 
@@ -311,38 +856,55 @@ export function generateInclusionProjectWelcomeEmailHtml(params: {
 export function generateInclusionProjectWelcomeEmailText(params: {
   name: string;
   email: string;
-  tempPassword: string;
+  tempPassword?: string;
+  activationUrl?: string;
+  activationToken?: string;
   postTitle?: string;
   roles?: string[];
   appUrl?: string;
+  accountStatus?: string;
 }): string {
   const appUrl = params.appUrl || DEFAULT_APP_URL;
   const rolesText = (params.roles && params.roles.length > 0) ? params.roles.join(', ') : 'Staff Member';
   const postText = params.postTitle || 'Designated Operational Post';
+  const isPending = params.accountStatus === 'pending' || params.accountStatus === 'Inactive';
+  const activationUrl = params.activationUrl || (
+    params.activationToken 
+      ? `${appUrl}/?action=activate&email=${encodeURIComponent(params.email)}&token=${params.activationToken}`
+      : `${appUrl}/?action=activate&email=${encodeURIComponent(params.email)}`
+  );
 
   return `===============================================================
-THE INCLUSION PROJECT CRM — YOUR ACCOUNT CREDENTIALS
+THE INCLUSION PROJECT CRM — YOUR ACCOUNT INVITATION
 ===============================================================
 
-Welcome to the Team, ${params.name}!
+Hello ${params.name},
 
-Your official user account for The Inclusion Project CRM has been 
-created by the Super Admin. Below are your login credentials:
+You have been invited to use The Inclusion Project's CRM platform.
 
-- Portal URL:         ${appUrl}
-- Login ID / Email:   ${params.email}
-- Temporary Password: ${params.tempPassword}
-- Primary Post:       ${postText}
-- Assigned Roles:     ${rolesText}
+Your account details are:
+- Login email:   ${params.email}
+- Assigned role: ${rolesText}
+- Primary post:  ${postText}
+- Portal URL:    ${appUrl}
 
-IMPORTANT SECURITY NOTICE:
-You will be required to change this temporary password immediately 
-upon your first sign-in. Never share your temporary credentials.
+To activate your account and set your password, please use the secure link below:
+${activationUrl}
 
-Sign in at: ${appUrl}
+${params.tempPassword ? `Temporary Password: ${params.tempPassword}
+For your security, you will be required to change this temporary password immediately upon your first sign-in. Never share your credentials.\n` : ''}
+After completing account setup, you can sign in using your registered email address.
 
+${isPending 
+  ? 'If your account requires administrator approval, access will remain restricted until the required approval is completed.\n'
+  : (!params.tempPassword ? 'For your security, you will be required to set your private password upon initial account activation.\n' : '')}
+
+If you were not expecting this invitation, please contact the TIP CRM administrator at ${CRM_SENDER_EMAIL}.
+
+Kind regards,
+TIP CRM Team
+The Inclusion Project
 Support & Inquiries: ${CRM_SENDER_EMAIL}
-The Inclusion Project • Building Equitable, Inclusive, and Resilient Communities
 `;
 }
 
@@ -363,21 +925,62 @@ export async function sendWelcomeEmail(params: WelcomeEmailParams): Promise<{
   messageId: string;
   sentFrom: string;
   recipient: string;
-  provider: string;
+  provider: 'smtp' | 'resend' | 'sendgrid' | 'local_outbox';
+  status: 'SENT' | 'SIMULATED_LOCAL' | 'FAILED';
+  deliveryStatus: 'SENT' | 'SIMULATED_LOCAL' | 'FAILED';
   timestamp: string;
+  activationUrl: string;
   previewHtml: string;
 }> {
   const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
   const timestamp = new Date().toISOString();
-  const subject = 'Welcome to The Inclusion Project CRM — Your Account Credentials';
-  const htmlContent = generateInclusionProjectWelcomeEmailHtml(params);
-  const textContent = generateInclusionProjectWelcomeEmailText(params);
+  const subject = 'Your TIP CRM Account Invitation — The Inclusion Project';
+  const appUrl = params.appUrl || DEFAULT_APP_URL;
+  const activationUrl = params.activationUrl || (
+    params.activationToken 
+      ? `${appUrl}/?action=activate&email=${encodeURIComponent(params.email)}&token=${params.activationToken}`
+      : `${appUrl}/?action=activate&email=${encodeURIComponent(params.email)}`
+  );
 
-  let provider: 'resend' | 'sendgrid' | 'smtp' | 'local_outbox' = 'local_outbox';
+  const htmlContent = generateInclusionProjectWelcomeEmailHtml({ ...params, activationUrl });
+  const textContent = generateInclusionProjectWelcomeEmailText({ ...params, activationUrl });
+
+  let provider: 'smtp' | 'resend' | 'sendgrid' | 'local_outbox' = 'local_outbox';
   let deliveryStatus: 'SENT' | 'SIMULATED_LOCAL' | 'FAILED' = 'SIMULATED_LOCAL';
 
-  // 1. Try Resend if configured
-  if (process.env.RESEND_API_KEY) {
+  // 1. Try SMTP (Gmail or custom SMTP) if configured
+  const smtpConfig = getSmtpConfig();
+  if (smtpConfig) {
+    try {
+      await sendViaSmtp({
+        host: smtpConfig.host,
+        port: smtpConfig.port,
+        user: smtpConfig.user,
+        pass: smtpConfig.pass,
+        secure: smtpConfig.secure,
+        from: smtpConfig.from || CRM_SENDER_EMAIL,
+        fromName: smtpConfig.fromName || CRM_SENDER_NAME,
+        to: params.email,
+        subject,
+        html: htmlContent,
+        text: textContent
+      });
+      provider = 'smtp';
+      deliveryStatus = 'SENT';
+      safeLogger.info('Welcome email delivered via SMTP', {
+        recipient: params.email,
+        host: smtpConfig.host,
+        port: smtpConfig.port
+      });
+    } catch (smtpErr: any) {
+      safeLogger.warn('SMTP delivery attempt failed; checking fallback providers:', {
+        error: smtpErr?.message
+      });
+    }
+  }
+
+  // 2. Try Resend if configured and SMTP was not used
+  if (deliveryStatus !== 'SENT' && process.env.RESEND_API_KEY) {
     try {
       const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -404,7 +1007,7 @@ export async function sendWelcomeEmail(params: WelcomeEmailParams): Promise<{
     }
   }
 
-  // 2. Try SendGrid if configured and Resend not used
+  // 3. Try SendGrid if configured and not yet sent
   if (deliveryStatus !== 'SENT' && process.env.SENDGRID_API_KEY) {
     try {
       const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
@@ -432,7 +1035,7 @@ export async function sendWelcomeEmail(params: WelcomeEmailParams): Promise<{
     }
   }
 
-  // 3. Record email transmission in authoritative sent_emails.jsonl
+  // 4. Record email transmission in authoritative sent_emails.jsonl
   const record: SentEmailRecord = {
     id: messageId,
     timestamp,
@@ -448,7 +1051,9 @@ export async function sendWelcomeEmail(params: WelcomeEmailParams): Promise<{
       userIdEmail: params.email,
       roles: params.roles || ['staff_member'],
       postTitle: params.postTitle,
-      appUrl: params.appUrl || DEFAULT_APP_URL
+      appUrl: params.appUrl || DEFAULT_APP_URL,
+      activationUrl,
+      accountStatus: params.accountStatus
     },
     html: htmlContent
   };
@@ -459,7 +1064,7 @@ export async function sendWelcomeEmail(params: WelcomeEmailParams): Promise<{
     safeLogger.error('Failed to append to sent_emails.jsonl', { error: (fsErr as any)?.message });
   }
 
-  // 4. Record authoritative security audit event
+  // 5. Record authoritative security audit event
   recordAuditEvent({
     actorId: params.actorId || 'u-admin-090',
     actorName: 'Super Admin',
@@ -468,14 +1073,15 @@ export async function sendWelcomeEmail(params: WelcomeEmailParams): Promise<{
     resourceType: 'UserCredential',
     resourceId: params.email,
     outcome: 'SUCCESS',
-    description: `Dispatched welcome onboarding email with temporary credentials to ${params.email} from ${CRM_SENDER_EMAIL} using The Inclusion Project template.`,
+    description: `Dispatched account invitation email with secure activation link to ${params.email} from ${CRM_SENDER_EMAIL} using The Inclusion Project template (provider: ${provider}, status: ${deliveryStatus}).`,
     correlationId: params.correlationId,
     metadata: {
       messageId,
       sentFrom: CRM_SENDER_EMAIL,
       recipient: params.email,
       provider,
-      deliveryStatus
+      deliveryStatus,
+      activationUrl
     }
   });
 
@@ -485,7 +1091,10 @@ export async function sendWelcomeEmail(params: WelcomeEmailParams): Promise<{
     sentFrom: CRM_SENDER_EMAIL,
     recipient: params.email,
     provider,
+    status: deliveryStatus,
+    deliveryStatus,
     timestamp,
+    activationUrl,
     previewHtml: htmlContent
   };
 }

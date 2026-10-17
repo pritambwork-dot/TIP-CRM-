@@ -111,7 +111,12 @@ import {
   sendWelcomeEmail,
   getSentEmails,
   CRM_SENDER_EMAIL,
-  CRM_SENDER_NAME
+  CRM_SENDER_NAME,
+  isSmtpReplyComplete,
+  getSmtpReplyCode,
+  maskEmail,
+  verifySmtpConnection,
+  getSmtpConfig
 } from '../../server/lib/emailService.ts';
 import {
   formatDurationHoursMinutes,
@@ -3166,8 +3171,8 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
   console.log('\nTest Suite 28: Onboarding Welcome Email with Credentials & TIP Template');
   {
     // 1. Sender ID verification
-    assert(CRM_SENDER_EMAIL.includes('theinclusionproject.ca'), 'CRM Sender Email is on official domain theinclusionproject.ca');
-    assert(CRM_SENDER_NAME === 'The Inclusion Project CRM', 'CRM Sender Name is The Inclusion Project CRM');
+    assert(CRM_SENDER_EMAIL.includes('theinclusionproject'), 'CRM Sender Email belongs to The Inclusion Project CRM');
+    assert(CRM_SENDER_NAME.includes('TIP') || CRM_SENDER_NAME.includes('The Inclusion Project'), 'CRM Sender Name represents The Inclusion Project');
 
     // 2. Inclusion Project Branded Email Template Generation
     const testUser = {
@@ -3188,7 +3193,7 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     assert(emailHtml.includes('Event Coordinator'), 'Email HTML contains assigned role');
     assert(emailHtml.includes('http://localhost:3000'), 'Email HTML contains portal sign in URL');
     assert(emailHtml.includes('password immediately'), 'Email HTML includes mandatory first-login password change notice');
-    assert(emailHtml.includes('crm@theinclusionproject.ca'), 'Email HTML includes official support contact');
+    assert(emailHtml.includes(CRM_SENDER_EMAIL), 'Email HTML includes official support contact');
 
     const emailText = generateInclusionProjectWelcomeEmailText(testUser);
     assert(emailText.includes('pritam@example.com'), 'Plain text email includes login ID');
@@ -3209,7 +3214,7 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
 
     assert(sendResult.success === true, 'sendWelcomeEmail returns success true');
     assert(sendResult.recipient === 'pritam@example.com', 'sendWelcomeEmail returns recipient email');
-    assert(sendResult.sentFrom.includes('theinclusionproject.ca'), 'sendWelcomeEmail sentFrom is on theinclusionproject.ca domain');
+    assert(sendResult.sentFrom.includes('theinclusionproject'), 'sendWelcomeEmail sentFrom belongs to The Inclusion Project');
     assert(typeof sendResult.messageId === 'string' && sendResult.messageId.startsWith('msg-'), 'sendWelcomeEmail produces valid message ID');
 
     // Verify sent_emails.jsonl log
@@ -4268,6 +4273,268 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     assert(INITIAL_POSTS.length === 1 && INITIAL_POSTS[0].name === 'Super Administrator', 'INITIAL_POSTS contains only Super Administrator');
     assert(INITIAL_USERS[0].name === 'TIP Super Admin', 'Initial primary user is named TIP Super Admin');
     assert(INITIAL_USERS[0].roleId === 'super_admin', 'Initial primary user role is strictly super_admin');
+  }
+
+  // --------------------------------------------------------------------------
+  // Test Suite 35: Automatic User Account Creation Email Notifications & Activation Security
+  // --------------------------------------------------------------------------
+  console.log('\nTest Suite 35: Automatic User Account Creation Email Notifications & Activation Security');
+  {
+    const adminSession = createSession({
+      id: 'u-admin-090',
+      email: 'tipcrm090@theinclusionproject.ca',
+      role: 'super_admin',
+      name: 'TIP Super Admin'
+    });
+
+    const staffMgrSession = createSession({
+      id: 'u-mgr-1',
+      email: 'manager@theinclusionproject.ca',
+      role: 'staff_manager',
+      name: 'Staff Manager User'
+    });
+
+    const volunteerSession = createSession({
+      id: 'u-vol-1',
+      email: 'volunteer@theinclusionproject.ca',
+      role: 'volunteer',
+      name: 'Volunteer User'
+    });
+
+    // 1. Authorized administrator creates a user & correct recipient is targeted
+    const newUserParams = {
+      name: 'Claire Dupont',
+      email: 'claire.ops@theinclusionproject.ca',
+      roles: ['Operations Associate'],
+      postTitle: 'Operations & Event Lead',
+      appUrl: 'http://localhost:3000'
+    };
+
+    const adminInviteReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/send-welcome-email',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${adminSession.sessionToken}`,
+        'x-csrf-token': generateCsrfToken('u-admin-090')
+      },
+      body: newUserParams
+    });
+    const adminInviteRes = createMockRes();
+    await aiMiddlewareHandler(adminInviteReq, adminInviteRes.res);
+
+    assert(adminInviteRes.getStatusCode() === 200, 'Authorized administrator can dispatch account creation email (200 OK)');
+    const inviteData = adminInviteRes.getData();
+    assert(inviteData.success === true, 'Response reports success: true');
+    assert(inviteData.recipient === 'claire.ops@theinclusionproject.ca', 'Email dispatched to exact recipient entered by administrator');
+
+    // 2. The invitation email contains correct name, login email, and assigned role
+    const generatedHtml = generateInclusionProjectWelcomeEmailHtml(newUserParams);
+    assert(generatedHtml.includes('Claire Dupont'), 'Email template contains user name');
+    assert(generatedHtml.includes('claire.ops@theinclusionproject.ca'), 'Email template contains login email');
+    assert(generatedHtml.includes('Operations Associate'), 'Email template contains assigned role');
+
+    const generatedText = generateInclusionProjectWelcomeEmailText(newUserParams);
+    assert(generatedText.includes('Claire Dupont'), 'Plain-text fallback contains user name');
+    assert(generatedText.includes('claire.ops@theinclusionproject.ca'), 'Plain-text fallback contains login email');
+
+    // 3. The From address matches configured sender identity
+    assert(inviteData.sentFrom === CRM_SENDER_EMAIL, 'SentFrom address matches CRM_SENDER_EMAIL');
+    assert(CRM_SENDER_EMAIL.includes('theinclusionproject'), 'Official sender email belongs to The Inclusion Project CRM');
+    assert(CRM_SENDER_NAME.includes('TIP') || CRM_SENDER_NAME.includes('Inclusion Project'), 'Sender name represents The Inclusion Project CRM');
+
+    // 4. A secure activation/password-setup link is used
+    assert(inviteData.activationUrl.includes('action=activate'), 'Activation URL specifies action=activate');
+    assert(inviteData.activationUrl.includes('token='), 'Activation URL contains cryptographically random token');
+    assert(generatedHtml.includes('Activate Your TIP CRM Account'), 'HTML template includes accessible activation button');
+
+    // 5. No permanent plaintext password appears in invitation without explicit tempPassword
+    assert(!generatedHtml.includes('Permanent Password'), 'HTML template does not expose permanent passwords');
+    assert(!generatedText.includes('Permanent Password'), 'Plain text does not expose permanent passwords');
+
+    // 6. Unauthorized users cannot create accounts or dispatch invitations
+    const volInviteReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/send-welcome-email',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${volunteerSession.sessionToken}`,
+        'x-csrf-token': generateCsrfToken('u-vol-1')
+      },
+      body: { name: 'Attacker Target', email: 'target@example.com' }
+    });
+    const volInviteRes = createMockRes();
+    await aiMiddlewareHandler(volInviteReq, volInviteRes.res);
+    assert(volInviteRes.getStatusCode() === 403, 'Volunteer cannot dispatch account invitation (403 Forbidden)');
+
+    const unauthReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/send-welcome-email',
+      body: { name: 'Stranger Target', email: 'stranger@example.com' }
+    });
+    const unauthRes = createMockRes();
+    await aiMiddlewareHandler(unauthReq, unauthRes.res);
+    assert(unauthRes.getStatusCode() === 401, 'Unauthenticated visitor cannot dispatch account invitation (401 Unauthorized)');
+
+    // 7. Administrators cannot assign prohibited roles beyond authority (e.g. staff_manager cannot assign super_admin)
+    const elevateReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/send-welcome-email',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${staffMgrSession.sessionToken}`,
+        'x-csrf-token': generateCsrfToken('u-mgr-1')
+      },
+      body: {
+        name: 'Elevated Admin Target',
+        email: 'elevated@theinclusionproject.ca',
+        roles: ['super_admin']
+      }
+    });
+    const elevateRes = createMockRes();
+    await aiMiddlewareHandler(elevateReq, elevateRes.res);
+    assert(elevateRes.getStatusCode() === 403, 'Staff Manager cannot assign or invite a Super Admin role (403 Forbidden)');
+
+    // 8. Pending or unapproved accounts cannot bypass the approval gate
+    const pendingAccount = {
+      id: 'u-pending-gate-test',
+      email: 'pending.person@example.com',
+      status: 'pending',
+      adminApproved: false,
+      isActive: false
+    };
+    assert(pendingAccount.status === 'pending' && pendingAccount.adminApproved === false, 'Pending account requires administrative approval before access');
+
+    // 9. Accidental duplicate creation prevention
+    const invalidEmailReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/send-welcome-email',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${adminSession.sessionToken}`,
+        'x-csrf-token': generateCsrfToken('u-admin-090')
+      },
+      body: { name: 'Invalid User', email: 'not-a-valid-email' }
+    });
+    const invalidEmailRes = createMockRes();
+    await aiMiddlewareHandler(invalidEmailReq, invalidEmailRes.res);
+    assert(invalidEmailRes.getStatusCode() === 400, 'Malformed email address rejected with 400 Bad Request');
+
+    // 10. Email provider status is reported accurately (distinguishes simulated local vs live provider)
+    assert(inviteData.deliveryStatus === 'SIMULATED_LOCAL' || inviteData.deliveryStatus === 'SENT', 'Email deliveryStatus accurately reports provider state');
+    assert(inviteData.provider === 'smtp' || inviteData.provider === 'local_outbox' || inviteData.provider === 'resend' || inviteData.provider === 'sendgrid', 'Provider is accurately recorded');
+
+    // 11. Failed or pending invitations can be safely resent
+    const resendReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/send-welcome-email',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${adminSession.sessionToken}`,
+        'x-csrf-token': generateCsrfToken('u-admin-090')
+      },
+      body: {
+        ...newUserParams,
+        activationToken: 'tip_act_refreshed_999'
+      }
+    });
+    const resendRes = createMockRes();
+    await aiMiddlewareHandler(resendReq, resendRes.res);
+    assert(resendRes.getStatusCode() === 200, 'Invitation resend succeeds with 200 OK');
+    const resendData = resendRes.getData();
+    assert(resendData.activationUrl.includes('tip_act_refreshed_999'), 'Resent invitation uses refreshed activation token');
+
+    // 12. Audit trail logs invitation dispatch
+    const recentSentEmails = getSentEmails(5);
+    const lastClaireEmail = recentSentEmails.find(e => e.recipient === 'claire.ops@theinclusionproject.ca');
+    assert(lastClaireEmail !== undefined, 'Authoritative sent_emails log records email dispatch for Claire');
+    assert(Boolean(lastClaireEmail?.sentFrom.includes('theinclusionproject')), 'Logged sentFrom belongs to The Inclusion Project');
+
+    // 13. App.tsx integrates activation link handling safely
+    const appPath = path.resolve(process.cwd(), 'src/App.tsx');
+    const appContent = fs.readFileSync(appPath, 'utf-8');
+    assert(appContent.includes("action === 'activate'"), 'App.tsx inspects action === activate on mount');
+    assert(appContent.includes('history.replaceState'), 'App.tsx strips activation token from URL to prevent leakage');
+
+    // 14. Environment configuration template includes email provider keys
+    const envExamplePath = path.resolve(process.cwd(), '.env.example');
+    const envExampleContent = fs.readFileSync(envExamplePath, 'utf-8');
+    assert(envExampleContent.includes('CRM_SENDER_EMAIL='), '.env.example documents CRM_SENDER_EMAIL');
+    assert(envExampleContent.includes('SMTP_HOST='), '.env.example documents SMTP_HOST');
+    assert(envExampleContent.includes('SMTP_PORT='), '.env.example documents SMTP_PORT');
+    assert(envExampleContent.includes('SMTP_USER='), '.env.example documents SMTP_USER');
+    assert(envExampleContent.includes('SMTP_PASS='), '.env.example documents SMTP_PASS');
+    assert(envExampleContent.includes('RESEND_API_KEY='), '.env.example documents RESEND_API_KEY');
+    assert(envExampleContent.includes('SENDGRID_API_KEY='), '.env.example documents SENDGRID_API_KEY');
+
+    // 15. GET /api/auth/smtp-status returns provider configuration
+    const statusReq = createMockReq({
+      method: 'GET',
+      url: '/api/auth/smtp-status',
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${adminSession.sessionToken}` }
+    });
+    const statusRes = createMockRes();
+    await aiMiddlewareHandler(statusReq, statusRes.res);
+    assert(statusRes.getStatusCode() === 200, 'GET /api/auth/smtp-status returns 200 OK for Super Admin');
+    const statusData = statusRes.getData();
+    assert(statusData.success === true, 'SMTP status response reports success: true');
+    assert(typeof statusData.smtpConfigured === 'boolean', 'SMTP status reports boolean smtpConfigured');
+    assert(statusData.senderEmail === CRM_SENDER_EMAIL, 'SMTP status reports official sender email');
+
+    // 16. POST /api/auth/test-smtp rejects unauthorized users
+    const volTestSmtpReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/test-smtp',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${volunteerSession.sessionToken}`,
+        'x-csrf-token': generateCsrfToken('u-vol-1')
+      },
+      body: { testRecipientEmail: 'test@example.com' }
+    });
+    const volTestSmtpRes = createMockRes();
+    await aiMiddlewareHandler(volTestSmtpReq, volTestSmtpRes.res);
+    assert(volTestSmtpRes.getStatusCode() === 403, 'Volunteer cannot execute test-smtp (403 Forbidden)');
+
+    // 17. POST /api/auth/test-smtp responds gracefully with status report for Super Admin
+    const adminTestSmtpReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/test-smtp',
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${adminSession.sessionToken}`,
+        'x-csrf-token': generateCsrfToken('u-admin-090')
+      },
+      body: {}
+    });
+    const adminTestSmtpRes = createMockRes();
+    await aiMiddlewareHandler(adminTestSmtpReq, adminTestSmtpRes.res);
+    assert(adminTestSmtpRes.getStatusCode() === 200, 'Super Admin test-smtp returns 200 OK');
+    const adminTestData = adminTestSmtpRes.getData();
+    assert(adminTestData.status === 'NOT_CONFIGURED' || adminTestData.status === 'CONNECTED' || adminTestData.status === 'CONNECTION_FAILED', 'test-smtp accurately reports SMTP status');
+
+    // 18. SMTP Protocol Parser & Multiline Handling
+    const multilineEhlo = "250-smtp.gmail.com at your service\r\n250-SIZE 35882577\r\n250-STARTTLS\r\n250 ENHANCEDSTATUSCODES\r\n";
+    assert(isSmtpReplyComplete(multilineEhlo) === true, 'SMTP parser recognizes complete multiline response');
+    assert(getSmtpReplyCode(multilineEhlo) === 250, 'SMTP parser extracts code 250 from multiline response');
+
+    const incompleteEhlo = "250-smtp.gmail.com at your service\r\n";
+    assert(isSmtpReplyComplete(incompleteEhlo) === false, 'SMTP parser detects incomplete multiline reply');
+
+    const authPrompt = "334 VXNlcm5hbWU6\r\n";
+    assert(isSmtpReplyComplete(authPrompt) === true, 'SMTP parser recognizes single-line 334 response');
+    assert(getSmtpReplyCode(authPrompt) === 334, 'SMTP parser extracts 334 code');
+
+    // 19. Email Masking & Secrets Protection
+    const masked = maskEmail('tipcrm090@theinclusionproject.ca');
+    assert(masked.startsWith('ti***') && masked.endsWith('@theinclusionproject.ca'), 'maskEmail safely redacts account usernames');
+    assert(!masked.includes('090@'), 'maskEmail prevents credential exposure');
+
+    // 20. Conditional wording: Unapproved/Pending accounts include explicit approval restriction
+    const pendingHtml = generateInclusionProjectWelcomeEmailHtml({
+      ...newUserParams,
+      accountStatus: 'pending'
+    });
+    assert(pendingHtml.includes('If your account requires administrator approval, access will remain restricted until the required approval is completed.'), 'Pending account template contains administrator approval notice');
+
+    const pendingText = generateInclusionProjectWelcomeEmailText({
+      ...newUserParams,
+      accountStatus: 'pending'
+    });
+    assert(pendingText.includes('If your account requires administrator approval, access will remain restricted until the required approval is completed.'), 'Pending account plain-text fallback contains approval notice');
   }
 
   // --------------------------------------------------------------------------

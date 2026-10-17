@@ -113,12 +113,31 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
     emailSentFrom?: string;
     emailSentAt?: string;
     emailDeliveryStatus?: string;
+    activationUrl?: string;
     previewHtml?: string;
   } | null>(null);
   const [previewEmailModal, setPreviewEmailModal] = useState<{ title: string; html: string; to: string } | null>(null);
   const [isResendingEmail, setIsResendingEmail] = useState(false);
   const [resetPassNotice, setResetPassNotice] = useState<{ name: string; tempPass: string } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Email Delivery & SMTP Diagnostic States
+  const [isSmtpModalOpen, setIsSmtpModalOpen] = useState(false);
+  const [smtpInfo, setSmtpInfo] = useState<{
+    success?: boolean;
+    smtpConfigured?: boolean;
+    smtpHost?: string | null;
+    smtpPort?: number;
+    smtpUserMasked?: string | null;
+    resendConfigured?: boolean;
+    sendgridConfigured?: boolean;
+    activeProvider?: string;
+    senderEmail?: string;
+    senderName?: string;
+  } | null>(null);
+  const [testEmailAddress, setTestEmailAddress] = useState('');
+  const [isTestingSmtp, setIsTestingSmtp] = useState(false);
+  const [testSmtpResult, setTestSmtpResult] = useState<any>(null);
 
   // Check 12: Authoritative Server-Side Audit Trail State
   const canViewAuditLogs = isSuperAdmin || hasPermission('audit_logs', 'view');
@@ -333,44 +352,78 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
 
   const handleCreateUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUserName.trim() || !newUserEmail.trim()) return;
+    const cleanName = newUserName.trim();
+    const cleanEmail = newUserEmail.trim().toLowerCase();
+
+    if (!cleanName || !cleanEmail) {
+      alert('Please enter both name and email.');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      alert('Please enter a valid recipient email address.');
+      return;
+    }
+
+    // Duplicate account prevention
+    if (users.some(u => u.email.trim().toLowerCase() === cleanEmail)) {
+      alert(`An account with email "${cleanEmail}" already exists in the CRM.`);
+      return;
+    }
 
     const rolesToAssign: RoleId[] = newUserAssignedRoles.length > 0 
       ? newUserAssignedRoles 
       : [newUserRole];
 
-    const created = await adminProvisionUser({
-      name: newUserName.trim(),
-      email: newUserEmail.trim(),
-      postId: newUserPostId || undefined,
-      assignedRoleIds: rolesToAssign,
-      assignedProgramIds: newUserPrograms,
-      assignedEventIds: newUserEvents,
-      tempPassword: newUserTempPassword
-    });
+    // Privilege restriction: non-super-admin cannot create super-admin
+    if (!isSuperAdmin && rolesToAssign.includes('super_admin')) {
+      alert('Only the Super Admin can assign the Super Administrator role.');
+      return;
+    }
 
-    setProvisionedNotice({
-      name: created.name,
-      email: created.email,
-      tempPass: created.tempPassword || newUserTempPassword,
-      userId: created.id,
-      postTitle: created.postTitle,
-      roles: rolesToAssign.map(r => ROLE_DEFINITIONS[r]?.name || r),
-      emailSentFrom: created.emailSentFrom || 'crm@theinclusionproject.ca',
-      emailSentAt: created.emailSentAt || new Date().toISOString(),
-      emailDeliveryStatus: created.emailDeliveryStatus || 'SENT',
-      previewHtml: created.emailPreviewHtml
-    });
+    try {
+      const created = await adminProvisionUser({
+        name: cleanName,
+        email: cleanEmail,
+        postId: newUserPostId || undefined,
+        assignedRoleIds: rolesToAssign,
+        assignedProgramIds: newUserPrograms,
+        assignedEventIds: newUserEvents,
+        tempPassword: newUserTempPassword
+      });
 
-    setIsAddUserOpen(false);
-    setSelectedUserId(created.id);
-    setNewUserName('');
-    setNewUserEmail('');
-    setNewUserPhone('');
-    setNewUserTitle('');
-    setNewUserTempPassword('TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900));
-    setSaveSuccessMessage(`Account created for "${created.name}" & credentials email sent to ${created.email} from ${created.emailSentFrom || 'crm@theinclusionproject.ca'}`);
-    setTimeout(() => setSaveSuccessMessage(null), 5000);
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+      const activationUrl = created.activationToken 
+        ? `${origin}/?action=activate&email=${encodeURIComponent(created.email)}&token=${created.activationToken}`
+        : `${origin}/?action=activate&email=${encodeURIComponent(created.email)}`;
+
+      setProvisionedNotice({
+        name: created.name,
+        email: created.email,
+        tempPass: created.tempPassword || newUserTempPassword,
+        userId: created.id,
+        postTitle: created.postTitle,
+        roles: rolesToAssign.map(r => ROLE_DEFINITIONS[r]?.name || r),
+        emailSentFrom: created.emailSentFrom || 'The Inclusion Project CRM <crm@theinclusionproject.ca>',
+        emailSentAt: created.emailSentAt || new Date().toISOString(),
+        emailDeliveryStatus: created.emailDeliveryStatus || 'SENT',
+        activationUrl,
+        previewHtml: created.emailPreviewHtml
+      });
+
+      setIsAddUserOpen(false);
+      setSelectedUserId(created.id);
+      setNewUserName('');
+      setNewUserEmail('');
+      setNewUserPhone('');
+      setNewUserTitle('');
+      setNewUserTempPassword('TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900));
+      setSaveSuccessMessage(`Account created for "${created.name}" & invitation email dispatched to ${created.email} from ${created.emailSentFrom || 'crm@theinclusionproject.ca'}`);
+      setTimeout(() => setSaveSuccessMessage(null), 5000);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to create user account.');
+    }
   };
 
   const handleResendWelcomeEmail = async (userId: string) => {
@@ -575,6 +628,28 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
             <span className="text-xs text-emerald-700 font-semibold bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200 flex items-center gap-1 animate-fadeIn">
               <Check className="w-3.5 h-3.5" /> {saveSuccessMessage}
             </span>
+          )}
+
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={async () => {
+                setIsSmtpModalOpen(true);
+                setTestSmtpResult(null);
+                try {
+                  const res = await fetch('/api/auth/smtp-status');
+                  if (res.ok) {
+                    const data = await res.json();
+                    setSmtpInfo(data);
+                  }
+                } catch {}
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 text-xs font-semibold transition-colors cursor-pointer shadow-2xs"
+              title="Inspect Email Delivery & SMTP Configuration"
+            >
+              <Mail className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Email Delivery</span>
+            </button>
           )}
 
           {canManageUsers ? (
@@ -2519,14 +2594,14 @@ CREATE POLICY people_scoped_view ON people
               <div className="flex items-center justify-between font-semibold">
                 <span className="flex items-center gap-1.5">
                   <Mail className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Welcome Email Delivered</span>
+                  <span>Welcome Email Dispatched</span>
                 </span>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-800 text-[10px] font-mono font-bold">
-                  SENT
+                <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-800 text-[10px] font-mono font-bold uppercase">
+                  {provisionedNotice.emailDeliveryStatus || 'SENT'}
                 </span>
               </div>
               <p className="text-[11px] text-emerald-800 leading-relaxed">
-                Dispatched from <strong>{provisionedNotice.emailSentFrom || 'crm@theinclusionproject.ca'}</strong> to <strong>{provisionedNotice.email}</strong> using <em>The Inclusion Project</em> official onboarding template.
+                Dispatched from <strong>{provisionedNotice.emailSentFrom || 'The Inclusion Project CRM <crm@theinclusionproject.ca>'}</strong> to <strong>{provisionedNotice.email}</strong> with secure activation link.
               </p>
             </div>
 
@@ -2536,26 +2611,28 @@ CREATE POLICY people_scoped_view ON people
                 <span className="font-bold text-zinc-900">{provisionedNotice.name}</span>
               </div>
               <div>
-                <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider block">Login ID (Email)</span>
+                <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider block">Login Email</span>
                 <span className="font-mono text-zinc-800 font-semibold">{provisionedNotice.email}</span>
               </div>
-              <div>
-                <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider block">Temporary Password</span>
-                <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded border border-zinc-200 font-mono font-bold text-zinc-900 mt-0.5">
-                  <span className="text-rose-600">{provisionedNotice.tempPass}</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(provisionedNotice.tempPass);
-                      setCopiedKey('prov');
-                      setTimeout(() => setCopiedKey(null), 2000);
-                    }}
-                    className="text-indigo-600 hover:text-indigo-800 font-sans text-xs font-semibold cursor-pointer"
-                  >
-                    {copiedKey === 'prov' ? 'Copied!' : 'Copy'}
-                  </button>
+              {provisionedNotice.activationUrl && (
+                <div>
+                  <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider block">Secure Activation Link</span>
+                  <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded border border-zinc-200 font-mono text-[11px] text-zinc-800 mt-0.5 gap-2">
+                    <span className="truncate">{provisionedNotice.activationUrl}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(provisionedNotice.activationUrl!);
+                        setCopiedKey('act_url');
+                        setTimeout(() => setCopiedKey(null), 2000);
+                      }}
+                      className="text-indigo-600 hover:text-indigo-800 font-sans text-xs font-semibold shrink-0 cursor-pointer"
+                    >
+                      {copiedKey === 'act_url' ? 'Copied!' : 'Copy Link'}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="text-[11px] text-zinc-500 bg-amber-50 border border-amber-200 p-2.5 rounded-lg text-amber-900">
@@ -2691,6 +2768,147 @@ CREATE POLICY people_scoped_view ON people
               className="w-full py-2.5 rounded-xl bg-zinc-900 hover:bg-black text-white text-xs font-semibold transition-all cursor-pointer"
             >
               Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Email Delivery & SMTP Configuration Diagnostic Modal */}
+      {isSmtpModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/70 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl border border-zinc-200 shadow-2xl max-w-lg w-full p-6 space-y-4 animate-scaleUp">
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                  <Mail className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-900">Email Delivery & SMTP Status</h3>
+                  <p className="text-xs text-zinc-500">Official transactional email gateway for user invitations</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSmtpModalOpen(false)}
+                className="p-1 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Provider Status Overview */}
+            <div className="p-3.5 rounded-xl bg-zinc-50 border border-zinc-200 text-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-semibold">Active Provider:</span>
+                <span className={`px-2 py-0.5 rounded-full font-mono text-[11px] font-bold uppercase ${
+                  smtpInfo?.activeProvider === 'smtp'
+                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                    : smtpInfo?.activeProvider === 'resend' || smtpInfo?.activeProvider === 'sendgrid'
+                      ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                      : 'bg-amber-100 text-amber-800 border border-amber-300'
+                }`}>
+                  {smtpInfo?.activeProvider === 'smtp' ? 'Gmail SMTP' : (smtpInfo?.activeProvider || 'Simulated Local Outbox')}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-semibold">Sender Display Name:</span>
+                <strong className="text-zinc-800">{smtpInfo?.senderName || 'The Inclusion Project CRM'}</strong>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-semibold">Official From Address:</span>
+                <strong className="font-mono text-zinc-800">{smtpInfo?.senderEmail || 'crm@theinclusionproject.ca'}</strong>
+              </div>
+
+              {smtpInfo?.smtpHost && (
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-500 font-semibold">SMTP Host & Port:</span>
+                  <span className="font-mono text-zinc-700">{smtpInfo.smtpHost}:{smtpInfo.smtpPort}</span>
+                </div>
+              )}
+
+              {smtpInfo?.smtpUserMasked && (
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-500 font-semibold">SMTP Account:</span>
+                  <span className="font-mono text-zinc-700">{smtpInfo.smtpUserMasked}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Google App Password Security Guide */}
+            <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200 text-xs text-blue-900 space-y-1">
+              <div className="font-bold flex items-center gap-1">
+                <span>🔐 Dedicated TIP CRM Gmail SMTP Setup</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-blue-800">
+                To send emails directly from the official TIP CRM Gmail account, Google requires a 16-character <strong>Google App Password</strong> (created via myaccount.google.com &gt; Security &gt; 2-Step Verification &gt; App passwords). Set <code className="font-mono text-[10px] bg-blue-100 px-1 rounded">SMTP_HOST=smtp.gmail.com</code>, <code className="font-mono text-[10px] bg-blue-100 px-1 rounded">SMTP_PORT=587</code>, <code className="font-mono text-[10px] bg-blue-100 px-1 rounded">SMTP_USER</code>, and <code className="font-mono text-[10px] bg-blue-100 px-1 rounded">SMTP_PASS</code> in Vercel or production server environment.
+              </p>
+            </div>
+
+            {/* Test Email Delivery Section */}
+            <div className="p-3.5 rounded-xl border border-zinc-200 bg-white space-y-2.5 text-xs">
+              <label className="block font-bold text-zinc-800 uppercase tracking-wider text-[11px]">
+                Send Test Email to Recipient
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  value={testEmailAddress}
+                  onChange={e => setTestEmailAddress(e.target.value)}
+                  placeholder="admin@theinclusionproject.ca"
+                  className="flex-1 px-3 py-1.5 rounded-lg border border-zinc-300 text-xs focus:outline-hidden focus:border-zinc-500 font-mono"
+                />
+                <button
+                  type="button"
+                  disabled={isTestingSmtp || !testEmailAddress.trim()}
+                  onClick={async () => {
+                    setIsTestingSmtp(true);
+                    setTestSmtpResult(null);
+                    try {
+                      const res = await fetch('/api/auth/test-smtp', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ testRecipientEmail: testEmailAddress.trim() })
+                      });
+                      const data = await res.json();
+                      setTestSmtpResult(data);
+                    } catch (e: any) {
+                      setTestSmtpResult({ success: false, error: e?.message || 'Request failed' });
+                    } finally {
+                      setIsTestingSmtp(false);
+                    }
+                  }}
+                  className="px-3.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-black text-white font-semibold text-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                >
+                  <Send className={`w-3.5 h-3.5 ${isTestingSmtp ? 'animate-pulse' : ''}`} />
+                  <span>{isTestingSmtp ? 'Sending...' : 'Test Send'}</span>
+                </button>
+              </div>
+
+              {testSmtpResult && (
+                <div className={`p-2.5 rounded-lg border text-[11px] ${
+                  testSmtpResult.success
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border-rose-200 text-rose-800'
+                }`}>
+                  <div className="font-bold">{testSmtpResult.success ? '✓ Dispatch Complete' : '✕ Test Failed'}</div>
+                  <div className="mt-0.5">{testSmtpResult.message || testSmtpResult.error}</div>
+                  {testSmtpResult.provider && (
+                    <div className="mt-1 font-mono text-[10px] text-zinc-600">
+                      Provider: <strong>{testSmtpResult.provider}</strong> | Status: <strong>{testSmtpResult.status}</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsSmtpModalOpen(false)}
+              className="w-full py-2.5 rounded-xl bg-zinc-900 hover:bg-black text-white text-xs font-semibold cursor-pointer"
+            >
+              Close
             </button>
           </div>
         </div>

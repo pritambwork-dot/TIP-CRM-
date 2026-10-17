@@ -58,7 +58,11 @@ import {
   sendWelcomeEmail,
   getSentEmails,
   CRM_SENDER_EMAIL,
-  generateInclusionProjectWelcomeEmailHtml
+  CRM_SENDER_NAME,
+  generateInclusionProjectWelcomeEmailHtml,
+  verifySmtpConnection,
+  getSmtpConfig,
+  maskEmail
 } from './lib/emailService.ts';
 import {
   recordUserLogin,
@@ -2170,18 +2174,38 @@ Rules:
         return true;
       }
 
-      if (!name || !email || !tempPassword) {
-        sendSafeError(res, 400, 'Bad Request: name, email, and temporary password are required.', ERROR_CODES.BAD_REQUEST);
+      // Privilege restriction: staff_manager cannot invite a super_admin
+      if (actor.role !== 'super_admin' && Array.isArray(roles) && roles.some((r: string) => r.toLowerCase().includes('super_admin') || r.toLowerCase().includes('super admin'))) {
+        sendSafeError(res, 403, 'Forbidden: Only the Super Admin can provision or invite Super Administrator accounts.', ERROR_CODES.FORBIDDEN);
         return true;
       }
+
+      if (!name || !email) {
+        sendSafeError(res, 400, 'Bad Request: name and email are required.', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(String(email).trim())) {
+        sendSafeError(res, 400, 'Bad Request: Please provide a valid recipient email address.', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      const generatedTempPass = tempPassword || ('TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900));
+      const origin = appUrl || process.env.APP_URL || 'http://localhost:3000';
+      const token = body?.activationToken || ('tip_act_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36));
+      const activationUrl = body?.activationUrl || `${origin}/?action=activate&email=${encodeURIComponent(email)}&token=${token}`;
 
       const emailResult = await sendWelcomeEmail({
         name,
         email,
-        tempPassword,
+        tempPassword: generatedTempPass,
+        activationUrl,
+        activationToken: token,
         postTitle,
         roles,
-        appUrl,
+        appUrl: origin,
+        accountStatus: body?.accountStatus,
         actorId: actor.id,
         actorRole: actor.role,
         correlationId
@@ -2193,9 +2217,131 @@ Rules:
         recipient: emailResult.recipient,
         messageId: emailResult.messageId,
         provider: emailResult.provider,
+        deliveryStatus: emailResult.deliveryStatus,
         timestamp: emailResult.timestamp,
+        activationUrl: emailResult.activationUrl,
         previewHtml: emailResult.previewHtml,
-        message: `Welcome email with login credentials successfully dispatched to ${email} from ${emailResult.sentFrom}.`
+        message: emailResult.provider === 'local_outbox'
+          ? `Welcome invitation email recorded in local outbox for ${email} from ${emailResult.sentFrom}.`
+          : `Welcome invitation email accepted by ${emailResult.provider} for delivery to ${email} from ${emailResult.sentFrom}.`
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 11b-1. GET /api/auth/smtp-status — Check Email Delivery & SMTP Configuration
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/smtp-status' && req.method === 'GET') {
+      const actor = getRequestActor(req, {});
+      if (actor.sessionError || !actor.authenticated || actor.role === 'unauthenticated') {
+        sendSafeError(res, 401, 'Unauthorized: Active administrator session required.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+      if (actor.role !== 'super_admin' && actor.role !== 'staff_manager') {
+        sendSafeError(res, 403, 'Forbidden: Administrator privileges required.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      const smtpConfig = getSmtpConfig();
+      sendJson(res, 200, {
+        success: true,
+        smtpConfigured: Boolean(smtpConfig),
+        smtpHost: smtpConfig?.host || null,
+        smtpPort: smtpConfig?.port || 587,
+        smtpUserMasked: smtpConfig ? maskEmail(smtpConfig.user) : null,
+        resendConfigured: Boolean(process.env.RESEND_API_KEY),
+        sendgridConfigured: Boolean(process.env.SENDGRID_API_KEY),
+        activeProvider: smtpConfig ? 'smtp' : (process.env.RESEND_API_KEY ? 'resend' : (process.env.SENDGRID_API_KEY ? 'sendgrid' : 'local_outbox')),
+        senderEmail: CRM_SENDER_EMAIL,
+        senderName: CRM_SENDER_NAME
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 11b-2. POST /api/auth/test-smtp — Verify SMTP Connection and Test Email Dispatch
+    // --------------------------------------------------------------------------
+    if (url === '/api/auth/test-smtp' && req.method === 'POST') {
+      const body = await parseRequestBody(req);
+      const actor = getRequestActor(req, body);
+
+      if (actor.sessionError || !actor.authenticated || actor.role === 'unauthenticated') {
+        sendSafeError(res, 401, 'Unauthorized: Active administrator session required.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+      if (actor.role !== 'super_admin') {
+        sendSafeError(res, 403, 'Forbidden: Only Super Administrators can test SMTP email configuration.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      const { testRecipientEmail } = body || {};
+      const status = await verifySmtpConnection();
+
+      if (!status.connected && !status.configured) {
+        sendJson(res, 200, {
+          success: false,
+          configured: false,
+          connected: false,
+          status: 'NOT_CONFIGURED',
+          message: 'SMTP is not configured. Missing SMTP_HOST, SMTP_USER, or SMTP_PASS in environment variables.'
+        });
+        return true;
+      }
+
+      if (!status.connected) {
+        sendJson(res, 200, {
+          success: false,
+          configured: true,
+          connected: false,
+          status: 'CONNECTION_FAILED',
+          error: status.error,
+          code: status.code
+        });
+        return true;
+      }
+
+      // If test recipient email is provided, send a real test email
+      if (testRecipientEmail) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(String(testRecipientEmail).trim())) {
+          sendSafeError(res, 400, 'Bad Request: Invalid test recipient email address.', ERROR_CODES.BAD_REQUEST);
+          return true;
+        }
+
+        const emailResult = await sendWelcomeEmail({
+          name: 'Authorized Test Recipient',
+          email: String(testRecipientEmail).trim(),
+          postTitle: 'Test Verification Post',
+          roles: ['Staff Member'],
+          appUrl: process.env.APP_URL || 'http://localhost:3000',
+          accountStatus: 'approved',
+          actorId: actor.id,
+          actorRole: actor.role
+        });
+
+        sendJson(res, 200, {
+          success: true,
+          configured: true,
+          connected: true,
+          status: emailResult.deliveryStatus,
+          provider: emailResult.provider,
+          sentFrom: emailResult.sentFrom,
+          recipient: emailResult.recipient,
+          messageId: emailResult.messageId,
+          message: `Test email dispatched to ${testRecipientEmail} via ${emailResult.provider} (${emailResult.deliveryStatus}).`
+        });
+        return true;
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        configured: true,
+        connected: true,
+        status: 'CONNECTED',
+        host: status.host,
+        port: status.port,
+        user: status.user,
+        message: 'SMTP connection and authentication verified successfully.'
       });
       return true;
     }

@@ -140,6 +140,8 @@ export interface UserProfile {
   passwordChangedAt?: string;
   onboardingCompleted?: boolean;
   tempPassword?: string;
+  activationToken?: string;
+  activationExpiresAt?: string;
   passwordHash?: string;
   password?: string;
   approvedBy?: string;

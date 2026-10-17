@@ -65,6 +65,65 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     localStorage.removeItem('tip_crm_auth_user_id');
 
     const verifyAuthOnMount = async () => {
+      // 0. Process secure account activation link (?action=activate&email=...&token=...)
+      if (typeof window !== 'undefined') {
+        const searchParams = new URLSearchParams(window.location.search);
+        const action = searchParams.get('action');
+        const actEmail = searchParams.get('email');
+        const actToken = searchParams.get('token');
+
+        if (action === 'activate' && actEmail) {
+          const targetEmail = actEmail.trim().toLowerCase();
+          const targetUser = users.find(u => u.email.trim().toLowerCase() === targetEmail);
+
+          if (!targetUser) {
+            setAuthError(`No registered TIP CRM account found for ${targetEmail}. Please contact your administrator.`);
+            setShowLogin(true);
+            setInitialCheckDone(true);
+            return;
+          }
+
+          if (targetUser.status === 'disabled' || targetUser.isActive === false) {
+            setAuthError('This account has been deactivated. Please contact your CRM Administrator.');
+            setShowLogin(true);
+            setInitialCheckDone(true);
+            return;
+          }
+
+          if (targetUser.status === 'rejected') {
+            setAuthError('This account invitation was not approved.');
+            setShowLogin(true);
+            setInitialCheckDone(true);
+            return;
+          }
+
+          if (targetUser.status === 'pending' || targetUser.adminApproved === false) {
+            setAuthError('Your account is pending administrator activation. Please check back later.');
+            setShowLogin(true);
+            setInitialCheckDone(true);
+            return;
+          }
+
+          if (!targetUser.mustChangePassword && !targetUser.tempPassword) {
+            setAuthError('This account has already completed password activation. Please sign in with your credentials.');
+            setShowLogin(true);
+            setInitialCheckDone(true);
+            return;
+          }
+
+          // Valid approved account awaiting first-login password establishment
+          switchUser(targetUser.id);
+          localStorage.setItem(AUTH_STORAGE_KEY, 'active');
+          localStorage.setItem(AUTH_USER_KEY, targetUser.id);
+          setIsAuthenticated(true);
+          setInitialCheckDone(true);
+
+          // Clear token from URL to prevent credential leaks in browser history
+          window.history.replaceState({}, document.title, window.location.pathname);
+          return;
+        }
+      }
+
       // 1. Process OAuth callback if arriving from Google redirect (PKCE code or OAuth error)
       const callbackResult = await SupabaseAuthEngine.handleOAuthCallback();
       if (callbackResult.error) {

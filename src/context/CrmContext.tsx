@@ -985,17 +985,38 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     tempPassword?: string;
     sendInviteEmail?: boolean;
   }): Promise<UserProfile> => {
+    const cleanEmail = params.email.trim().toLowerCase();
+    if (!cleanEmail) {
+      throw new Error('Email address is required.');
+    }
+
+    // Security Check: Prevent accidental duplicate accounts
+    const duplicate = users.find(u => u.email.trim().toLowerCase() === cleanEmail);
+    if (duplicate) {
+      throw new Error(`An account with email "${cleanEmail}" already exists in the CRM.`);
+    }
+
+    // Security Check: Only Super Admin can assign the super_admin role
+    if (currentUser.roleId !== 'super_admin' && params.assignedRoleIds.includes('super_admin')) {
+      throw new Error('Only the Super Admin can assign the Super Administrator role.');
+    }
+
     const primaryRoleId = params.assignedRoleIds[0] || 'staff_member';
     const roleDef = ROLE_DEFINITIONS[primaryRoleId] || ROLE_DEFINITIONS.staff_member;
     const post = posts.find(p => p.id === params.postId);
     const tempPass = params.tempPassword || ('TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900));
+    
+    // Generate secure short-lived activation token and URL
+    const activationToken = 'tip_act_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+    const activationUrl = `${origin}/?action=activate&email=${encodeURIComponent(cleanEmail)}&token=${activationToken}`;
 
     const newUser: UserProfile = {
       id: 'u-' + Date.now(),
       authUserId: 'auth-' + Date.now(),
       organizationId: 'org-tip',
-      name: params.name,
-      email: params.email,
+      name: params.name.trim(),
+      email: cleanEmail,
       roleId: primaryRoleId,
       role: primaryRoleId === 'volunteer' ? 'volunteer' : 'staff',
       assignedRoleIds: params.assignedRoleIds.length > 0 ? params.assignedRoleIds : [primaryRoleId],
@@ -1004,15 +1025,16 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       postId: params.postId,
       postTitle: post?.title || post?.name,
       responsibilities: post?.responsibilities || [],
-      avatarInitials: params.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U',
+      avatarInitials: params.name.trim().split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U',
       status: 'approved',
       isActive: true,
       emailVerified: true,
       adminApproved: true,
       mustChangePassword: true,
       tempPassword: tempPass,
+      activationToken,
       emailSentAt: new Date().toISOString(),
-      emailSentFrom: 'crm@theinclusionproject.ca',
+      emailSentFrom: 'The Inclusion Project CRM <crm@theinclusionproject.ca>',
       emailDeliveryStatus: 'local_outbox',
       onboardingCompleted: false,
       provider: 'email',
@@ -1024,25 +1046,28 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString()
     };
 
-    // Dispatches the official Inclusion Project welcome email with ID and Temporary Password
+    // Dispatches the official Inclusion Project welcome email with secure activation link
     try {
       const emailResponse = await fetch('/api/auth/send-welcome-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: params.name,
-          email: params.email,
+          name: newUser.name,
+          email: cleanEmail,
+          activationUrl,
+          activationToken,
           tempPassword: tempPass,
           postTitle: post?.title || post?.name,
           roles: params.assignedRoleIds.map(rid => ROLE_DEFINITIONS[rid]?.name || rid),
-          appUrl: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+          appUrl: origin,
+          accountStatus: newUser.status
         })
       });
       if (emailResponse.ok) {
         const emailData = await emailResponse.json();
         newUser.emailSentAt = emailData.timestamp || new Date().toISOString();
-        newUser.emailSentFrom = emailData.sentFrom || 'crm@theinclusionproject.ca';
-        newUser.emailDeliveryStatus = emailData.provider || 'SENT';
+        newUser.emailSentFrom = emailData.sentFrom || 'The Inclusion Project CRM <crm@theinclusionproject.ca>';
+        newUser.emailDeliveryStatus = emailData.deliveryStatus || emailData.provider || 'SENT';
         newUser.emailPreviewHtml = emailData.previewHtml;
       }
     } catch (err) {
@@ -1050,7 +1075,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     setUsers(prev => [...prev, newUser]);
-    logAction('Account Provisioned', 'User Management', newUser.name, `Created admin-provisioned account; credentials email dispatched to ${newUser.email} from ${newUser.emailSentFrom} (${params.assignedRoleIds.join(', ')})`);
+    logAction('Account Provisioned', 'User Management', newUser.name, `Created admin-provisioned account; invitation email dispatched to ${newUser.email} from ${newUser.emailSentFrom} (${params.assignedRoleIds.join(', ')})`);
     return newUser;
   };
 
@@ -1060,6 +1085,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const post = posts.find(p => p.id === target.postId);
     const tempPass = target.tempPassword || ('TIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '!' + Math.floor(100 + Math.random() * 900));
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+    const activationToken = target.activationToken || ('tip_act_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36));
+    const activationUrl = `${origin}/?action=activate&email=${encodeURIComponent(target.email)}&token=${activationToken}`;
 
     try {
       const emailResponse = await fetch('/api/auth/send-welcome-email', {
@@ -1068,10 +1096,13 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: JSON.stringify({
           name: target.name,
           email: target.email,
+          activationUrl,
+          activationToken,
           tempPassword: tempPass,
           postTitle: target.postTitle || post?.title || post?.name,
           roles: target.assignedRoleIds.map(rid => ROLE_DEFINITIONS[rid]?.name || rid),
-          appUrl: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+          appUrl: origin,
+          accountStatus: target.status
         })
       });
       if (emailResponse.ok) {
@@ -1079,16 +1110,17 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const updatedUser: UserProfile = {
           ...target,
           tempPassword: tempPass,
+          activationToken,
           emailSentAt: emailData.timestamp || new Date().toISOString(),
-          emailSentFrom: emailData.sentFrom || 'crm@theinclusionproject.ca',
-          emailDeliveryStatus: emailData.provider || 'SENT',
+          emailSentFrom: emailData.sentFrom || 'The Inclusion Project CRM <crm@theinclusionproject.ca>',
+          emailDeliveryStatus: emailData.deliveryStatus || emailData.provider || 'SENT',
           emailPreviewHtml: emailData.previewHtml
         };
         setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
         logAction('Email Dispatched', 'User Management', target.name, `Resent welcome onboarding email with credentials to ${target.email} from ${emailData.sentFrom || 'crm@theinclusionproject.ca'}`);
         return {
           success: true,
-          message: `Welcome email with login credentials sent to ${target.email} from ${emailData.sentFrom || 'crm@theinclusionproject.ca'}.`,
+          message: `Welcome invitation email sent to ${target.email} from ${emailData.sentFrom || 'crm@theinclusionproject.ca'}.`,
           previewHtml: emailData.previewHtml
         };
       }
