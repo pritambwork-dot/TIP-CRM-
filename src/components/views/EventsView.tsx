@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Calendar, 
   Search, 
@@ -45,9 +45,25 @@ export const EventsView: React.FC<EventsViewProps> = ({
   onSelectEvent,
   onSelectPerson
 }) => {
-  const { scopedEvents, events, addEvent, programs, participants, hasPermission, Permissions, currentUser } = useCrm();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFilter, setSelectedFilter] = useState<EventType | 'All'>('All');
+  const { 
+    scopedEvents, 
+    events, 
+    addEvent, 
+    programs, 
+    participants, 
+    hasPermission, 
+    Permissions, 
+    currentUser,
+    workspaceState,
+    saveWorkspaceNavigation,
+    getFormDraft,
+    saveFormDraft,
+    discardFormDraft
+  } = useCrm();
+  const [searchQuery, setSearchQuery] = useState(workspaceState?.viewPreferences?.eventsSearch || '');
+  const [selectedFilter, setSelectedFilter] = useState<EventType | 'All'>(
+    (workspaceState?.viewPreferences?.eventsFilter as any) || 'All'
+  );
 
   const canCreateEvent = currentUser.roleId === 'super_admin' || currentUser.roleId === 'staff_manager' || hasPermission('events', 'create');
 
@@ -68,6 +84,74 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [newProgramId, setNewProgramId] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [newInstructions, setNewInstructions] = useState('');
+
+  // Persist search & filter changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveWorkspaceNavigation('events', {
+        selectedEventId,
+        searchFilter: searchQuery,
+        activeSubTab: selectedFilter
+      });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchQuery, selectedFilter, selectedEventId, saveWorkspaceNavigation]);
+
+  // Restore draft when modal opens
+  useEffect(() => {
+    if (showAddModal) {
+      const saved = getFormDraft('new_event');
+      if (saved?.data) {
+        if (saved.data.newName) setNewName(saved.data.newName);
+        if (saved.data.newType) setNewType(saved.data.newType);
+        if (saved.data.newDate) setNewDate(saved.data.newDate);
+        if (saved.data.newTime) setNewTime(saved.data.newTime);
+        if (saved.data.newLocation) setNewLocation(saved.data.newLocation);
+        if (saved.data.newFacilitator) setNewFacilitator(saved.data.newFacilitator);
+        if (saved.data.newCapacity) setNewCapacity(saved.data.newCapacity);
+        if (saved.data.newProgramId) setNewProgramId(saved.data.newProgramId);
+        if (saved.data.newNotes) setNewNotes(saved.data.newNotes);
+        if (saved.data.newInstructions) setNewInstructions(saved.data.newInstructions);
+      }
+    }
+  }, [showAddModal, getFormDraft]);
+
+  // Auto-save draft with debounce
+  useEffect(() => {
+    if (!showAddModal) return;
+    if (!newName.trim() && !newNotes.trim() && !newInstructions.trim()) return;
+
+    const timer = setTimeout(() => {
+      saveFormDraft('new_event', {
+        newName,
+        newType,
+        newDate,
+        newTime,
+        newLocation,
+        newFacilitator,
+        newCapacity,
+        newProgramId,
+        newNotes,
+        newInstructions
+      });
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [showAddModal, newName, newType, newDate, newTime, newLocation, newFacilitator, newCapacity, newProgramId, newNotes, newInstructions, saveFormDraft]);
+
+  const handleDiscardEventDraft = () => {
+    discardFormDraft('new_event');
+    setNewName('');
+    setNewType('Workshop');
+    setNewDate('2026-10-15');
+    setNewTime('14:00 - 16:00 EDT');
+    setNewLocation('Centre for Social Innovation (Toronto) & Zoom');
+    setNewFacilitator(currentUser?.name || 'Ruth Mojeed Ramirez');
+    setNewCapacity('35');
+    setNewProgramId('');
+    setNewNotes('');
+    setNewInstructions('');
+  };
 
   const filteredEvents = visibleEvents.filter(e => {
     const matchesFilter = selectedFilter === 'All' ? true : e.type === selectedFilter;
@@ -109,6 +193,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
       instructionLogs: initialInstructionLogs
     });
 
+    // Reset form & discard draft
+    discardFormDraft('new_event');
     setNewName('');
     setNewNotes('');
     setNewInstructions('');
@@ -434,23 +520,42 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   />
                 </div>
 
-                <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowAddModal(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="crimson"
-                    size="sm"
-                    className="shadow-sm"
-                  >
-                    Save Event
-                  </Button>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-border">
+                  <div className="flex items-center gap-2">
+                    {(newName.trim() || newNotes.trim() || newInstructions.trim()) && (
+                      <span className="text-[11px] text-zinc-500 flex items-center gap-1.5 font-medium">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Draft auto-saved
+                      </span>
+                    )}
+                    {(newName.trim() || newNotes.trim() || newInstructions.trim()) && (
+                      <button
+                        type="button"
+                        onClick={handleDiscardEventDraft}
+                        className="text-[11px] text-rose-600 hover:text-rose-700 underline font-medium cursor-pointer"
+                      >
+                        Discard draft
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowAddModal(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="crimson"
+                      size="sm"
+                      className="shadow-sm"
+                    >
+                      Save Event
+                    </Button>
+                  </div>
                 </div>
               </form>
             </motion.div>

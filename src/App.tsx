@@ -10,6 +10,8 @@ import { GoogleSignInModal } from './components/auth/GoogleSignInModal';
 import { SupabaseAuthEngine } from './lib/supabase';
 import { verifyPassword } from './lib/passwordSecurity';
 import { clearUserOfflineCache } from './lib/offlineStorage';
+import { workspaceManager } from './lib/workspaceManager';
+import { Sparkles, X } from 'lucide-react';
 import { ErrorBoundary, ViewLoadingSkeleton } from './components/common';
 import { MobileBottomNav } from './components/navigation/MobileBottomNav';
 
@@ -438,6 +440,7 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
         await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
       }
       if (currentUserId) {
+        workspaceManager.purgeUserSessionMemory(currentUserId);
         await clearUserOfflineCache(currentUserId).catch(() => {});
       }
     } finally {
@@ -539,7 +542,14 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
 };
 
 const MainLayout: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
-  const { currentUser } = useCrm();
+  const { 
+    currentUser, 
+    people, 
+    organizations, 
+    programs, 
+    events, 
+    saveWorkspaceNavigation 
+  } = useCrm();
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
 
   // Modals
@@ -550,6 +560,62 @@ const MainLayout: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
   const [importOpen, setImportOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
+  // Smart Resume Workspace State
+  const [resumeBanner, setResumeBanner] = useState<{
+    show: boolean;
+    sectionName: string;
+    tab: NavTab;
+    reason?: string;
+  } | null>(null);
+  const [hasRestoredWorkspace, setHasRestoredWorkspace] = useState(false);
+
+  // Selected records for drill-down across views
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+
+  // Restore previous session workspace
+  useEffect(() => {
+    if (!currentUser?.id || hasRestoredWorkspace) return;
+
+    let isMounted = true;
+    workspaceManager.getWorkspace(currentUser.id).then(ws => {
+      if (!isMounted) return;
+      const { validWorkspace, adjusted, reason } = workspaceManager.validateWorkspaceForUser(
+        ws,
+        currentUser.roleId,
+        { people, organizations, programs, events }
+      );
+
+      const targetTab = validWorkspace.lastActiveTab || 'dashboard';
+      setActiveTab(targetTab);
+      if (validWorkspace.selectedRecordIds.personId) setSelectedPersonId(validWorkspace.selectedRecordIds.personId);
+      if (validWorkspace.selectedRecordIds.organizationId) setSelectedOrgId(validWorkspace.selectedRecordIds.organizationId);
+      if (validWorkspace.selectedRecordIds.programId) setSelectedProgramId(validWorkspace.selectedRecordIds.programId);
+      if (validWorkspace.selectedRecordIds.eventId) setSelectedEventId(validWorkspace.selectedRecordIds.eventId);
+
+      setHasRestoredWorkspace(true);
+
+      const hasDrafts = Object.keys(validWorkspace.drafts || {}).length > 0;
+      if (targetTab !== 'dashboard' || hasDrafts || adjusted) {
+        const sectionTitle = sectionTitles[targetTab] || targetTab;
+        setResumeBanner({
+          show: true,
+          sectionName: sectionTitle,
+          tab: targetTab,
+          reason: reason || (hasDrafts ? 'In-progress form drafts have been preserved.' : undefined)
+        });
+      }
+    }).catch(() => {
+      if (isMounted) setHasRestoredWorkspace(true);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.id, currentUser?.roleId, people, organizations, programs, events, hasRestoredWorkspace]);
 
   const handleOpenQuickAction = () => {
     setQuickActionInitialMode('menu');
@@ -562,12 +628,6 @@ const MainLayout: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
     setQuickActionPersonId(personId || null);
     setQuickActionOpen(true);
   };
-
-  // Selected records for drill-down across views
-  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
-  const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   // Keyboard shortcut for ⌘K / Ctrl+K
   useEffect(() => {
@@ -593,10 +653,22 @@ const MainLayout: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
   const handleNavigate = (tab: NavTab, recordId?: string) => {
     setActiveTab(tab);
 
-    if (tab === 'people' && recordId) setSelectedPersonId(recordId);
-    if (tab === 'organizations' && recordId) setSelectedOrgId(recordId);
-    if (tab === 'programs' && recordId) setSelectedProgramId(recordId);
-    if (tab === 'events' && recordId) setSelectedEventId(recordId);
+    let nextPersonId = selectedPersonId;
+    let nextOrgId = selectedOrgId;
+    let nextProgId = selectedProgramId;
+    let nextEventId = selectedEventId;
+
+    if (tab === 'people' && recordId) { nextPersonId = recordId; setSelectedPersonId(recordId); }
+    if (tab === 'organizations' && recordId) { nextOrgId = recordId; setSelectedOrgId(recordId); }
+    if (tab === 'programs' && recordId) { nextProgId = recordId; setSelectedProgramId(recordId); }
+    if (tab === 'events' && recordId) { nextEventId = recordId; setSelectedEventId(recordId); }
+
+    saveWorkspaceNavigation(tab, {
+      selectedPersonId: nextPersonId,
+      selectedOrgId: nextOrgId,
+      selectedProgramId: nextProgId,
+      selectedEventId: nextEventId
+    });
   };
 
   const handleQuickAction = (type: QuickActionType) => {
@@ -661,7 +733,15 @@ const MainLayout: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
         {/* Animated Apple-Style Left Sidebar Dock */}
         <AppleDock
           activeTab={activeTab}
-          onTabChange={(tab: NavTab) => setActiveTab(tab)}
+          onTabChange={(tab: NavTab) => {
+            setActiveTab(tab);
+            saveWorkspaceNavigation(tab, {
+              selectedPersonId,
+              selectedOrgId,
+              selectedProgramId,
+              selectedEventId
+            });
+          }}
           onOpenSearch={() => setSearchOpen(true)}
           onOpenQuickAction={handleOpenQuickAction}
           onOpenOnboarding={() => setOnboardingOpen(true)}
@@ -669,6 +749,54 @@ const MainLayout: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
 
         {/* Main Workspace Canvas with Apple Fluid View Transition */}
         <main className="flex-1 overflow-y-auto px-3 sm:px-6 lg:px-8 pt-3 sm:pt-6 pb-24 md:pb-12 w-full max-w-7xl mx-auto">
+          {/* Smart Resume Workspace Notification Banner */}
+          <AnimatePresence>
+            {resumeBanner?.show && (
+              <motion.div
+                initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                transition={{ duration: 0.2 }}
+                id="smart-resume-banner"
+                className="mb-4 p-3.5 bg-white/95 backdrop-blur-md border border-[#140a8e]/20 rounded-2xl shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-7 h-7 rounded-full bg-[#140a8e]/10 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-3.5 h-3.5 text-[#140a8e]" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-zinc-900 tracking-tight">
+                      Welcome back, {currentUser.name} — Workspace resumed from your previous session at {resumeBanner.sectionName}.
+                    </p>
+                    {resumeBanner.reason && (
+                      <p className="text-[11px] text-zinc-500 mt-0.5 truncate">{resumeBanner.reason}</p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleNavigate('dashboard');
+                      setResumeBanner(null);
+                    }}
+                    className="px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:text-zinc-950 bg-zinc-100 hover:bg-zinc-200/90 rounded-xl transition-all cursor-pointer active:scale-95"
+                  >
+                    Go to Dashboard
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setResumeBanner(null)}
+                    className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors cursor-pointer"
+                    aria-label="Dismiss resume notice"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}

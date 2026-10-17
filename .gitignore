@@ -39,5 +39,7 @@ scratch/
 server/audit_logs.jsonl
 server/sent_emails.jsonl
 server/user_sessions.jsonl
+server/user_workspaces.json
+audit_evidence/
 brag-output/
 .env*

@@ -56,7 +56,18 @@ export const QuickActionModal: React.FC<QuickActionModalProps> = ({
   initialPersonId = null,
   onNavigateToPerson
 }) => {
-  const { currentUser, people, updatePerson, addInteraction, addTask, hasPermission, Permissions } = useCrm();
+  const { 
+    currentUser, 
+    people, 
+    updatePerson, 
+    addInteraction, 
+    addTask, 
+    hasPermission, 
+    Permissions,
+    getFormDraft,
+    saveFormDraft,
+    discardFormDraft
+  } = useCrm();
   const isVolunteer = currentUser.role === 'volunteer';
 
   // Mode state: 'menu' or 'quick_note'
@@ -79,25 +90,66 @@ export const QuickActionModal: React.FC<QuickActionModalProps> = ({
     entry: string;
   } | null>(null);
 
-  // Sync mode and selected person when opened or changed
+  // Sync mode and selected person when opened or changed + restore draft if available
   useEffect(() => {
     if (isOpen) {
       setMode(initialMode);
       setSubmittedPerson(null);
       setLastAppendedEntry(null);
-      setNoteText('');
-      setFollowUpDate('');
-      setCreateFollowUpTask(false);
       setIsChangingContact(false);
       setContactSearchQuery('');
 
-      if (initialPersonId && people.some(p => p.id === initialPersonId)) {
-        setSelectedPersonId(initialPersonId);
-      } else if (people.length > 0 && !selectedPersonId) {
-        setSelectedPersonId(people[0].id);
+      // Check for saved draft
+      const saved = getFormDraft('quick_note');
+      if (saved?.data) {
+        if (saved.data.noteText) setNoteText(saved.data.noteText);
+        if (saved.data.interactionType) setInteractionType(saved.data.interactionType);
+        if (saved.data.followUpDate) setFollowUpDate(saved.data.followUpDate);
+        if (saved.data.createFollowUpTask !== undefined) setCreateFollowUpTask(saved.data.createFollowUpTask);
+        if (saved.data.selectedPersonId && people.some(p => p.id === saved.data.selectedPersonId)) {
+          setSelectedPersonId(saved.data.selectedPersonId);
+        } else if (initialPersonId && people.some(p => p.id === initialPersonId)) {
+          setSelectedPersonId(initialPersonId);
+        } else if (people.length > 0) {
+          setSelectedPersonId(people[0].id);
+        }
+      } else {
+        setNoteText('');
+        setFollowUpDate('');
+        setCreateFollowUpTask(false);
+        if (initialPersonId && people.some(p => p.id === initialPersonId)) {
+          setSelectedPersonId(initialPersonId);
+        } else if (people.length > 0 && !selectedPersonId) {
+          setSelectedPersonId(people[0].id);
+        }
       }
     }
-  }, [isOpen, initialMode, initialPersonId, people]);
+  }, [isOpen, initialMode, initialPersonId, people, getFormDraft]);
+
+  // Debounced auto-save draft for quick note
+  useEffect(() => {
+    if (!isOpen || mode !== 'quick_note') return;
+    if (!noteText.trim()) return;
+
+    const timer = setTimeout(() => {
+      saveFormDraft('quick_note', {
+        selectedPersonId,
+        noteText,
+        interactionType,
+        followUpDate,
+        createFollowUpTask
+      });
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [isOpen, mode, noteText, selectedPersonId, interactionType, followUpDate, createFollowUpTask, saveFormDraft]);
+
+  const handleDiscardDraft = () => {
+    discardFormDraft('quick_note');
+    setNoteText('');
+    setFollowUpDate('');
+    setCreateFollowUpTask(false);
+  };
 
   // Selected person object
   const selectedPerson = useMemo(() => {
@@ -174,6 +226,7 @@ export const QuickActionModal: React.FC<QuickActionModalProps> = ({
       entry: formattedEntry
     });
     setSubmittedPerson(selectedPerson);
+    discardFormDraft('quick_note');
   };
 
   if (!isOpen) return null;
@@ -573,25 +626,44 @@ export const QuickActionModal: React.FC<QuickActionModalProps> = ({
               )}
 
               {/* Action Buttons */}
-              <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setMode('menu')}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  variant="crimson"
-                  size="sm"
-                  disabled={!selectedPerson || !noteText.trim()}
-                  className="shadow-sm"
-                >
-                  <PenLine className="w-3.5 h-3.5 mr-1.5" />
-                  <span>Append Note to Profile</span>
-                </Button>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-border">
+                <div className="flex items-center gap-2">
+                  {noteText.trim() && (
+                    <span className="text-[11px] text-zinc-500 flex items-center gap-1.5 font-medium">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Draft auto-saved
+                    </span>
+                  )}
+                  {noteText.trim() && (
+                    <button
+                      type="button"
+                      onClick={handleDiscardDraft}
+                      className="text-[11px] text-rose-600 hover:text-rose-700 underline font-medium cursor-pointer"
+                    >
+                      Discard draft
+                    </button>
+                  )}
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setMode('menu')}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="crimson"
+                    size="sm"
+                    disabled={!selectedPerson || !noteText.trim()}
+                    className="shadow-sm"
+                  >
+                    <PenLine className="w-3.5 h-3.5 mr-1.5" />
+                    <span>Append Note to Profile</span>
+                  </Button>
+                </div>
               </div>
             </form>
           </div>

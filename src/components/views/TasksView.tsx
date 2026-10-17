@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   CheckSquare, 
   Plus, 
@@ -55,14 +55,23 @@ export const TasksView: React.FC<TasksViewProps> = ({
     currentUser,
     hasPermission,
     isSuperAdmin,
-    isStaffManager
+    isStaffManager,
+    workspaceState,
+    saveWorkspaceNavigation,
+    getFormDraft,
+    saveFormDraft,
+    discardFormDraft
   } = useCrm();
 
   const isManagerOrAdmin = isSuperAdmin || isStaffManager;
   const visibleTasks = isManagerOrAdmin ? tasks : scopedTasks;
 
-  const [activeTab, setActiveTab] = useState<TaskFilterTab>('All');
-  const [ownerFilter, setOwnerFilter] = useState<string>('All');
+  const [activeTab, setActiveTab] = useState<TaskFilterTab>(
+    (workspaceState?.viewPreferences?.tasksTab as any) || 'All'
+  );
+  const [ownerFilter, setOwnerFilter] = useState<string>(
+    workspaceState?.viewPreferences?.tasksFilter || 'All'
+  );
   const [priorityFilter, setPriorityFilter] = useState<string>('All');
   const [postFilter, setPostFilter] = useState<string>('All');
 
@@ -77,6 +86,58 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [newSource, setNewSource] = useState<TaskSource>('MANUAL');
   const [newAssignmentMethod, setNewAssignmentMethod] = useState<TaskAssignmentMethod>('MANUAL');
   const [newNotes, setNewNotes] = useState('');
+
+  // Persist tab & filter changes
+  useEffect(() => {
+    saveWorkspaceNavigation('tasks', {
+      activeSubTab: activeTab,
+      searchFilter: ownerFilter
+    });
+  }, [activeTab, ownerFilter, saveWorkspaceNavigation]);
+
+  // Restore draft when modal opens
+  useEffect(() => {
+    if (showAddModal) {
+      const saved = getFormDraft('new_task');
+      if (saved?.data) {
+        if (saved.data.newTitle) setNewTitle(saved.data.newTitle);
+        if (saved.data.newDueDate) setNewDueDate(saved.data.newDueDate);
+        if (saved.data.newPriority) setNewPriority(saved.data.newPriority);
+        if (saved.data.newOwner) setNewOwner(saved.data.newOwner);
+        if (saved.data.newAssignedToId) setNewAssignedToId(saved.data.newAssignedToId);
+        if (saved.data.newAssignedPostId) setNewAssignedPostId(saved.data.newAssignedPostId);
+        if (saved.data.newNotes) setNewNotes(saved.data.newNotes);
+      }
+    }
+  }, [showAddModal, getFormDraft]);
+
+  // Auto-save draft with debounce
+  useEffect(() => {
+    if (!showAddModal) return;
+    if (!newTitle.trim() && !newNotes.trim()) return;
+
+    const timer = setTimeout(() => {
+      saveFormDraft('new_task', {
+        newTitle,
+        newDueDate,
+        newPriority,
+        newOwner,
+        newAssignedToId,
+        newAssignedPostId,
+        newNotes
+      });
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [showAddModal, newTitle, newDueDate, newPriority, newOwner, newAssignedToId, newAssignedPostId, newNotes, saveFormDraft]);
+
+  const handleDiscardTaskDraft = () => {
+    discardFormDraft('new_task');
+    setNewTitle('');
+    setNewDueDate(new Date().toISOString().split('T')[0]);
+    setNewPriority('Medium');
+    setNewNotes('');
+  };
 
   // AI Task Assistant modal
   const [selectedTaskForAi, setSelectedTaskForAi] = useState<TaskItem | null>(null);
@@ -159,6 +220,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
       notes: newNotes.trim() || undefined
     });
 
+    // Discard saved draft and reset
+    discardFormDraft('new_task');
     setNewTitle('');
     setNewNotes('');
     setShowAddModal(false);
@@ -651,23 +714,42 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   />
                 </div>
 
-                <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowAddModal(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="crimson"
-                    size="sm"
-                    className="shadow-sm"
-                  >
-                    Save Task
-                  </Button>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-border">
+                  <div className="flex items-center gap-2">
+                    {(newTitle.trim() || newNotes.trim()) && (
+                      <span className="text-[11px] text-zinc-500 flex items-center gap-1.5 font-medium">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Draft auto-saved
+                      </span>
+                    )}
+                    {(newTitle.trim() || newNotes.trim()) && (
+                      <button
+                        type="button"
+                        onClick={handleDiscardTaskDraft}
+                        className="text-[11px] text-rose-600 hover:text-rose-700 underline font-medium cursor-pointer"
+                      >
+                        Discard draft
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowAddModal(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="crimson"
+                      size="sm"
+                      className="shadow-sm"
+                    >
+                      Save Task
+                    </Button>
+                  </div>
                 </div>
               </form>
             </motion.div>

@@ -12,6 +12,17 @@ import WebSocket from 'ws';
 if (typeof globalThis !== 'undefined' && !globalThis.WebSocket) {
   (globalThis as any).WebSocket = WebSocket;
 }
+if (typeof globalThis !== 'undefined' && !globalThis.localStorage) {
+  const store = new Map<string, string>();
+  (globalThis as any).localStorage = {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => store.set(key, String(value)),
+    removeItem: (key: string) => store.delete(key),
+    clear: () => store.clear(),
+    key: (i: number) => Array.from(store.keys())[i] || null,
+    get length() { return store.size; }
+  };
+}
 import { 
   sanitizeSecrets, 
   generateCorrelationId, 
@@ -152,6 +163,11 @@ import {
   mapFundingToDb,
   mapDbToFunding
 } from '../lib/services';
+import { 
+  workspaceManager, 
+  type UserWorkspaceState, 
+  type FormDraft 
+} from '../lib/workspaceManager.ts';
 
 
 // Lightweight Test Runner
@@ -4752,6 +4768,272 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     assert(appSrc.includes('activateProvisionedUser(targetEmail, actToken || undefined)'), 'App.tsx calls activateProvisionedUser on activation URL');
     assert(appSrc.includes('activateProvisionedUser(targetEmail)'), 'App.tsx calls activateProvisionedUser for Google OAuth resolution');
     assert(appSrc.includes('activateProvisionedUser(normalizedInput)'), 'App.tsx calls activateProvisionedUser for email login hydration');
+  }
+
+  // ==========================================================================
+  // Test Suite 38: Smart Resume Workspace & Persistent Multi-User State Management
+  // ==========================================================================
+  {
+    console.log('\nTest Suite 38: Smart Resume Workspace & Persistent Multi-User State Management');
+
+    const testUserA = 'u-smart-resume-a-' + Date.now();
+    const testUserB = 'u-smart-resume-b-' + Date.now();
+
+    // 1. Module Restoration: User leaves in Programs view -> restored to Programs view
+    await workspaceManager.saveWorkspace(testUserA, {
+      lastActiveTab: 'programs',
+      selectedRecordIds: { programId: 'prog-1' },
+      viewPreferences: { programsSearch: 'Youth Lab' }
+    });
+    const wsA = await workspaceManager.getWorkspace(testUserA);
+    assert(wsA.lastActiveTab === 'programs', 'Workspace restores last active tab: programs');
+    assert(wsA.selectedRecordIds.programId === 'prog-1', 'Workspace restores selected program ID: prog-1');
+    assert(wsA.viewPreferences.programsSearch === 'Youth Lab', 'Workspace restores active search query');
+
+    // 2. Refresh Persistence: Active route survives page reload / local storage retrieval
+    const rawLocal = localStorage.getItem(`tip_crm_workspace_${testUserA}`);
+    assert(typeof rawLocal === 'string' && rawLocal.length > 0, 'Workspace is persisted to local storage');
+    const parsedLocal = JSON.parse(rawLocal!);
+    assert(parsedLocal.userId === testUserA, 'Local storage workspace matches user ID');
+    assert(parsedLocal.lastActiveTab === 'programs', 'Local storage preserves active tab across reload');
+
+    // 3. Form Draft Recovery: Incomplete new contact form retains entered data across page reload
+    await workspaceManager.saveDraft(testUserA, 'new_person', {
+      newName: 'Zuri Adedayo',
+      newEmail: 'zuri@example.com',
+      newRole: 'Advisory Committee Lead'
+    });
+    const draftA = workspaceManager.getDraft(testUserA, 'new_person');
+    assert(draftA !== null, 'Form draft for new_person is successfully retrieved');
+    assert(draftA!.data.newName === 'Zuri Adedayo', 'Form draft preserves contact name');
+    assert(draftA!.data.newEmail === 'zuri@example.com', 'Form draft preserves contact email');
+    assert(draftA!.data.newRole === 'Advisory Committee Lead', 'Form draft preserves contact role');
+
+    // 4. Auto-Save Debounce: Multiple rapid draft edits succeed without corrupting state
+    for (let i = 0; i < 5; i++) {
+      await workspaceManager.saveDraft(testUserA, 'quick_note', {
+        noteText: `Rapid keystroke update step ${i}`,
+        selectedPersonId: 'p-1'
+      });
+    }
+    const debouncedDraft = workspaceManager.getDraft(testUserA, 'quick_note');
+    assert(debouncedDraft !== null, 'Rapid debounced draft saves succeed');
+    assert(debouncedDraft!.data.noteText === 'Rapid keystroke update step 4', 'Latest debounced draft payload is saved');
+
+    // 5. Save Indicators: Status transitions and subscription
+    const initialStatus = workspaceManager.getStatus();
+    assert(typeof initialStatus === 'string', 'workspaceManager.getStatus returns valid status string');
+    let listenerFired: boolean = false;
+    const unsub = workspaceManager.subscribeStatus(st => {
+      listenerFired = true;
+    });
+    assert(Boolean(listenerFired), 'subscribeStatus fires listener on registration');
+    unsub();
+
+    // 6. Multi-User Isolation: User A workspace and drafts are never visible to User B
+    const wsB = await workspaceManager.getWorkspace(testUserB);
+    assert(wsB.lastActiveTab === 'dashboard', 'User B receives independent default workspace tab');
+    const draftB = workspaceManager.getDraft(testUserB, 'new_person');
+    assert(draftB === null, 'User B cannot see User A form drafts (strict user isolation)');
+    assert(Object.keys(wsB.drafts).length === 0, 'User B drafts collection is initially empty');
+
+    // In-memory cache purge on user switch / logout
+    workspaceManager.purgeUserSessionMemory(testUserA);
+    // After memory purge, getWorkspace reloads cleanly from local storage without cross-user leakage
+    const reloadedA = await workspaceManager.getWorkspace(testUserA);
+    assert(reloadedA.userId === testUserA, 'Reloaded workspace after session purge correctly identifies User A');
+
+    // 7. Permission Denial Handling: Revoked/Restricted permissions fallback safely
+    const restrictedWs: UserWorkspaceState = {
+      version: 1,
+      userId: testUserA,
+      lastActiveTab: 'funding',
+      selectedRecordIds: {},
+      viewPreferences: {},
+      drafts: {},
+      updatedAt: Date.now(),
+      syncedAt: null
+    };
+    const volunteerValidation = workspaceManager.validateWorkspaceForUser(
+      restrictedWs,
+      'volunteer',
+      { people: [], organizations: [], programs: [], events: [] }
+    );
+    assert(volunteerValidation.adjusted === true, 'Volunteer accessing funding is flagged for adjustment');
+    assert(volunteerValidation.validWorkspace.lastActiveTab === 'dashboard', 'Volunteer is safely redirected to Operational Dashboard');
+    assert(typeof volunteerValidation.reason === 'string' && volunteerValidation.reason.includes('Volunteer'), 'Informative fallback reason provided for volunteer');
+
+    // 8. Offline Resume: Workspace restores from local cache safely
+    const offlineWs = await workspaceManager.getWorkspace(testUserA);
+    assert(offlineWs.userId === testUserA, 'Offline fallback returns valid workspace for user');
+
+    // 9. Draft Discard: Unwanted draft can be deliberately removed
+    await workspaceManager.discardDraft(testUserA, 'quick_note');
+    const discardedDraft = workspaceManager.getDraft(testUserA, 'quick_note');
+    assert(discardedDraft === null, 'Discarded draft is completely removed from drafts collection');
+
+    // 10. Deleted Record Handling: Deleted entity resets selection with explanation
+    const deletedRecordWs: UserWorkspaceState = {
+      version: 1,
+      userId: testUserA,
+      lastActiveTab: 'people',
+      selectedRecordIds: { personId: 'deleted-person-999' },
+      viewPreferences: {},
+      drafts: {},
+      updatedAt: Date.now(),
+      syncedAt: null
+    };
+    const deletedValidation = workspaceManager.validateWorkspaceForUser(
+      deletedRecordWs,
+      'staff_member',
+      { people: [{ id: 'existing-p-1' }] }
+    );
+    assert(deletedValidation.adjusted === true, 'Deleted record reference triggers adjustment');
+    assert(deletedValidation.validWorkspace.selectedRecordIds.personId === null, 'Deleted record ID is reset to null');
+    assert(typeof deletedValidation.reason === 'string' && deletedValidation.reason.includes('deleted'), 'Reason explains record was deleted or is no longer accessible');
+
+    // 11. Workflow State Preservation: Complex viewPreferences survive
+    await workspaceManager.saveWorkspace(testUserA, {
+      viewPreferences: {
+        peopleFilter: 'Partner',
+        peopleSearch: 'Community',
+        tasksTab: 'Upcoming',
+        eventsFilter: 'Workshop'
+      }
+    });
+    const workflowWs = await workspaceManager.getWorkspace(testUserA);
+    assert(workflowWs.viewPreferences.peopleFilter === 'Partner', 'Preserves people relationship filter');
+    assert(workflowWs.viewPreferences.peopleSearch === 'Community', 'Preserves people search text');
+    assert(workflowWs.viewPreferences.tasksTab === 'Upcoming', 'Preserves tasks active tab');
+    assert(workflowWs.viewPreferences.eventsFilter === 'Workshop', 'Preserves events type filter');
+
+    // 12. Secret Exclusion: Workspace state never contains passwords or credentials
+    const serializedWs = JSON.stringify(workflowWs).toLowerCase();
+    assert(!serializedWs.includes('password'), 'Workspace state contains zero password fields');
+    assert(!serializedWs.includes('secret_key'), 'Workspace state contains zero secret keys');
+    assert(!serializedWs.includes('tip_act_'), 'Workspace state contains zero activation tokens');
+
+    // 13. Server-Side Workspace API Authentication & RBAC
+    // A. Unauthenticated request to /api/workspace -> 401
+    const unauthWsReq = createMockReq({
+      method: 'GET',
+      url: `/api/workspace?userId=${testUserA}`
+    });
+    const unauthWsRes = createMockRes();
+    await aiMiddlewareHandler(unauthWsReq, unauthWsRes.res);
+    assert(unauthWsRes.getStatusCode() === 401, 'Unauthenticated request to GET /api/workspace rejected with 401');
+
+    // B. User B attempting to view User A workspace -> 403 Forbidden
+    const crossUserReq = createMockReq({
+      method: 'GET',
+      url: `/api/workspace?userId=${testUserA}`,
+      headers: {
+        'x-user-id': testUserB,
+        'x-user-role': 'volunteer'
+      }
+    });
+    const crossUserRes = createMockRes();
+    await aiMiddlewareHandler(crossUserReq, crossUserRes.res);
+    assert(crossUserRes.getStatusCode() === 403, 'Cross-user workspace access rejected with 403 Forbidden');
+
+    // C. User A saving workspace to server API -> 200 OK
+    const postWsReq = createMockReq({
+      method: 'POST',
+      url: '/api/workspace',
+      headers: {
+        'x-user-id': testUserA,
+        'x-user-role': 'staff_member',
+        'content-type': 'application/json'
+      },
+      body: {
+        userId: testUserA,
+        workspace: {
+          version: 1,
+          userId: testUserA,
+          lastActiveTab: 'tasks',
+          selectedRecordIds: {},
+          viewPreferences: { tasksTab: 'Today' },
+          drafts: {
+            new_task: {
+              formId: 'new_task',
+              data: { newTitle: 'Server persisted task' },
+              updatedAt: Date.now()
+            }
+          },
+          updatedAt: Date.now()
+        }
+      }
+    });
+    const postWsRes = createMockRes();
+    await aiMiddlewareHandler(postWsReq, postWsRes.res);
+    assert(postWsRes.getStatusCode() === 200, 'POST /api/workspace persists workspace state with 200 OK');
+    const postWsBody = postWsRes.getData();
+    assert(postWsBody.success === true, 'Server workspace response confirms success: true');
+    assert(typeof postWsBody.syncedAt === 'number', 'Server workspace returns authoritative syncedAt timestamp');
+
+    // D. User A retrieving workspace from server API -> 200 OK with matching state
+    const getWsReq = createMockReq({
+      method: 'GET',
+      url: `/api/workspace?userId=${testUserA}`,
+      headers: {
+        'x-user-id': testUserA,
+        'x-user-role': 'staff_member'
+      }
+    });
+    const getWsRes = createMockRes();
+    await aiMiddlewareHandler(getWsReq, getWsRes.res);
+    assert(getWsRes.getStatusCode() === 200, 'GET /api/workspace returns 200 OK for authorized owner');
+    const getWsBody = getWsRes.getData();
+    assert(getWsBody.workspace.lastActiveTab === 'tasks', 'Server returns saved lastActiveTab: tasks');
+    assert(getWsBody.workspace.drafts.new_task.data.newTitle === 'Server persisted task', 'Server returns preserved form draft');
+
+    // E. Discarding draft via DELETE /api/workspace/draft
+    const deleteDraftReq = createMockReq({
+      method: 'DELETE',
+      url: `/api/workspace/draft?userId=${testUserA}&formId=new_task`,
+      headers: {
+        'x-user-id': testUserA,
+        'x-user-role': 'staff_member'
+      }
+    });
+    const deleteDraftRes = createMockRes();
+    await aiMiddlewareHandler(deleteDraftReq, deleteDraftRes.res);
+    assert(deleteDraftRes.getStatusCode() === 200, 'DELETE /api/workspace/draft returns 200 OK');
+
+    // 14. Frontend Source Code Integrations Verification
+    // A. CrmContext declares workspace methods and state
+    const crmContextSrc2 = fs.readFileSync(path.resolve(process.cwd(), 'src/context/CrmContext.tsx'), 'utf-8');
+    assert(crmContextSrc2.includes('workspaceState: UserWorkspaceState | null;'), 'CrmContextType declares workspaceState');
+    assert(crmContextSrc2.includes('workspaceSaveStatus: WorkspaceSaveStatus;'), 'CrmContextType declares workspaceSaveStatus');
+    assert(crmContextSrc2.includes('saveWorkspaceNavigation:'), 'CrmContextType declares saveWorkspaceNavigation');
+    assert(crmContextSrc2.includes('saveFormDraft:'), 'CrmContextType declares saveFormDraft');
+    assert(crmContextSrc2.includes('getFormDraft:'), 'CrmContextType declares getFormDraft');
+    assert(crmContextSrc2.includes('discardFormDraft:'), 'CrmContextType declares discardFormDraft');
+    assert(crmContextSrc2.includes('workspaceManager.purgeUserSessionMemory(currentUser.id)'), 'CrmContext purges user session memory on user switch');
+
+    // B. App.tsx renders smart-resume-banner and handles navigation persistence
+    const appSrc2 = fs.readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf-8');
+    assert(appSrc2.includes('id="smart-resume-banner"'), 'App.tsx renders smart-resume-banner');
+    assert(appSrc2.includes('workspaceManager.getWorkspace(currentUser.id)'), 'App.tsx retrieves workspace on mount');
+    assert(appSrc2.includes('workspaceManager.validateWorkspaceForUser'), 'App.tsx validates restored workspace');
+    assert(appSrc2.includes('workspaceManager.purgeUserSessionMemory(currentUserId)'), 'App.tsx purges workspace memory on logout');
+
+    // C. Form view components have draft auto-save and discard mechanisms
+    const quickModalSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/components/QuickActionModal.tsx'), 'utf-8');
+    assert(quickModalSrc.includes("saveFormDraft('quick_note'"), 'QuickActionModal auto-saves quick_note draft');
+    assert(quickModalSrc.includes("discardFormDraft('quick_note'"), 'QuickActionModal supports discarding quick_note draft');
+
+    const peopleViewSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/components/views/PeopleView.tsx'), 'utf-8');
+    assert(peopleViewSrc.includes("saveFormDraft('new_person'"), 'PeopleView auto-saves new_person draft');
+    assert(peopleViewSrc.includes("discardFormDraft('new_person'"), 'PeopleView supports discarding new_person draft');
+
+    const tasksViewSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/components/views/TasksView.tsx'), 'utf-8');
+    assert(tasksViewSrc.includes("saveFormDraft('new_task'"), 'TasksView auto-saves new_task draft');
+    assert(tasksViewSrc.includes("discardFormDraft('new_task'"), 'TasksView supports discarding new_task draft');
+
+    const eventsViewSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/components/views/EventsView.tsx'), 'utf-8');
+    assert(eventsViewSrc.includes("saveFormDraft('new_event'"), 'EventsView auto-saves new_event draft');
+    assert(eventsViewSrc.includes("discardFormDraft('new_event'"), 'EventsView supports discarding new_event draft');
   }
 
   // --------------------------------------------------------------------------

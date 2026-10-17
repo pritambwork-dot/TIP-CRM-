@@ -42,7 +42,8 @@ import {
   AiBudgetConfig,
   UserSessionRecord,
   UserSessionSummary,
-  UserSessionStats
+  UserSessionStats,
+  NavTab
 } from '../types';
 import { hashPassword } from '../lib/passwordSecurity';
 import { 
@@ -107,6 +108,12 @@ import {
   DocumentsService 
 } from '../lib/services';
 import { syncEngine } from '../lib/syncEngine';
+import { 
+  workspaceManager, 
+  UserWorkspaceState, 
+  FormDraft, 
+  WorkspaceSaveStatus 
+} from '../lib/workspaceManager';
 
 export interface PermissionsUtility {
   can: (action: ActionType, resource: ResourceType) => boolean;
@@ -364,6 +371,15 @@ interface CrmContextType {
   // Supabase Database Connection & Readiness
   databaseReadiness: DatabaseReadinessReport | null;
   refreshDatabaseReadiness: (forceRefresh?: boolean) => Promise<DatabaseReadinessReport>;
+
+  // Persistent Workspace & Session State
+  workspaceState: UserWorkspaceState | null;
+  workspaceSaveStatus: WorkspaceSaveStatus;
+  saveWorkspaceNavigation: (tab: NavTab, meta?: { selectedPersonId?: string | null; selectedOrgId?: string | null; selectedProgramId?: string | null; selectedEventId?: string | null; searchFilter?: string; activeSubTab?: string }) => void;
+  saveFormDraft: (formId: string, data: Record<string, any>) => void;
+  getFormDraft: (formId: string) => FormDraft | null;
+  discardFormDraft: (formId: string) => void;
+  clearAllFormDrafts: () => void;
 }
 
 const CrmContext = createContext<CrmContextType | undefined>(undefined);
@@ -772,6 +788,88 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return report;
   };
 
+  // Persistent Workspace & Session State
+  const [workspaceState, setWorkspaceState] = useState<UserWorkspaceState | null>(null);
+  const [workspaceSaveStatus, setWorkspaceSaveStatus] = useState<WorkspaceSaveStatus>(() => workspaceManager.getStatus());
+
+  useEffect(() => {
+    const unsub = workspaceManager.subscribeStatus(setWorkspaceSaveStatus);
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      workspaceManager.getWorkspace(currentUser.id).then(ws => {
+        setWorkspaceState(ws);
+      }).catch(() => {});
+    }
+  }, [currentUser?.id]);
+
+  const saveWorkspaceNavigation = useCallback((tab: NavTab, meta?: { selectedPersonId?: string | null; selectedOrgId?: string | null; selectedProgramId?: string | null; selectedEventId?: string | null; searchFilter?: string; activeSubTab?: string }) => {
+    if (!currentUser?.id) return;
+    workspaceManager.saveNavigation(currentUser.id, {
+      activeTab: tab,
+      recordIds: {
+        personId: meta?.selectedPersonId,
+        organizationId: meta?.selectedOrgId,
+        programId: meta?.selectedProgramId,
+        eventId: meta?.selectedEventId
+      },
+      viewPreferences: meta?.searchFilter || meta?.activeSubTab ? {
+        [`${tab}Search`]: meta?.searchFilter,
+        [`${tab}Tab`]: meta?.activeSubTab
+      } : undefined
+    });
+    setWorkspaceState(prev => prev ? {
+      ...prev,
+      lastActiveTab: tab,
+      selectedRecordIds: {
+        ...prev.selectedRecordIds,
+        ...(meta?.selectedPersonId !== undefined ? { personId: meta.selectedPersonId } : {}),
+        ...(meta?.selectedOrgId !== undefined ? { organizationId: meta.selectedOrgId } : {}),
+        ...(meta?.selectedProgramId !== undefined ? { programId: meta.selectedProgramId } : {}),
+        ...(meta?.selectedEventId !== undefined ? { eventId: meta.selectedEventId } : {})
+      }
+    } : null);
+  }, [currentUser?.id]);
+
+  const saveFormDraft = useCallback((formId: string, data: Record<string, any>) => {
+    if (!currentUser?.id) return;
+    workspaceManager.saveDraft(currentUser.id, formId, data).catch(() => {});
+    setWorkspaceState(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        drafts: {
+          ...prev.drafts,
+          [formId]: { formId, data, updatedAt: Date.now() }
+        }
+      };
+    });
+  }, [currentUser?.id]);
+
+  const getFormDraft = useCallback((formId: string) => {
+    if (!currentUser?.id) return null;
+    return workspaceManager.getDraft(currentUser.id, formId);
+  }, [currentUser?.id]);
+
+  const discardFormDraft = useCallback((formId: string) => {
+    if (!currentUser?.id) return;
+    workspaceManager.discardDraft(currentUser.id, formId).catch(() => {});
+    setWorkspaceState(prev => {
+      if (!prev) return null;
+      const drafts = { ...prev.drafts };
+      delete drafts[formId];
+      return { ...prev, drafts };
+    });
+  }, [currentUser?.id]);
+
+  const clearAllFormDrafts = useCallback(() => {
+    if (!currentUser?.id) return;
+    workspaceManager.clearAllDrafts(currentUser.id).catch(() => {});
+    setWorkspaceState(prev => prev ? { ...prev, drafts: {} } : null);
+  }, [currentUser?.id]);
+
   useEffect(() => {
     if (currentUser?.id) {
       syncEngine.setUserId(currentUser.id);
@@ -881,6 +979,9 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const switchUser = (userId: string) => {
     const found = users.find(u => u.id === userId);
     if (found) {
+      if (currentUser?.id) {
+        workspaceManager.purgeUserSessionMemory(currentUser.id);
+      }
       // Clear previous user's transient action state to prevent cross-account execution
       setPendingActionPreview(null);
       setCurrentUser(found);
@@ -2765,7 +2866,14 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sessionStats,
       isLoadingSessions,
       fetchUserSessions,
-      adminTerminateSession
+      adminTerminateSession,
+      workspaceState,
+      workspaceSaveStatus,
+      saveWorkspaceNavigation,
+      saveFormDraft,
+      getFormDraft,
+      discardFormDraft,
+      clearAllFormDrafts
     }}>
       {children}
     </CrmContext.Provider>

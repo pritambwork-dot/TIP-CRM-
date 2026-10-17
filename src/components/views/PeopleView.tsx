@@ -51,9 +51,23 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
   onNavigateToProgram,
   onOpenImport
 }) => {
-  const { scopedPeople, people, addPerson, currentUser, hasPermission, Permissions } = useCrm();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFilter, setSelectedFilter] = useState<RelationshipType | 'All'>('All');
+  const { 
+    scopedPeople, 
+    people, 
+    addPerson, 
+    currentUser, 
+    hasPermission, 
+    Permissions,
+    workspaceState,
+    saveWorkspaceNavigation,
+    getFormDraft,
+    saveFormDraft,
+    discardFormDraft
+  } = useCrm();
+  const [searchQuery, setSearchQuery] = useState(workspaceState?.viewPreferences?.peopleSearch || '');
+  const [selectedFilter, setSelectedFilter] = useState<RelationshipType | 'All'>(
+    (workspaceState?.viewPreferences?.peopleFilter as any) || 'All'
+  );
   
   // Add Person Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -70,9 +84,69 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
   const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 150);
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+      saveWorkspaceNavigation('people', {
+        selectedPersonId,
+        searchFilter: searchQuery,
+        activeSubTab: selectedFilter
+      });
+    }, 200);
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [searchQuery, selectedFilter, selectedPersonId, saveWorkspaceNavigation]);
+
+  // Restore draft when modal opens
+  useEffect(() => {
+    if (showAddModal) {
+      const saved = getFormDraft('new_person');
+      if (saved?.data) {
+        if (saved.data.newName) setNewName(saved.data.newName);
+        if (saved.data.newEmail) setNewEmail(saved.data.newEmail);
+        if (saved.data.newRole) setNewRole(saved.data.newRole);
+        if (saved.data.newOrgName) setNewOrgName(saved.data.newOrgName);
+        if (saved.data.newPhone) setNewPhone(saved.data.newPhone);
+        if (saved.data.newCity) setNewCity(saved.data.newCity);
+        if (saved.data.newRelationshipTypes) setNewRelationshipTypes(saved.data.newRelationshipTypes);
+        if (saved.data.newInterests) setNewInterests(saved.data.newInterests);
+        if (saved.data.newNotes) setNewNotes(saved.data.newNotes);
+      }
+    }
+  }, [showAddModal, getFormDraft]);
+
+  // Auto-save draft with debounce
+  useEffect(() => {
+    if (!showAddModal) return;
+    if (!newName.trim() && !newEmail.trim() && !newRole.trim() && !newOrgName.trim()) return;
+
+    const timer = setTimeout(() => {
+      saveFormDraft('new_person', {
+        newName,
+        newEmail,
+        newRole,
+        newOrgName,
+        newPhone,
+        newCity,
+        newRelationshipTypes,
+        newInterests,
+        newNotes
+      });
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [showAddModal, newName, newEmail, newRole, newOrgName, newPhone, newCity, newRelationshipTypes, newInterests, newNotes, saveFormDraft]);
+
+  const handleDiscardPersonDraft = () => {
+    discardFormDraft('new_person');
+    setNewName('');
+    setNewEmail('');
+    setNewRole('');
+    setNewOrgName('');
+    setNewPhone('');
+    setNewCity('Toronto');
+    setNewRelationshipTypes(['Partner']);
+    setNewInterests('');
+    setNewNotes('');
+  };
 
   // Filter and search on scoped people collection with debouncing and memoization
   const filteredPeople = useMemo(() => {
@@ -114,7 +188,8 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
       mailchimpStatus: 'subscribed'
     });
 
-    // Reset form
+    // Reset form & discard draft
+    discardFormDraft('new_person');
     setNewName('');
     setNewEmail('');
     setNewRole('');
@@ -492,23 +567,42 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
                   />
                 </div>
 
-                <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowAddModal(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="crimson"
-                    size="sm"
-                    className="shadow-sm"
-                  >
-                    Add to Directory
-                  </Button>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-border">
+                  <div className="flex items-center gap-2">
+                    {(newName.trim() || newEmail.trim() || newRole.trim()) && (
+                      <span className="text-[11px] text-zinc-500 flex items-center gap-1.5 font-medium">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Draft auto-saved
+                      </span>
+                    )}
+                    {(newName.trim() || newEmail.trim() || newRole.trim()) && (
+                      <button
+                        type="button"
+                        onClick={handleDiscardPersonDraft}
+                        className="text-[11px] text-rose-600 hover:text-rose-700 underline font-medium cursor-pointer"
+                      >
+                        Discard draft
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowAddModal(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="crimson"
+                      size="sm"
+                      className="shadow-sm"
+                    >
+                      Add to Directory
+                    </Button>
+                  </div>
                 </div>
               </form>
             </motion.div>

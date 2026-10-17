@@ -246,6 +246,92 @@ function getProvisionedAccount(email: string): ProvisionedAccountRecord | undefi
   return provisionedAccountsStore[email.toLowerCase().trim()];
 }
 
+// --------------------------------------------------------------------------
+// User Workspaces Persistent Store & Server-Side Cloud Sync
+// --------------------------------------------------------------------------
+const USER_WORKSPACES_FILE = path.resolve(process.cwd(), 'server', 'user_workspaces.json');
+const userWorkspacesStore: Record<string, any> = {};
+
+try {
+  if (fs.existsSync(USER_WORKSPACES_FILE)) {
+    const data = JSON.parse(fs.readFileSync(USER_WORKSPACES_FILE, 'utf-8'));
+    if (data && typeof data === 'object') {
+      Object.assign(userWorkspacesStore, data);
+    }
+  }
+} catch {}
+
+function saveServerUserWorkspace(userId: string, workspace: any) {
+  userWorkspacesStore[userId] = {
+    ...workspace,
+    userId,
+    updatedAt: Date.now()
+  };
+  try {
+    fs.writeFileSync(USER_WORKSPACES_FILE, JSON.stringify(userWorkspacesStore, null, 2), 'utf-8');
+  } catch {}
+}
+
+async function syncWorkspaceToSupabase(userId: string, workspace: any) {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
+  if (!url || !key) return;
+  try {
+    await fetch(`${url}/rest/v1/user_workspaces`, {
+      method: 'POST',
+      headers: {
+        'apikey': key,
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        last_active_tab: workspace.lastActiveTab || 'dashboard',
+        selected_record_ids: workspace.selectedRecordIds || {},
+        view_preferences: workspace.viewPreferences || {},
+        drafts: workspace.drafts || {},
+        version: workspace.version || 1,
+        updated_at: new Date().toISOString()
+      })
+    }).catch(() => {});
+  } catch {}
+}
+
+async function fetchWorkspaceFromSupabase(userId: string): Promise<any | null> {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
+  if (!url || !key) return null;
+  try {
+    const res = await fetch(`${url}/rest/v1/user_workspaces?user_id=eq.${encodeURIComponent(userId)}&select=*`, {
+      method: 'GET',
+      headers: {
+        'apikey': key,
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (res.ok) {
+      const rows = await res.json();
+      if (Array.isArray(rows) && rows.length > 0) {
+        const row = rows[0];
+        return {
+          version: row.version || 1,
+          userId: row.user_id,
+          lastActiveTab: row.last_active_tab || 'dashboard',
+          selectedRecordIds: row.selected_record_ids || {},
+          viewPreferences: row.view_preferences || {},
+          drafts: row.drafts || {},
+          updatedAt: new Date(row.updated_at).getTime(),
+          syncedAt: Date.now()
+        };
+      }
+    }
+  } catch {}
+  return null;
+}
+
+
 // Helper to safely parse JSON body from incoming HTTP request
 function parseRequestBody(req: IncomingMessage): Promise<any> {
   if ((req as any).body) {
@@ -385,7 +471,7 @@ export async function aiMiddlewareHandler(req: IncomingMessage, res: ServerRespo
   const rawUrl = req.url || '';
   const url = rawUrl.split('?')[0];
 
-  if (!url.startsWith('/api/ai') && !url.startsWith('/api/auth') && !url.startsWith('/api/audit') && !url.startsWith('/api/storage')) {
+  if (!url.startsWith('/api/ai') && !url.startsWith('/api/auth') && !url.startsWith('/api/audit') && !url.startsWith('/api/storage') && !url.startsWith('/api/workspace')) {
     return false; // Not an API route, continue to next Vite handler
   }
 
@@ -2742,6 +2828,121 @@ Rules:
         success: true,
         message: `Session terminated. User logged out after using the CRM for ${result.session?.durationFormatted}.`,
         session: result.session
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 11g. GET /api/workspace — Retrieve User Workspace State
+    // --------------------------------------------------------------------------
+    if (url === '/api/workspace' && req.method === 'GET') {
+      const actor = getRequestActor(req, {});
+      if (actor.sessionError || !actor.authenticated || actor.role === 'unauthenticated') {
+        sendSafeError(res, 401, 'Unauthorized: Active user session required.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      const queryString = (req.url || '').split('?')[1] || '';
+      const params = new URLSearchParams(queryString);
+      const targetUserId = params.get('userId') || actor.id;
+
+      // Security Isolation Invariant: Users can only read their own workspace unless super_admin
+      if (targetUserId !== actor.id && actor.role !== 'super_admin') {
+        sendSafeError(res, 403, 'Forbidden: You can only access your own saved workspace.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      // Try loading from Supabase first (if connected)
+      let ws = await fetchWorkspaceFromSupabase(targetUserId);
+      if (!ws && userWorkspacesStore[targetUserId]) {
+        ws = userWorkspacesStore[targetUserId];
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        userId: targetUserId,
+        workspace: ws || null
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 11h. POST /api/workspace — Save User Workspace State & Form Drafts
+    // --------------------------------------------------------------------------
+    if (url === '/api/workspace' && req.method === 'POST') {
+      const body = await parseRequestBody(req);
+      const actor = getRequestActor(req, body);
+
+      if (actor.sessionError || !actor.authenticated || actor.role === 'unauthenticated') {
+        sendSafeError(res, 401, 'Unauthorized: Active user session required.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      const targetUserId = body?.userId || actor.id;
+      const workspacePayload = body?.workspace || {};
+
+      // Security Isolation Invariant: Users can only modify their own workspace unless super_admin
+      if (targetUserId !== actor.id && actor.role !== 'super_admin') {
+        sendSafeError(res, 403, 'Forbidden: You cannot modify another user\'s saved workspace.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      // Sanitize workspace payload (strip secrets, tokens, or scripts)
+      const sanitizedWorkspace = {
+        version: workspacePayload.version || 1,
+        userId: targetUserId,
+        lastActiveTab: typeof workspacePayload.lastActiveTab === 'string' ? workspacePayload.lastActiveTab.slice(0, 50) : 'dashboard',
+        selectedRecordIds: workspacePayload.selectedRecordIds && typeof workspacePayload.selectedRecordIds === 'object' ? workspacePayload.selectedRecordIds : {},
+        viewPreferences: workspacePayload.viewPreferences && typeof workspacePayload.viewPreferences === 'object' ? workspacePayload.viewPreferences : {},
+        drafts: workspacePayload.drafts && typeof workspacePayload.drafts === 'object' ? workspacePayload.drafts : {},
+        updatedAt: Date.now()
+      };
+
+      saveServerUserWorkspace(targetUserId, sanitizedWorkspace);
+      syncWorkspaceToSupabase(targetUserId, sanitizedWorkspace).catch(() => {});
+
+      sendJson(res, 200, {
+        success: true,
+        userId: targetUserId,
+        syncedAt: sanitizedWorkspace.updatedAt
+      });
+      return true;
+    }
+
+    // --------------------------------------------------------------------------
+    // 11i. DELETE /api/workspace/draft — Discard Form Draft
+    // --------------------------------------------------------------------------
+    if (url === '/api/workspace/draft' && req.method === 'DELETE') {
+      const actor = getRequestActor(req, {});
+      if (actor.sessionError || !actor.authenticated || actor.role === 'unauthenticated') {
+        sendSafeError(res, 401, 'Unauthorized: Active user session required.', ERROR_CODES.UNAUTHORIZED);
+        return true;
+      }
+
+      const queryString = (req.url || '').split('?')[1] || '';
+      const params = new URLSearchParams(queryString);
+      const targetUserId = params.get('userId') || actor.id;
+      const formId = params.get('formId');
+
+      if (targetUserId !== actor.id && actor.role !== 'super_admin') {
+        sendSafeError(res, 403, 'Forbidden: You cannot modify another user\'s drafts.', ERROR_CODES.FORBIDDEN);
+        return true;
+      }
+
+      if (!formId) {
+        sendSafeError(res, 400, 'Bad Request: formId parameter is required.', ERROR_CODES.BAD_REQUEST);
+        return true;
+      }
+
+      if (userWorkspacesStore[targetUserId]?.drafts) {
+        delete userWorkspacesStore[targetUserId].drafts[formId];
+        saveServerUserWorkspace(targetUserId, userWorkspacesStore[targetUserId]);
+        syncWorkspaceToSupabase(targetUserId, userWorkspacesStore[targetUserId]).catch(() => {});
+      }
+
+      sendJson(res, 200, {
+        success: true,
+        message: `Draft ${formId} discarded.`
       });
       return true;
     }
