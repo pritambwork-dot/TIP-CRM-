@@ -1869,6 +1869,32 @@ Rules:
         return true;
       }
 
+      // Security Invariant: Primary Super Admin role is immutable and cannot be demoted or changed
+      const userEmail = typeof req.headers['x-user-email'] === 'string' ? req.headers['x-user-email'] : body?.email;
+      const isPrimaryAdmin = userId === 'u-admin-090' || 
+                            actor.id === 'u-admin-090' || 
+                            userEmail === 'theinclusionproject.crm@gmail.com';
+      if (isPrimaryAdmin && targetRoleId !== 'super_admin') {
+        recordAuditEvent({
+          actorId: userId || actor.id,
+          actorName: actor.name || 'TIP Super Admin',
+          actorRole: 'super_admin',
+          action: 'AUTH_ROLE_DEMOTION_DENIED',
+          resourceType: 'UserRole',
+          resourceId: userId || actor.id,
+          outcome: 'FAILURE',
+          description: `Primary Super Admin role is immutable. Attempted switch/demotion to '${targetRoleId}' was rejected.`,
+          ipAddress: clientIp
+        });
+        sendSafeError(
+          res,
+          403,
+          'Forbidden: The Primary Super Administrator role is protected and cannot be changed or demoted.',
+          ERROR_CODES.FORBIDDEN
+        );
+        return true;
+      }
+
       // Check user account status
       if (userStatus && userStatus !== 'approved') {
         recordAuditEvent({
@@ -2211,8 +2237,23 @@ Rules:
         correlationId
       });
 
+      if (isProduction() && emailResult.deliveryStatus !== 'SENT') {
+        sendSafeError(
+          res,
+          502,
+          `Email Delivery Failed: Email gateway (${emailResult.provider}) could not dispatch invitation to ${email}. Check SMTP credentials.`,
+          ERROR_CODES.SERVICE_UNAVAILABLE,
+          {
+            deliveryStatus: emailResult.deliveryStatus,
+            provider: emailResult.provider,
+            recipient: emailResult.recipient
+          }
+        );
+        return true;
+      }
+
       sendJson(res, 200, {
-        success: true,
+        success: emailResult.success,
         sentFrom: emailResult.sentFrom,
         recipient: emailResult.recipient,
         messageId: emailResult.messageId,
@@ -2222,7 +2263,7 @@ Rules:
         activationUrl: emailResult.activationUrl,
         previewHtml: emailResult.previewHtml,
         message: emailResult.provider === 'local_outbox'
-          ? `Welcome invitation email recorded in local outbox for ${email} from ${emailResult.sentFrom}.`
+          ? `Welcome invitation email recorded in local outbox (development simulation) for ${email} from ${emailResult.sentFrom}.`
           : `Welcome invitation email accepted by ${emailResult.provider} for delivery to ${email} from ${emailResult.sentFrom}.`
       });
       return true;

@@ -3013,6 +3013,13 @@ async function runTests() {
   assert(!deploySql.includes('eyJh'), 'deploy_all.sql contains zero JWT tokens');
   assert(!deploySql.includes('service_role_key'), 'deploy_all.sql contains zero service role secrets');
 
+  // 12. Primary Super Admin Immutability & Last Admin Triggers
+  assert(deploySql.includes('protect_primary_super_admin()'), 'deploy_all.sql defines protect_primary_super_admin function');
+  assert(deploySql.includes('trg_protect_primary_super_admin'), 'deploy_all.sql attaches trg_protect_primary_super_admin trigger to public.users');
+  assert(deploySql.includes('protect_primary_super_admin_roles()'), 'deploy_all.sql defines protect_primary_super_admin_roles function');
+  assert(deploySql.includes('trg_protect_primary_super_admin_roles'), 'deploy_all.sql attaches trg_protect_primary_super_admin_roles trigger to public.user_roles');
+  assert(deploySql.includes('theinclusionproject.crm@gmail.com'), 'deploy_all.sql binds immutability to theinclusionproject.crm@gmail.com');
+
   // ==========================================================================
   // Test Suite 26: Contacts Import Engine (CSV File & Google Folder Parsing)
   // ==========================================================================
@@ -4536,6 +4543,104 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
       accountStatus: 'pending'
     });
     assert(pendingText.includes('If your account requires administrator approval, access will remain restricted until the required approval is completed.'), 'Pending account plain-text fallback contains approval notice');
+  }
+
+  // ==========================================================================
+  // Test Suite 36: Immutable Primary Super Admin & Production Email Truthfulness
+  // ==========================================================================
+  console.log('\nTest Suite 36: Immutable Primary Super Admin & Production Email Truthfulness');
+  {
+    // 1. Primary Super Admin cannot demote themselves via API
+    const { sessionToken: adminSessionToken } = createSession({
+      id: 'u-admin-090',
+      name: 'TIP Super Admin',
+      email: 'theinclusionproject.crm@gmail.com',
+      role: 'super_admin'
+    });
+
+    const demoteReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/switch-role',
+      headers: {
+        cookie: `tip_session=${adminSessionToken}`,
+        'content-type': 'application/json',
+        'x-user-id': 'u-admin-090',
+        'x-user-role': 'super_admin',
+        'x-user-email': 'theinclusionproject.crm@gmail.com',
+        'x-csrf-token': generateCsrfToken('u-admin-090')
+      },
+      body: {
+        userId: 'u-admin-090',
+        targetRoleId: 'staff_manager',
+        assignedRoleIds: ['super_admin']
+      }
+    });
+    const demoteRes = createMockRes();
+    await aiMiddlewareHandler(demoteReq, demoteRes.res);
+    assert(demoteRes.getStatusCode() === 403, 'Primary Super Admin self-demotion returns 403 Forbidden');
+    const demoteData = demoteRes.getData();
+    assert(demoteData.error && (demoteData.error.includes('protected') || demoteData.error.includes('immutable')), 'Demotion response explains that Primary Super Administrator is immutable or protected');
+
+    // 2. Audit Trail logs AUTH_ROLE_DEMOTION_DENIED
+    const { logs: demoteAuditLogs } = queryAuditLogs({ action: 'AUTH_ROLE_DEMOTION_DENIED' });
+    assert(demoteAuditLogs.length > 0, 'Audit trail records AUTH_ROLE_DEMOTION_DENIED on attempted self-demotion');
+    assert(demoteAuditLogs[0].outcome === 'FAILURE', 'Recorded audit event marks failure outcome');
+
+    // 3. Primary Super Admin switching to their own role succeeds
+    const sameRoleReq = createMockReq({
+      method: 'POST',
+      url: '/api/auth/switch-role',
+      headers: {
+        cookie: `tip_session=${adminSessionToken}`,
+        'content-type': 'application/json',
+        'x-user-id': 'u-admin-090',
+        'x-user-role': 'super_admin',
+        'x-user-email': 'theinclusionproject.crm@gmail.com',
+        'x-csrf-token': generateCsrfToken('u-admin-090')
+      },
+      body: {
+        userId: 'u-admin-090',
+        targetRoleId: 'super_admin',
+        assignedRoleIds: ['super_admin']
+      }
+    });
+    const sameRoleRes = createMockRes();
+    await aiMiddlewareHandler(sameRoleReq, sameRoleRes.res);
+    assert(sameRoleRes.getStatusCode() === 200, 'Primary Super Admin retaining super_admin role succeeds with 200 OK');
+
+    // 4. CrmContext source code inspection for Primary Super Admin protections
+    const crmContextSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/context/CrmContext.tsx'), 'utf-8');
+    assert(crmContextSrc.includes("PRIMARY_SUPER_ADMIN_ID = 'u-admin-090'"), 'CrmContext exports PRIMARY_SUPER_ADMIN_ID');
+    assert(crmContextSrc.includes("PRIMARY_SUPER_ADMIN_EMAIL = 'theinclusionproject.crm@gmail.com'"), 'CrmContext exports PRIMARY_SUPER_ADMIN_EMAIL');
+    assert(crmContextSrc.includes('isPrimarySuperAdmin'), 'CrmContext exports isPrimarySuperAdmin helper');
+    assert(crmContextSrc.includes('switchActiveRole') && crmContextSrc.includes('Protected Primary Super Admin role is immutable'), 'CrmContext blocks role switching for Primary Super Admin');
+    assert(crmContextSrc.includes('updateUser') && crmContextSrc.includes('Protected Primary Super Admin role cannot be modified or demoted'), 'CrmContext blocks updateUser modifications for Primary Super Admin');
+    assert(crmContextSrc.includes('deleteUser') && crmContextSrc.includes('Protected Primary Super Admin account cannot be deleted'), 'CrmContext blocks deleting Primary Super Admin');
+    assert(crmContextSrc.includes('Cannot demote the last remaining Super Administrator'), 'CrmContext blocks demoting the last active Super Admin');
+    assert(crmContextSrc.includes('Cannot delete the last remaining Super Administrator'), 'CrmContext blocks deleting the last active Super Admin');
+
+    // 5. UsersAndAccessView inspection
+    const usersViewSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/components/views/UsersAndAccessView.tsx'), 'utf-8');
+    assert(usersViewSrc.includes('Protected System Root Administrator'), 'UsersAndAccessView renders protected system root administrator status');
+    assert(usersViewSrc.includes('SIMULATED_LOCAL'), 'UsersAndAccessView handles SIMULATED_LOCAL delivery status');
+    assert(usersViewSrc.includes('Account Created (Development Simulation)'), 'UsersAndAccessView warns about development email simulation');
+    assert(usersViewSrc.includes('Account Created (Email Delivery Failed)'), 'UsersAndAccessView warns when email delivery failed');
+
+    // 6. TopBar inspection
+    const topBarSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/components/TopBar.tsx'), 'utf-8');
+    assert(topBarSrc.includes('isPrimary') && topBarSrc.includes('u-admin-090'), 'TopBar guards role selector for Primary Super Admin');
+    assert(topBarSrc.includes('Protected System Invariant: Primary Super Admin role cannot be demoted'), 'TopBar informs user that Primary Super Admin cannot change role');
+
+    // 7. Production email truthfulness enforcement in emailService
+    const emailServiceSrc = fs.readFileSync(path.resolve(process.cwd(), 'server/lib/emailService.ts'), 'utf-8');
+    assert(emailServiceSrc.includes('isProduction()'), 'emailService checks production mode');
+    assert(emailServiceSrc.includes("deliveryStatus = 'FAILED'"), 'emailService sets deliveryStatus FAILED when live delivery fails');
+    assert(emailServiceSrc.includes("deliveryStatus = 'SIMULATED_LOCAL'"), 'emailService marks local outbox as SIMULATED_LOCAL in non-production');
+
+    // 8. aiMiddleware production guard on send-welcome-email
+    const aiMiddlewareSrc = fs.readFileSync(path.resolve(process.cwd(), 'server/aiMiddleware.ts'), 'utf-8');
+    assert(aiMiddlewareSrc.includes("deliveryStatus !== 'SENT'"), 'aiMiddleware validates email deliveryStatus in production');
+    assert(aiMiddlewareSrc.includes('502'), 'aiMiddleware returns 502 Bad Gateway when email delivery fails in production');
   }
 
   // --------------------------------------------------------------------------

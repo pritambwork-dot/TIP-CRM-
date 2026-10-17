@@ -1396,7 +1396,6 @@ DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'purge_audit_logs_older_than') THEN
     REVOKE EXECUTE ON FUNCTION public.purge_audit_logs_older_than(INTEGER) FROM PUBLIC;
-    REVOKE EXECUTE ON FUNCTION public.purge_audit_logs_older_than(INTEGER) FROM anon;
     GRANT EXECUTE ON FUNCTION public.purge_audit_logs_older_than(INTEGER) TO authenticated;
   END IF;
 END $$;
@@ -1404,6 +1403,86 @@ END $$;
 -- Prevent anonymous role from executing arbitrary mutations on public schema
 REVOKE CREATE ON SCHEMA public FROM anon;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+
+-- ==============================================================================
+-- 17. IMMUTABLE PRIMARY SUPER ADMIN & PREVENT LAST-ADMIN LOCKOUT TRIGGERS
+-- ==============================================================================
+
+-- 1. Protect Primary Super Admin on public.users
+CREATE OR REPLACE FUNCTION public.protect_primary_super_admin()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Prevent deletion of Primary Super Admin
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.email = 'theinclusionproject.crm@gmail.com' OR OLD.auth_user_id = 'auth-tipcrm090' THEN
+      RAISE EXCEPTION 'CRITICAL SECURITY VIOLATION: Primary Super Administrator account (%) is immutable and cannot be deleted.', OLD.email;
+    END IF;
+    RETURN OLD;
+  END IF;
+
+  -- Prevent deactivation, demotion, or email tampering of Primary Super Admin
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.email = 'theinclusionproject.crm@gmail.com' OR OLD.auth_user_id = 'auth-tipcrm090' THEN
+      IF NEW.email <> OLD.email THEN
+        RAISE EXCEPTION 'CRITICAL SECURITY VIOLATION: Primary Super Administrator email cannot be modified.';
+      END IF;
+      IF NEW.is_active = FALSE THEN
+        RAISE EXCEPTION 'CRITICAL SECURITY VIOLATION: Primary Super Administrator cannot be deactivated.';
+      END IF;
+      IF NEW.status <> 'approved' THEN
+        RAISE EXCEPTION 'CRITICAL SECURITY VIOLATION: Primary Super Administrator status must remain approved.';
+      END IF;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_protect_primary_super_admin ON public.users;
+CREATE TRIGGER trg_protect_primary_super_admin
+BEFORE UPDATE OR DELETE ON public.users
+FOR EACH ROW
+EXECUTE FUNCTION public.protect_primary_super_admin();
+
+-- 2. Protect Primary Super Admin Role and Last-Admin Invariant on public.user_roles
+CREATE OR REPLACE FUNCTION public.protect_primary_super_admin_roles()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_is_primary BOOLEAN;
+  v_super_admin_count INT;
+BEGIN
+  IF TG_OP = 'DELETE' OR TG_OP = 'UPDATE' THEN
+    -- Check if user is Primary Super Admin
+    SELECT EXISTS (
+      SELECT 1 FROM public.users 
+      WHERE id = OLD.user_id 
+        AND (email = 'theinclusionproject.crm@gmail.com' OR auth_user_id = 'auth-tipcrm090')
+    ) INTO v_is_primary;
+
+    IF v_is_primary AND OLD.role_id = 'super_admin' THEN
+      RAISE EXCEPTION 'CRITICAL SECURITY VIOLATION: Primary Super Administrator role cannot be removed or demoted.';
+    END IF;
+
+    -- Check last remaining super_admin protection
+    IF OLD.role_id = 'super_admin' THEN
+      SELECT COUNT(*) INTO v_super_admin_count FROM public.user_roles WHERE role_id = 'super_admin';
+      IF v_super_admin_count <= 1 THEN
+        RAISE EXCEPTION 'CRITICAL SECURITY VIOLATION: Cannot remove or demote the last remaining Super Administrator.';
+      END IF;
+    END IF;
+  END IF;
+
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_protect_primary_super_admin_roles ON public.user_roles;
+CREATE TRIGGER trg_protect_primary_super_admin_roles
+BEFORE UPDATE OR DELETE ON public.user_roles
+FOR EACH ROW
+EXECUTE FUNCTION public.protect_primary_super_admin_roles();
 
 COMMIT;
 

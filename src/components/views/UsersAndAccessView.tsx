@@ -66,7 +66,8 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
     sessionStats,
     isLoadingSessions,
     fetchUserSessions,
-    adminTerminateSession
+    adminTerminateSession,
+    isPrimarySuperAdmin
   } = useCrm();
 
   const canManageUsers = isSuperAdmin || hasPermission('users', 'manage');
@@ -230,6 +231,10 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
     assignedEventIds: rawSelectedUser.assignedEventIds || []
   } : undefined;
 
+  const isSelectedUserPrimaryAdmin = Boolean(
+    selectedUser && (isPrimarySuperAdmin ? isPrimarySuperAdmin(selectedUser) : (selectedUser.id === 'u-admin-090' || selectedUser.email === 'theinclusionproject.crm@gmail.com'))
+  );
+
   // User Counts
   const superAdminCount = users.filter(u => u.roleId === 'super_admin').length;
   const staffManagerCount = users.filter(u => u.roleId === 'staff_manager').length;
@@ -245,6 +250,11 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
   });
 
   const handleRoleChange = (userId: string, newRoleId: RoleId) => {
+    const targetUser = users.find(u => u.id === userId);
+    if (isPrimarySuperAdmin ? isPrimarySuperAdmin(targetUser) : (userId === 'u-admin-090' || targetUser?.email === 'theinclusionproject.crm@gmail.com')) {
+      alert('Security Invariant: The Primary Super Administrator role is protected and cannot be modified or demoted.');
+      return;
+    }
     if (!isAdministrator) {
       alert('Access Denied: Only administrators can configure user roles and data scopes.');
       return;
@@ -860,6 +870,22 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                 </div>
               )}
 
+              {/* PRIMARY SUPER ADMIN PROTECTED BANNER */}
+              {isSelectedUserPrimaryAdmin && (
+                <div className="p-3.5 rounded-xl bg-indigo-50/90 border border-indigo-200 text-xs text-indigo-950 space-y-1.5 shadow-xs">
+                  <div className="flex items-center gap-2 font-bold text-indigo-900">
+                    <ShieldCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>Protected System Root Administrator</span>
+                    <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-mono font-bold uppercase tracking-wider ml-auto">
+                      Immutable
+                    </span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-indigo-800">
+                    This account is designated as the primary system administrator. By organization security policy, its Super Administrator role, permissions, and account status are permanent and cannot be modified, demoted, or deactivated.
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-zinc-700 uppercase tracking-wider">
@@ -870,35 +896,53 @@ export const UsersAndAccessView: React.FC<UsersAndAccessViewProps> = () => {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {(['super_admin', 'staff_manager', 'staff_member', 'volunteer'] as RoleId[]).map(roleKey => {
-                    const rDef = ROLE_DEFINITIONS[roleKey];
-                    const isCurrentRole = selectedUser.roleId === roleKey;
-                    return (
-                      <button
-                        key={roleKey}
-                        type="button"
-                        disabled={!isAdministrator}
-                        onClick={() => handleRoleChange(selectedUser.id, roleKey)}
-                        className={`p-3 rounded-xl border text-left transition-all ${
-                          !isAdministrator ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
-                        } ${
-                          isCurrentRole
-                            ? 'border-zinc-900 bg-zinc-900 text-white shadow-xs'
-                            : 'border-zinc-200 hover:border-zinc-300 bg-white text-zinc-900'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold">{rDef.name}</span>
-                          {isCurrentRole && <Check className="w-3.5 h-3.5 text-white" />}
-                        </div>
-                        <p className={`text-[10px] mt-1 leading-snug ${isCurrentRole ? 'text-zinc-300' : 'text-zinc-500'}`}>
-                          Level {rDef.level}
-                        </p>
-                      </button>
-                    );
-                  })}
-                </div>
+                {isSelectedUserPrimaryAdmin ? (
+                  <div className="p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/40 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-zinc-900 text-white flex items-center justify-center font-bold text-xs">
+                        SA
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-zinc-900">Super Administrator</p>
+                        <p className="text-[10px] text-zinc-500 font-medium">Level 4 Authority • Fixed & Protected Role</p>
+                      </div>
+                    </div>
+                    <span className="px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 border border-indigo-200">
+                      <ShieldCheck className="w-3 h-3 text-indigo-600" />
+                      <span>Role Fixed</span>
+                    </span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {(['super_admin', 'staff_manager', 'staff_member', 'volunteer'] as RoleId[]).map(roleKey => {
+                      const rDef = ROLE_DEFINITIONS[roleKey];
+                      const isCurrentRole = selectedUser.roleId === roleKey;
+                      return (
+                        <button
+                          key={roleKey}
+                          type="button"
+                          disabled={!isAdministrator}
+                          onClick={() => handleRoleChange(selectedUser.id, roleKey)}
+                          className={`p-3 rounded-xl border text-left transition-all ${
+                            !isAdministrator ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
+                          } ${
+                            isCurrentRole
+                              ? 'border-zinc-900 bg-zinc-900 text-white shadow-xs'
+                              : 'border-zinc-200 hover:border-zinc-300 bg-white text-zinc-900'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold">{rDef.name}</span>
+                            {isCurrentRole && <Check className="w-3.5 h-3.5 text-white" />}
+                          </div>
+                          <p className={`text-[10px] mt-1 leading-snug ${isCurrentRole ? 'text-zinc-300' : 'text-zinc-500'}`}>
+                            Level {rDef.level}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 <p className="text-xs text-zinc-500 bg-zinc-50 p-2.5 rounded-lg border border-zinc-100">
                   <span className="font-semibold text-zinc-800">{ROLE_DEFINITIONS[selectedUser.roleId]?.name}: </span>
                   {ROLE_DEFINITIONS[selectedUser.roleId]?.description}
@@ -2579,31 +2623,86 @@ CREATE POLICY people_scoped_view ON people
       {provisionedNotice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/60 backdrop-blur-xs">
           <div className="bg-white rounded-2xl border border-zinc-200 shadow-2xl max-w-md w-full p-6 space-y-4 animate-scaleUp">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                <Check className="w-5 h-5" />
+            {/* Header according to verified delivery status */}
+            {provisionedNotice.emailDeliveryStatus === 'SENT' ? (
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <Check className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-zinc-900">Account Provisioned & Invitation Sent!</h3>
+                  <p className="text-xs text-zinc-500">Official invitation dispatched via Gmail SMTP</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-bold text-zinc-900">Account Provisioned & Email Sent!</h3>
-                <p className="text-xs text-zinc-500">Credentials have been emailed to the user</p>
+            ) : provisionedNotice.emailDeliveryStatus === 'SIMULATED_LOCAL' || provisionedNotice.emailDeliveryStatus === 'local_outbox' ? (
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-zinc-900">Account Created (Development Simulation)</h3>
+                  <p className="text-xs text-zinc-500">Logged to local outbox (no real email dispatched)</p>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-zinc-900">Account Created (Email Delivery Failed)</h3>
+                  <p className="text-xs text-zinc-500">SMTP delivery failed; share activation link below</p>
+                </div>
+              </div>
+            )}
 
             {/* Email Dispatch Notice */}
-            <div className="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs space-y-1.5 text-emerald-900">
-              <div className="flex items-center justify-between font-semibold">
-                <span className="flex items-center gap-1.5">
-                  <Mail className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Welcome Email Dispatched</span>
-                </span>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-800 text-[10px] font-mono font-bold uppercase">
-                  {provisionedNotice.emailDeliveryStatus || 'SENT'}
-                </span>
+            {provisionedNotice.emailDeliveryStatus === 'SENT' ? (
+              <div className="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs space-y-1.5 text-emerald-900">
+                <div className="flex items-center justify-between font-semibold">
+                  <span className="flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Invitation Email Dispatched</span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-800 text-[10px] font-mono font-bold uppercase">
+                    SENT (Gmail SMTP)
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-800 leading-relaxed">
+                  Dispatched from <strong>{provisionedNotice.emailSentFrom || 'The Inclusion Project CRM <theinclusionproject.crm@gmail.com>'}</strong> to <strong>{provisionedNotice.email}</strong> with secure activation link.
+                </p>
               </div>
-              <p className="text-[11px] text-emerald-800 leading-relaxed">
-                Dispatched from <strong>{provisionedNotice.emailSentFrom || 'The Inclusion Project CRM <crm@theinclusionproject.ca>'}</strong> to <strong>{provisionedNotice.email}</strong> with secure activation link.
-              </p>
-            </div>
+            ) : provisionedNotice.emailDeliveryStatus === 'SIMULATED_LOCAL' || provisionedNotice.emailDeliveryStatus === 'local_outbox' ? (
+              <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-300 text-xs space-y-1.5 text-amber-950">
+                <div className="flex items-center justify-between font-semibold">
+                  <span className="flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-amber-700" />
+                    <span>Simulated Local Outbox</span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 text-[10px] font-mono font-bold uppercase">
+                    SIMULATION ONLY
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  ⚠️ <strong>Development mode only:</strong> This email was recorded in the server local outbox (<code className="font-mono text-[10px]">server/sent_emails.jsonl</code>). No actual email was transmitted over the internet.
+                </p>
+              </div>
+            ) : (
+              <div className="p-3 rounded-xl bg-rose-50/80 border border-rose-300 text-xs space-y-1.5 text-rose-950">
+                <div className="flex items-center justify-between font-semibold">
+                  <span className="flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-rose-700" />
+                    <span>Email Delivery Failed</span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-rose-200 text-rose-900 text-[10px] font-mono font-bold uppercase">
+                    FAILED
+                  </span>
+                </div>
+                <p className="text-[11px] text-rose-800 leading-relaxed">
+                  SMTP gateway could not connect or deliver. Please copy the secure activation link below and provide it to the recipient, or verify SMTP credentials.
+                </p>
+              </div>
+            )}
 
             <div className="p-3.5 rounded-xl bg-zinc-50 border border-zinc-200 space-y-2 text-xs">
               <div>

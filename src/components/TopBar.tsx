@@ -66,6 +66,13 @@ export const TopBar: React.FC<TopBarProps> = ({
       setShowRoleSwitcher(false);
       return;
     }
+    const isPrimary = currentUser.id === 'u-admin-090' || currentUser.email === 'theinclusionproject.crm@gmail.com';
+    if (isPrimary && targetRole !== 'super_admin') {
+      setRoleToast('Protected System Invariant: Primary Super Admin role cannot be demoted.');
+      setTimeout(() => setRoleToast(null), 3500);
+      setShowRoleSwitcher(false);
+      return;
+    }
     const success = await switchActiveRole(targetRole);
     setShowRoleSwitcher(false);
     if (success) {

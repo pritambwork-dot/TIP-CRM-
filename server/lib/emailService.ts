@@ -17,6 +17,7 @@ import net from 'net';
 import tls from 'tls';
 import { recordAuditEvent } from './auditLogger.ts';
 import { safeLogger } from './ai/gemini.ts';
+import { isProduction } from './environment.ts';
 
 export interface WelcomeEmailParams {
   name: string;
@@ -1035,6 +1036,29 @@ export async function sendWelcomeEmail(params: WelcomeEmailParams): Promise<{
     }
   }
 
+  // If no live provider succeeded
+  if (deliveryStatus !== 'SENT') {
+    if (isProduction()) {
+      // Production Invariant: Local outbox simulation is strictly disallowed in production
+      deliveryStatus = 'FAILED';
+      provider = smtpConfig ? 'smtp' : 'local_outbox';
+      safeLogger.error('Transactional email delivery failed in production; SMTP or provider delivery unconfirmed', {
+        recipient: params.email,
+        attemptedProvider: provider
+      });
+    } else {
+      // Development mode: capture in local outbox for testing with explicit simulated status
+      provider = 'local_outbox';
+      deliveryStatus = 'SIMULATED_LOCAL';
+    }
+  }
+
+  const isSuccess = deliveryStatus === 'SENT' || (!isProduction() && deliveryStatus === 'SIMULATED_LOCAL');
+  const auditAction = deliveryStatus === 'SENT' 
+    ? 'AUTH_WELCOME_EMAIL_SENT' 
+    : (deliveryStatus === 'SIMULATED_LOCAL' ? 'AUTH_WELCOME_EMAIL_SIMULATED' : 'AUTH_WELCOME_EMAIL_FAILED');
+  const auditOutcome = isSuccess ? 'SUCCESS' : 'FAILURE';
+
   // 4. Record email transmission in authoritative sent_emails.jsonl
   const record: SentEmailRecord = {
     id: messageId,
@@ -1069,11 +1093,15 @@ export async function sendWelcomeEmail(params: WelcomeEmailParams): Promise<{
     actorId: params.actorId || 'u-admin-090',
     actorName: 'Super Admin',
     actorRole: (params.actorRole as any) || 'super_admin',
-    action: 'AUTH_WELCOME_EMAIL_SENT',
+    action: auditAction,
     resourceType: 'UserCredential',
     resourceId: params.email,
-    outcome: 'SUCCESS',
-    description: `Dispatched account invitation email with secure activation link to ${params.email} from ${CRM_SENDER_EMAIL} using The Inclusion Project template (provider: ${provider}, status: ${deliveryStatus}).`,
+    outcome: auditOutcome,
+    description: deliveryStatus === 'SENT'
+      ? `Dispatched account invitation email with secure activation link to ${params.email} from ${CRM_SENDER_EMAIL} using The Inclusion Project template (provider: ${provider}, status: SENT).`
+      : (deliveryStatus === 'SIMULATED_LOCAL'
+          ? `Simulated account invitation email for ${params.email} recorded in local outbox (development only).`
+          : `Failed to deliver account invitation email to ${params.email} via ${provider}.`),
     correlationId: params.correlationId,
     metadata: {
       messageId,
@@ -1086,7 +1114,7 @@ export async function sendWelcomeEmail(params: WelcomeEmailParams): Promise<{
   });
 
   return {
-    success: true,
+    success: isSuccess,
     messageId,
     sentFrom: CRM_SENDER_EMAIL,
     recipient: params.email,

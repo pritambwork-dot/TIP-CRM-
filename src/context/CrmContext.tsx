@@ -155,6 +155,7 @@ interface CrmContextType {
 
   users: UserProfile[];
   currentUser: UserProfile;
+  isPrimarySuperAdmin: (user?: { id?: string; email?: string } | null) => boolean;
   switchUser: (userId: string) => void;
   switchUserRole: (roleId: RoleId) => void;
   switchActiveRole: (roleId: RoleId) => Promise<boolean>;
@@ -380,21 +381,31 @@ function loadFromStorage<T>(key: string, fallback: T): T {
   }
 }
 
+export const PRIMARY_SUPER_ADMIN_ID = 'u-admin-090';
+export const PRIMARY_SUPER_ADMIN_EMAIL = 'theinclusionproject.crm@gmail.com';
+export const PRIMARY_SUPER_ADMIN_AUTH_ID = 'auth-tipcrm090';
+
+export function isPrimarySuperAdmin(user?: { id?: string; email?: string; authUserId?: string; name?: string } | null): boolean {
+  if (!user) return false;
+  const email = (user.email || '').toLowerCase().trim();
+  const name = (user.name || '').toLowerCase();
+  return user.id === PRIMARY_SUPER_ADMIN_ID ||
+         user.id === 'u-1' ||
+         email === PRIMARY_SUPER_ADMIN_EMAIL ||
+         email === 'tipcrm090@theinclusionproject.ca' ||
+         email === 'admin@theinclusionproject.ca' ||
+         user.authUserId === PRIMARY_SUPER_ADMIN_AUTH_ID ||
+         name === 'tip super admin' ||
+         name === 'tip administrator';
+}
+
 function normalizeUser(rawUser: any): UserProfile {
   if (!rawUser || typeof rawUser !== 'object') {
     return { ...INITIAL_USERS[0] };
   }
 
   // Check if this profile belongs to TIP Administrator
-  const isAdmin = rawUser.id === 'u-admin-090' || 
-                  rawUser.id === 'u-1' || 
-                  rawUser.name === 'TIP Administrator' || 
-                  rawUser.name === 'TIP Super Admin' || 
-                  (typeof rawUser.name === 'string' && rawUser.name.toLowerCase().includes('administrator')) ||
-                  rawUser.email === 'theinclusionproject.crm@gmail.com' || 
-                  rawUser.email === 'tipcrm090@theinclusionproject.ca' || 
-                  rawUser.email === 'admin@theinclusionproject.ca' ||
-                  rawUser.email === 'tipcrm090';
+  const isAdmin = isPrimarySuperAdmin(rawUser);
 
   // Determine roleId with backward compatibility - Administrator is ALWAYS Super Admin!
   const baseRoleId: RoleId = isAdmin ? 'super_admin' : (rawUser.roleId || (rawUser.role === 'volunteer' ? 'volunteer' : 'staff_member'));
@@ -872,10 +883,16 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const switchUserRole = (roleId: RoleId) => {
-    const roleDef = ROLE_DEFINITIONS[roleId] || ROLE_DEFINITIONS.volunteer;
+    // Invariant: Protected Primary Super Admin cannot be demoted or changed
+    if (isPrimarySuperAdmin(currentUser) && roleId !== 'super_admin') {
+      clientSafeLogger.warn('Security Invariant: Protected Primary Super Admin role is immutable and cannot be demoted.');
+      return;
+    }
+    const roleDef = ROLE_DEFINITIONS[roleId] || ROLE_DEFINITIONS.staff_member;
     setCurrentUser(prev => {
       const updated: UserProfile = {
         ...prev,
+        activeRoleId: roleId,
         roleId,
         role: roleId === 'volunteer' ? 'volunteer' : 'staff',
         title: roleDef.name,
@@ -894,11 +911,21 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const setUserRole = (role: UserRole) => {
+    if (isPrimarySuperAdmin(currentUser)) {
+      clientSafeLogger.warn('Security Invariant: Protected Primary Super Admin cannot change role category.');
+      return;
+    }
     const targetRoleId: RoleId = role === 'volunteer' ? 'volunteer' : 'staff_manager';
     switchUserRole(targetRoleId);
   };
 
   const switchActiveRole = async (roleId: RoleId): Promise<boolean> => {
+    // Invariant: Protected Primary Super Admin cannot demote themselves or switch to a non-super_admin role
+    if (isPrimarySuperAdmin(currentUser) && roleId !== 'super_admin') {
+      clientSafeLogger.warn('Security Invariant: Protected Primary Super Admin role is immutable and cannot be demoted.');
+      return false;
+    }
+
     // 1. Authoritative check on client: must be in assignedRoleIds
     const allowedRoles = currentUser.assignedRoleIds || [currentUser.roleId];
     if (!allowedRoles.includes(roleId)) {
@@ -1050,8 +1077,8 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       tempPassword: tempPass,
       activationToken,
       emailSentAt: new Date().toISOString(),
-      emailSentFrom: 'The Inclusion Project CRM <crm@theinclusionproject.ca>',
-      emailDeliveryStatus: 'local_outbox',
+      emailSentFrom: 'The Inclusion Project CRM <theinclusionproject.crm@gmail.com>',
+      emailDeliveryStatus: 'pending',
       onboardingCompleted: false,
       provider: 'email',
       approvedBy: currentUser.name,
@@ -1082,12 +1109,15 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (emailResponse.ok) {
         const emailData = await emailResponse.json();
         newUser.emailSentAt = emailData.timestamp || new Date().toISOString();
-        newUser.emailSentFrom = emailData.sentFrom || 'The Inclusion Project CRM <crm@theinclusionproject.ca>';
+        newUser.emailSentFrom = emailData.sentFrom || 'The Inclusion Project CRM <theinclusionproject.crm@gmail.com>';
         newUser.emailDeliveryStatus = emailData.deliveryStatus || emailData.provider || 'SENT';
         newUser.emailPreviewHtml = emailData.previewHtml;
+      } else {
+        newUser.emailDeliveryStatus = 'FAILED';
       }
     } catch (err) {
-      clientSafeLogger.warn('Automated welcome email dispatch handled with fallback:', err);
+      newUser.emailDeliveryStatus = 'FAILED';
+      clientSafeLogger.warn('Automated welcome email dispatch encountered network/service error:', err);
     }
 
     setUsers(prev => [...prev, newUser]);
@@ -1267,16 +1297,63 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateUser = (id: string, updates: Partial<UserProfile>) => {
+    const targetUser = users.find(u => u.id === id);
+    const targetIsPrimaryAdmin = isPrimarySuperAdmin(targetUser) || id === PRIMARY_SUPER_ADMIN_ID;
+
+    // Invariant 1: Primary Super Admin account and role are strictly immutable
+    if (targetIsPrimaryAdmin) {
+      if (updates.roleId && updates.roleId !== 'super_admin') {
+        clientSafeLogger.warn('Security Invariant: Protected Primary Super Admin role cannot be modified or demoted.');
+        return;
+      }
+      if (updates.assignedRoleIds && !updates.assignedRoleIds.includes('super_admin')) {
+        clientSafeLogger.warn('Security Invariant: Protected Primary Super Admin must retain super_admin role.');
+        return;
+      }
+      if (updates.isActive === false) {
+        clientSafeLogger.warn('Security Invariant: Protected Primary Super Admin cannot be deactivated.');
+        return;
+      }
+      if (updates.status && updates.status !== 'approved') {
+        clientSafeLogger.warn('Security Invariant: Protected Primary Super Admin status must remain approved.');
+        return;
+      }
+      // Force immutable invariants
+      updates.roleId = 'super_admin';
+      updates.activeRoleId = 'super_admin';
+      updates.role = 'staff';
+      updates.assignedRoleIds = ['super_admin'];
+      updates.status = 'approved';
+      updates.isActive = true;
+    }
+
+    // Invariant 2: Non-admin users cannot modify permissions, roles, or data scopes
+    const isActorAdmin = currentUser.roleId === 'super_admin' || currentUser.roleId === 'staff_manager';
     const isChangingAccess = updates.roleId !== undefined || 
+      updates.assignedRoleIds !== undefined ||
       updates.dataScope !== undefined || 
       updates.permissionsOverride !== undefined ||
       updates.assignedProgramIds !== undefined ||
       updates.assignedEventIds !== undefined;
-    const isActorAdmin = currentUser.roleId === 'super_admin' || currentUser.roleId === 'staff_manager';
 
     if (isChangingAccess && !isActorAdmin) {
       clientSafeLogger.warn('Unauthorized attempt by non-admin to modify user data access/permissions');
       return;
+    }
+
+    // Invariant 3: Staff Manager cannot create, assign, or promote Super Administrator accounts
+    if (currentUser.roleId !== 'super_admin' && (updates.roleId === 'super_admin' || updates.assignedRoleIds?.includes('super_admin'))) {
+      clientSafeLogger.warn('Security Invariant: Only Super Administrators can grant Super Administrator role.');
+      return;
+    }
+
+    // Invariant 4: Last Super Admin protection
+    if (targetUser?.roleId === 'super_admin' && updates.roleId && updates.roleId !== 'super_admin') {
+      const activeSuperAdmins = users.filter(u => u.roleId === 'super_admin' && u.isActive && u.id !== id);
+      if (activeSuperAdmins.length === 0) {
+        clientSafeLogger.warn('Security Invariant: Cannot demote the last remaining Super Administrator.');
+        return;
+      }
     }
 
     setUsers(prev => prev.map(u => {
@@ -1297,10 +1374,21 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteUser = (id: string) => {
     const target = users.find(u => u.id === id);
-    if (target) {
-      setUsers(prev => prev.filter(u => u.id !== id));
-      logAction('Deactivated User', 'User Management', target.name, `Removed user account ${target.email}`);
+    if (!target) return;
+
+    if (isPrimarySuperAdmin(target) || id === PRIMARY_SUPER_ADMIN_ID) {
+      clientSafeLogger.warn('Security Invariant: Protected Primary Super Admin account cannot be deleted.');
+      return;
     }
+
+    const activeSuperAdmins = users.filter(u => u.roleId === 'super_admin' && u.isActive && u.id !== id);
+    if (target.roleId === 'super_admin' && activeSuperAdmins.length === 0) {
+      clientSafeLogger.warn('Security Invariant: Cannot delete the last remaining Super Administrator.');
+      return;
+    }
+
+    setUsers(prev => prev.filter(u => u.id !== id));
+    logAction('Deactivated User', 'User Management', target.name, `Removed user account ${target.email}`);
   };
 
   // RBAC permissions helper
@@ -2424,6 +2512,7 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <CrmContext.Provider value={{
       users,
       currentUser,
+      isPrimarySuperAdmin,
       switchUser,
       switchUserRole,
       switchActiveRole,
