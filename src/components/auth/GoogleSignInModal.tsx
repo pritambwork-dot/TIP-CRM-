@@ -48,15 +48,16 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
 
   // Super Admin state
   const adminUser = users.find(
-    u => u.id === 'u-admin-090' || u.roleId === 'super_admin' || u.email === 'tipcrm090@theinclusionproject.ca'
+    u => u.id === 'u-admin-090' || u.roleId === 'super_admin' || u.email === 'theinclusionproject.crm@gmail.com' || u.email === 'tipcrm090@theinclusionproject.ca'
   );
-  const adminEmail = adminUser?.email || 'tipcrm090@theinclusionproject.ca';
+  const adminEmail = adminUser?.email || 'theinclusionproject.crm@gmail.com';
   const adminName = adminUser?.name || 'TIP Super Admin';
 
   // Team & Staff Users (active/approved, non-super-admin)
   const staffUsers = users.filter(
     u =>
       u.roleId !== 'super_admin' &&
+      u.email.toLowerCase() !== 'theinclusionproject.crm@gmail.com' &&
       u.email.toLowerCase() !== 'tipcrm090@theinclusionproject.ca' &&
       u.email.toLowerCase() !== 'admin@theinclusionproject.ca' &&
       u.status !== 'disabled' &&
@@ -127,6 +128,8 @@ export const GoogleSignInModal: React.FC<GoogleSignInModalProps> = ({
 
     // Verify Password against primary super admin or provisioned user profile
     const isAdmin =
+      targetEmail === 'theinclusionproject.crm@gmail.com' ||
+      targetEmail === 'theinclusionproject.crm' ||
       targetEmail === 'tipcrm090' ||
       targetEmail === 'tipcrm090@theinclusionproject.ca' ||
       targetEmail === 'admin@theinclusionproject.ca';

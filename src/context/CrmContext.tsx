@@ -385,11 +385,13 @@ function normalizeUser(rawUser: any): UserProfile {
     return { ...INITIAL_USERS[0] };
   }
 
-  // Check if this profile belongs to TIP Administrator (TIPCRM090)
+  // Check if this profile belongs to TIP Administrator
   const isAdmin = rawUser.id === 'u-admin-090' || 
                   rawUser.id === 'u-1' || 
                   rawUser.name === 'TIP Administrator' || 
-                  (typeof rawUser.name === 'string' && rawUser.name.toLowerCase().includes('tip administrator')) ||
+                  rawUser.name === 'TIP Super Admin' || 
+                  (typeof rawUser.name === 'string' && rawUser.name.toLowerCase().includes('administrator')) ||
+                  rawUser.email === 'theinclusionproject.crm@gmail.com' || 
                   rawUser.email === 'tipcrm090@theinclusionproject.ca' || 
                   rawUser.email === 'admin@theinclusionproject.ca' ||
                   rawUser.email === 'tipcrm090';
@@ -409,7 +411,7 @@ function normalizeUser(rawUser: any): UserProfile {
     authUserId: rawUser.authUserId,
     organizationId: rawUser.organizationId || 'org-tip',
     name: isAdmin ? 'TIP Super Admin' : (rawUser.name || 'Staff User'),
-    email: isAdmin ? (rawUser.email || 'tipcrm090@theinclusionproject.ca') : (rawUser.email || 'user@theinclusionproject.ca'),
+    email: isAdmin ? (rawUser.email || 'theinclusionproject.crm@gmail.com') : (rawUser.email || 'user@theinclusionproject.ca'),
     phone: rawUser.phone,
     role: isAdmin ? 'staff' : (activeRoleId === 'volunteer' ? 'volunteer' : 'staff'),
     roleId: activeRoleId,
@@ -540,13 +542,20 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     // Guarantee that u-admin-090 / TIP Super Admin is always present as Super Admin
-    const adminIndex = list.findIndex(u => u.id === 'u-admin-090' || u.id === 'u-1' || u.name === 'TIP Super Admin' || u.name === 'TIP Administrator' || u.email === 'tipcrm090@theinclusionproject.ca');
+    const adminIndex = list.findIndex(u => 
+      u.id === 'u-admin-090' || 
+      u.id === 'u-1' || 
+      u.name === 'TIP Super Admin' || 
+      u.name === 'TIP Administrator' || 
+      u.email === 'theinclusionproject.crm@gmail.com' ||
+      u.email === 'tipcrm090@theinclusionproject.ca'
+    );
     if (adminIndex >= 0) {
       list[adminIndex] = {
         ...list[adminIndex],
         id: 'u-admin-090',
         name: 'TIP Super Admin',
-        email: 'tipcrm090@theinclusionproject.ca',
+        email: 'theinclusionproject.crm@gmail.com',
         roleId: 'super_admin',
         role: 'staff',
         assignedRoleIds: ['super_admin'],
@@ -578,12 +587,19 @@ export const CrmProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return INITIAL_USERS[0];
     }
     // If the saved user is the Super Admin / Administrator, ensure roleId is super_admin
-    if (user.id === 'u-admin-090' || user.id === 'u-1' || user.name === 'TIP Super Admin' || user.name === 'TIP Administrator' || user.email === 'tipcrm090@theinclusionproject.ca') {
+    if (
+      user.id === 'u-admin-090' || 
+      user.id === 'u-1' || 
+      user.name === 'TIP Super Admin' || 
+      user.name === 'TIP Administrator' || 
+      user.email === 'theinclusionproject.crm@gmail.com' ||
+      user.email === 'tipcrm090@theinclusionproject.ca'
+    ) {
       return {
         ...user,
         id: 'u-admin-090',
         name: 'TIP Super Admin',
-        email: 'tipcrm090@theinclusionproject.ca',
+        email: 'theinclusionproject.crm@gmail.com',
         roleId: 'super_admin',
         role: 'staff',
         avatarInitials: 'SA',

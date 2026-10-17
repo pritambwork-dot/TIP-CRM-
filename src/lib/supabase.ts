@@ -6,7 +6,7 @@ import { clientSafeLogger, mapToSafeErrorMessage } from './safeErrors';
 const SUPABASE_URL = 
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) ||
   (typeof process !== 'undefined' && (process.env?.VITE_SUPABASE_URL || process.env?.SUPABASE_URL)) ||
-  '';
+  'https://osbsacgmjkqyfkjdeten.supabase.co';
 
 const SUPABASE_ANON_KEY = 
   (typeof import.meta !== 'undefined' && ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY || (import.meta as any).env?.VITE_SUPABASE_PUBLISHABLE_KEY)) ||
@@ -266,9 +266,16 @@ export class SupabaseAuthEngine {
       }
     }
 
+    // In browser runtime, if real OAuth redirect is requested but supabase client is not initialized:
+    if (typeof window !== 'undefined' && !supabase && (forceExternalOAuth || !customEmail)) {
+      const errorMsg = 'Google authentication requires VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to be configured in Vercel environment variables.';
+      clientSafeLogger.error('Supabase client missing in browser OAuth:', errorMsg);
+      return { error: errorMsg };
+    }
+
     // Authenticate verified Google Identity (for testing or when customEmail is provided)
-    const email = customEmail?.trim().toLowerCase() || 'tipcrm090@theinclusionproject.ca';
-    const name = customName || ((email === 'tipcrm090@theinclusionproject.ca' || email === 'admin@theinclusionproject.ca') ? 'TIP Super Admin' : email.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase()));
+    const email = customEmail?.trim().toLowerCase() || 'theinclusionproject.crm@gmail.com';
+    const name = customName || ((email === 'theinclusionproject.crm@gmail.com' || email === 'tipcrm090@theinclusionproject.ca' || email === 'admin@theinclusionproject.ca') ? 'TIP Super Admin' : email.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase()));
     const authUserId = `auth-google-${btoa(email).replace(/=/g, '').slice(0, 16)}`;
 
     const session: AuthSession = {

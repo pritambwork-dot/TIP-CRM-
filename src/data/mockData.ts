@@ -31,7 +31,7 @@ export const INITIAL_USERS: UserProfile[] = [
     authUserId: 'auth-tipcrm090',
     organizationId: 'org-tip',
     name: 'TIP Super Admin',
-    email: 'tipcrm090@theinclusionproject.ca',
+    email: 'theinclusionproject.crm@gmail.com',
     phone: '+1 (604) 555-0100',
     roleId: 'super_admin',
     role: 'staff',

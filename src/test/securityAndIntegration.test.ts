@@ -4142,7 +4142,7 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     // A. signInWithGoogle default behavior (safe 1-click admin sign in)
     const defaultGoogleLogin = await SupabaseAuthEngine.signInWithGoogle();
     assert(defaultGoogleLogin.session !== undefined, 'signInWithGoogle without arguments returns valid session');
-    assert(defaultGoogleLogin.session?.user.email === 'tipcrm090@theinclusionproject.ca', 'Default Google login assigns primary admin email');
+    assert(defaultGoogleLogin.session?.user.email === 'theinclusionproject.crm@gmail.com', 'Default Google login assigns primary admin email');
     assert(defaultGoogleLogin.session?.user.provider === 'google', 'Default Google session has provider = google');
     assert(defaultGoogleLogin.session?.user.emailVerified === true, 'Google session email is verified');
 
@@ -4170,7 +4170,7 @@ Brand New Contact,new@inclusionproject.ca,New Partner Org`;
     const googleModalContent = fs.readFileSync(googleModalPath, 'utf-8');
     assert(googleModalContent.includes('export const GoogleSignInModal'), 'GoogleSignInModal component exported');
     assert(googleModalContent.includes('export const GoogleLogoSvg'), 'GoogleLogoSvg component exported');
-    assert(googleModalContent.includes('tipcrm090@theinclusionproject.ca'), 'Google modal includes TIP Super Admin preset');
+    assert(googleModalContent.includes('theinclusionproject.crm@gmail.com'), 'Google modal includes TIP Super Admin preset');
     assert(googleModalContent.includes('TIP Super Admin'), 'Google modal displays TIP Super Admin account label');
     assert(!googleModalContent.includes('sarah.t@theinclusionproject.ca'), 'Demo account Sarah Thompson removed from Google modal');
     assert(!googleModalContent.includes('marcus.c@theinclusionproject.ca'), 'Demo account Marcus Chen removed from Google modal');

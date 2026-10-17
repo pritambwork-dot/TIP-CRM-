@@ -147,7 +147,11 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
           let matchedUser = users.find(u => u.email.toLowerCase().trim() === targetEmail);
 
           // Explicitly bind Google login for authorized administrator to Super Admin
-          if (!matchedUser && (targetEmail === 'tipcrm090@theinclusionproject.ca' || targetEmail === 'admin@theinclusionproject.ca')) {
+          if (!matchedUser && (
+            targetEmail === 'theinclusionproject.crm@gmail.com' ||
+            targetEmail === 'tipcrm090@theinclusionproject.ca' || 
+            targetEmail === 'admin@theinclusionproject.ca'
+          )) {
             matchedUser = users.find(u => u.id === 'u-admin-090' || u.id === 'u-1') || users[0];
           }
 
@@ -247,7 +251,9 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     // Simulate async auth check
     setTimeout(() => {
       const normalizedInput = input.toLowerCase().trim();
-      const isAdminLogin = normalizedInput === 'tipcrm090' ||
+      const isAdminLogin = normalizedInput === 'theinclusionproject.crm@gmail.com' ||
+                           normalizedInput === 'theinclusionproject.crm' ||
+                           normalizedInput === 'tipcrm090' ||
                            normalizedInput === 'tipcrm090@theinclusionproject.ca' ||
                            normalizedInput === 'admin@theinclusionproject.ca';
 
@@ -258,7 +264,7 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
 
       // Explicitly bind authorized administrator credentials to Super Admin
       if (isAdminLogin) {
-        matchedUser = users.find(u => u.id === 'u-admin-090' || u.id === 'u-1' || u.email === 'tipcrm090@theinclusionproject.ca') || users[0];
+        matchedUser = users.find(u => u.id === 'u-admin-090' || u.id === 'u-1' || u.email === 'theinclusionproject.crm@gmail.com' || u.email === 'tipcrm090@theinclusionproject.ca') || users[0];
       }
 
       if (!matchedUser) {
@@ -349,7 +355,11 @@ const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
         let matchedUser = users.find(u => u.email.toLowerCase().trim() === targetEmail);
 
         // Explicitly bind authorized administrator emails to Super Admin
-        if (!matchedUser && (targetEmail === 'tipcrm090@theinclusionproject.ca' || targetEmail === 'admin@theinclusionproject.ca')) {
+        if (!matchedUser && (
+          targetEmail === 'theinclusionproject.crm@gmail.com' ||
+          targetEmail === 'tipcrm090@theinclusionproject.ca' || 
+          targetEmail === 'admin@theinclusionproject.ca'
+        )) {
           matchedUser = users.find(u => u.id === 'u-admin-090' || u.id === 'u-1') || users[0];
         }
 
